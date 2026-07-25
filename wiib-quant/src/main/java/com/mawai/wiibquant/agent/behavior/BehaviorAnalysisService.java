@@ -1,8 +1,5 @@
 package com.mawai.wiibquant.agent.behavior;
 
-import com.alibaba.cloud.ai.graph.RunnableConfig;
-import com.alibaba.cloud.ai.graph.agent.ReactAgent;
-import com.alibaba.cloud.ai.graph.exception.GraphRunnerException;
 import com.alibaba.fastjson2.JSON;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -11,10 +8,14 @@ import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.ai.chat.messages.AssistantMessage;
+import org.bsc.langgraph4j.RunnableConfig;
+import org.bsc.langgraph4j.StateGraph;
+import org.bsc.langgraph4j.prebuilt.MessagesState;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
@@ -54,7 +55,13 @@ public class BehaviorAnalysisService {
     private Result<BehaviorAnalysisReport> doAnalyze(long userId) {
         log.info("用户{}请求行为分析", userId);
 
-        ReactAgent agent = aiAgentRuntimeManager.createBehaviorAgent(step -> log.info("用户{} 工具调用: {}", userId, step));
+        StateGraph<MessagesState<Message>> agent;
+        try {
+            agent = aiAgentRuntimeManager.createBehaviorAgent(step -> log.info("用户{} 工具调用: {}", userId, step));
+        } catch (Exception e) {
+            log.error("行为分析 agent 构建失败 userId={}", userId, e);
+            return Result.fail("分析执行失败: " + e.getMessage());
+        }
 
         String text;
         try {
@@ -81,31 +88,21 @@ public class BehaviorAnalysisService {
         return Result.ok(report);
     }
 
-    /** 流式异常直接上抛，由 doAnalyze 统一 catch 落 Result.fail，不再多包一层前缀。 */
-    private String collectResponse(ReactAgent agent, long userId) throws GraphRunnerException {
+    /** 阻塞跑完整个 ReAct 循环，取最终助手消息——中间的工具调用轮次文本为空，不参与结果。 */
+    private String collectResponse(StateGraph<MessagesState<Message>> agent, long userId) throws Exception {
         String prompt = "分析用户#" + userId + "的全部行为数据，用户ID为" + userId;
-        StringBuilder assistantChunks = new StringBuilder();
 
-        agent.streamMessages(prompt, RunnableConfig.builder().threadId("behavior-" + userId).build())
-                .doOnNext(message -> appendResponse(message, assistantChunks))
-                .blockLast();
+        String finalText = agent.compile()
+                .invoke(Map.of("messages", new UserMessage(prompt)),
+                        RunnableConfig.builder().threadId("behavior-" + userId).build())
+                .flatMap(MessagesState::lastMessage)
+                .map(Message::getText)
+                .orElse("");
 
-        String finalText = assistantChunks.toString();
         if (finalText.isBlank()) {
             throw new IllegalStateException("行为分析未返回有效内容");
         }
         log.info("用户{} 行为分析完成, responseLength={}", userId, finalText.length());
         return finalText;
-    }
-
-    private void appendResponse(Message message, StringBuilder assistantChunks) {
-        if (!(message instanceof AssistantMessage assistant)) {
-            return;
-        }
-        String text = assistant.getText();
-        if (text == null || text.isBlank()) {
-            return;
-        }
-        assistantChunks.append(text);
     }
 }

@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.agent.quant.node;
 
-import com.alibaba.cloud.ai.graph.OverAllState;
+import org.bsc.langgraph4j.state.AgentState;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -44,7 +44,7 @@ final class BuildFeaturesBuilder {
             {"1h", "15m", "4"}, {"4h", "1h", "4"}, {"24h", "1h", "24"},
     };
 
-    Map<String, Object> apply(OverAllState state) {
+    Map<String, Object> apply(AgentState state) {
         String symbol = (String) state.value("target_symbol").orElse("BTCUSDT");
         Map<String, Object> rawData = new HashMap<>();
         rawData.put("kline_map", state.value("kline_map").orElse(Map.of()));

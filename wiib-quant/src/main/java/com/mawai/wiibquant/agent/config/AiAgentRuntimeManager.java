@@ -1,6 +1,5 @@
 package com.mawai.wiibquant.agent.config;
 
-import com.alibaba.cloud.ai.graph.agent.ReactAgent;
 import com.mawai.wiibcommon.constant.AiFunctions;
 import com.mawai.wiibcommon.constant.AiProtocols;
 import com.mawai.wiibcommon.entity.AiModelAssignment;
@@ -14,12 +13,16 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.model.tool.ToolCallingManager;
+import com.openai.client.OpenAIClient;
+import org.bsc.langgraph4j.GraphStateException;
+import org.bsc.langgraph4j.StateGraph;
+import org.bsc.langgraph4j.prebuilt.MessagesState;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.OpenAiChatOptions;
-import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.openai.setup.OpenAiSetup;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
-import org.springframework.retry.support.RetryTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
@@ -50,7 +53,6 @@ public class AiAgentRuntimeManager {
     private final AiRuntimeConfigMapper configMapper;
     private final AiModelAssignmentMapper assignmentMapper;
     private final ToolCallingManager toolCallingManager;
-    private final RetryTemplate retryTemplate;
     private final ObservationRegistry observationRegistry;
     private final AtomicReference<AiAgentRuntime> runtimeRef = new AtomicReference<>();
     private final Object graphLock = new Object();
@@ -59,16 +61,14 @@ public class AiAgentRuntimeManager {
                                  AiRuntimeConfigMapper configMapper,
                                  AiModelAssignmentMapper assignmentMapper,
                                  ToolCallingManager toolCallingManager,
-                                 RetryTemplate retryTemplate,
                                  ObjectProvider<ObservationRegistry> observationRegistry,
                                  ApplicationEventPublisher eventPublisher) {
         this.behaviorAgentFactory = behaviorAgentFactory;
         this.eventPublisher = eventPublisher;
         this.configMapper = configMapper;
         this.assignmentMapper = assignmentMapper;
-        // 与关掉的自动装配同源：RetryTemplate(spring.ai.retry)/ToolCallingManager 仍是独立装配的 bean，手建模型能力等价
+        // 与关掉的自动装配同源：ToolCallingManager 仍是独立装配的 bean，手建模型能力等价
         this.toolCallingManager = toolCallingManager;
-        this.retryTemplate = retryTemplate;
         this.observationRegistry = observationRegistry.getIfUnique(() -> ObservationRegistry.NOOP);
     }
 
@@ -126,7 +126,7 @@ public class AiAgentRuntimeManager {
         }
     }
 
-    public ReactAgent createBehaviorAgent(Consumer<String> onProgress) {
+    public StateGraph<MessagesState<Message>> createBehaviorAgent(Consumer<String> onProgress) throws GraphStateException {
         return behaviorAgentFactory.create(current().behaviorChatModel(), onProgress);
     }
 
@@ -199,13 +199,15 @@ public class AiAgentRuntimeManager {
         // 不设置 temperature：走各模型默认值，思考模型（多数拒收或忽略温度）也安全
         if (AiProtocols.isResponses(config.getApiProtocol())) {
             return new ResponsesChatModel(config.getApiKey(), config.getBaseUrl(), config.getModel(),
-                    null, config.getReasoningEffort(), toolCallingManager, retryTemplate);
+                    null, config.getReasoningEffort(), toolCallingManager);
         }
 
-        OpenAiApi openAiApi = OpenAiApi.builder()
-                .baseUrl(config.getBaseUrl())
-                .apiKey(config.getApiKey())
-                .build();
+        // Spring AI 2.0 起底层换成官方 OpenAI SDK，连接参数经 OpenAiSetup 建 client（照抄官方
+        // OpenAiChatAutoConfiguration 的建法）；SDK 重试给 0——重试与兜底统一由应用层承担，两层叠乘只会放大尾延迟
+        OpenAIClient openAiClient = OpenAiSetup.setupSyncClient(
+                config.getBaseUrl(), config.getApiKey(), null, null, null, null,
+                false, false, config.getModel(), null, 0, null, null,
+                observationRegistry, null, List.of());
 
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()
                 .model(config.getModel());
@@ -214,10 +216,9 @@ public class AiAgentRuntimeManager {
         }
 
         return OpenAiChatModel.builder()
-                .openAiApi(openAiApi)
-                .defaultOptions(options.build())
+                .openAiClient(openAiClient)
+                .options(options.build())
                 .toolCallingManager(toolCallingManager)
-                .retryTemplate(retryTemplate)
                 .observationRegistry(observationRegistry)
                 .build();
     }

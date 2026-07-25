@@ -1,9 +1,5 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.alibaba.cloud.ai.graph.RunnableConfig;
-import com.alibaba.cloud.ai.graph.checkpoint.BaseCheckpointSaver;
-import com.alibaba.cloud.ai.graph.streaming.OutputType;
-import com.alibaba.cloud.ai.graph.streaming.StreamingOutput;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -16,7 +12,11 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.bsc.langgraph4j.RunnableConfig;
+import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
+import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -255,20 +255,17 @@ public class ChatWorkbenchController {
     }
 
     private void run(SseChannel channel, long userId, String sessionId, String message) {
-        // 答案流/过程流分离：专家 agent 的输出是"工作过程"（前端弱化展示、不落历史），
-        // 只有 supervisor 的最终汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
+        // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
+        // 只有 supervisor 的汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
         StringBuilder answer = new StringBuilder();
         StringBuilder expertLog = new StringBuilder();
         RoutingFilter filter = new RoutingFilter((key, text) -> {
-            String agent = key.substring(key.indexOf('|') + 1);
-            boolean expert = ChatAgentFactory.EXPERT_AGENTS.contains(agent);
-            (expert ? expertLog : answer).append(text);
+            answer.append(text);
             channel.send("token", new JSONObject()
                     .fluentPut("text", text)
-                    .fluentPut("agent", agent)
-                    .fluentPut("role", expert ? "process" : "answer"));
+                    .fluentPut("agent", "supervisor")
+                    .fluentPut("role", "answer"));
         });
-        String[] lastNode = {""};
         // 深研判这类工具在图内同步阻塞跑，期间通道零字节。心跳全程喂着，中间层才不会当连接死了掐断
         ScheduledFuture<?> heartbeat = heartbeatScheduler.scheduleWithFixedDelay(
                 channel::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
@@ -286,40 +283,28 @@ public class ChatWorkbenchController {
             String enriched = memory.isEmpty() ? message : memory + "\n用户问题：" + message;
 
             var graph = chatAgentFactory.chatGraph();
-            RunnableConfig config = RunnableConfig.builder().threadId(sessionId).build();
-            graph.stream(Map.of("messages", List.of(new UserMessage(enriched))), config)
-                    .doOnNext(output -> {
+            RunnableConfig config = RunnableConfig.builder()
+                    .threadId(sessionId)
+                    // 专家的 token 流被并行分支 reduce 掉了拿不到，节点经此 sink 主动汇报进度与结论
+                    .addMetadata(ChatAgentFactory.PROGRESS_SINK_KEY,
+                            (java.util.function.Consumer<ChatAgentFactory.ExpertProgress>)
+                                    event -> onExpertProgress(channel, expertLog, event))
+                    .build();
+
+            graph.stream(Map.of("messages", new UserMessage(enriched)), config)
+                    .forEachAsync(output -> {
                         if (channel.isClosed()) {
                             return;
                         }
+                        // 只有 supervisor 是流式的（专家走阻塞 invoke），流出的增量即答案 token
                         if (output instanceof StreamingOutput<?> streaming) {
-                            // 框架对每次 LLM 调用先逐帧下发增量(*_STREAMING)，流结束再补 1 帧完整聚合
-                            // 文本(*_FINISHED)。聚合帧内容与增量完全重复，绝不能当 token 外发（否则每条
-                            // 消息双份），只用作"一次调用结束"的分段边界驱动路由过滤
-                            String key = output.node() + "|" + output.agent();
-                            OutputType type = streaming.getOutputType();
-                            if (type != null && type.name().endsWith("_FINISHED")) {
-                                filter.endSegment(key);
-                                return;
-                            }
-                            String chunk = streaming.message() instanceof AssistantMessage am && !am.hasToolCalls()
-                                    ? am.getText() : null;
+                            String chunk = streaming.chunk();
                             if (chunk != null && !chunk.isEmpty()) {
                                 // 经路由过滤外发：supervisor 的派发 JSON 数组是内部控制流，不进答案
-                                filter.onChunk(key, chunk);
+                                filter.onChunk(output.node(), chunk);
                             }
-                            return;
                         }
-                        // 非流式 NodeOutput=节点边界：agent 切换时发调度事件（工作台的"过程可视化"）
-                        String node = output.node();
-                        if (node != null && !node.equals(lastNode[0]) && !output.isSTART() && !output.isEND()) {
-                            lastNode[0] = node;
-                            channel.send("agent_start", new JSONObject()
-                                    .fluentPut("node", node)
-                                    .fluentPut("agent", output.agent()));
-                        }
-                    })
-                    .blockLast();
+                    }).join();
             filter.endAll();   // 收尾：在途段若是被扣住的路由数组即丢弃，否则补发
 
             // HITL：本轮 agent 触发了贵操作待确认 → 弹确认卡（approve 后前端自动补发继续指令）
@@ -330,7 +315,7 @@ public class ChatWorkbenchController {
                             .fluentPut("reason", pendingRequest.reason())
                             .fluentPut("resumeMessage", "已确认，请继续执行深度研判")));
 
-            // 极端场景（调用上限 END 等）supervisor 没产出汇总，退专家过程文本，答案不至于丢
+            // 极端场景（调用上限截停等）supervisor 没产出汇总，退专家结论，答案不至于丢
             String finalAnswer = !answer.isEmpty() ? answer.toString() : expertLog.toString();
             // 历史/记忆不看连接死活：切页断连后图照跑，答案必须落库（前端回来靠 status+历史补）。
             // 且必须在 finally 摘运行标记之前写完——轮询端不能出现"已结束但查不到答案"的空窗
@@ -352,6 +337,32 @@ public class ChatWorkbenchController {
         } finally {
             heartbeat.cancel(false);
             runRegistry.finish(sessionId);
+        }
+    }
+
+    /**
+     * 专家进度 → 前端事件。开始时发 agent_start（前端渲染成"接管分析"chip），
+     * 结论整段作为 role=process 的 token 发出（前端折叠成"工作过程"块）。
+     * 内容真实，只是并行下拿不到逐字流，一次性给。
+     */
+    private void onExpertProgress(SseChannel channel, StringBuilder expertLog,
+                                  ChatAgentFactory.ExpertProgress event) {
+        switch (event.phase()) {
+            case ChatAgentFactory.ExpertProgress.START -> channel.send("agent_start", new JSONObject()
+                    .fluentPut("node", event.agent())
+                    .fluentPut("agent", event.agent()));
+            case ChatAgentFactory.ExpertProgress.DONE -> {
+                if (event.text() != null && !event.text().isBlank()) {
+                    expertLog.append(event.text());
+                    channel.send("token", new JSONObject()
+                            .fluentPut("text", event.text())
+                            .fluentPut("agent", event.agent())
+                            .fluentPut("role", "process"));
+                }
+            }
+            case ChatAgentFactory.ExpertProgress.ERROR -> channel.send("progress", new JSONObject()
+                    .fluentPut("text", event.agent() + " 执行失败：" + event.text()));
+            default -> log.warn("[Workbench] 未知专家进度阶段 {}", event.phase());
         }
     }
 

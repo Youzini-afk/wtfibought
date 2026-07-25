@@ -1,7 +1,7 @@
 package com.mawai.wiibquant.agent.quant.node;
 
-import com.alibaba.cloud.ai.graph.OverAllState;
-import com.alibaba.cloud.ai.graph.action.NodeAction;
+import org.bsc.langgraph4j.state.AgentState;
+import org.bsc.langgraph4j.action.NodeAction;
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibcommon.entity.ForceOrder;
 import com.mawai.wiibcommon.enums.KlineInterval;
@@ -21,7 +21,7 @@ import java.util.concurrent.*;
  * 内部虚拟线程并行采集K线(7周期)、ticker、funding、orderbook、OI、LSR、新闻。
  */
 @Slf4j
-public class CollectDataNode implements NodeAction {
+public class CollectDataNode implements NodeAction<AgentState> {
 
     private static final long COLLECT_TIMEOUT_SECONDS = 10L;
 
@@ -39,7 +39,7 @@ public class CollectDataNode implements NodeAction {
     }
 
     @Override
-    public Map<String, Object> apply(OverAllState state) {
+    public Map<String, Object> apply(AgentState state) {
         String symbol = (String) state.value("target_symbol").orElse("BTCUSDT");
         if (symbol.isBlank()) symbol = "BTCUSDT";
         String preFetchedFearGreed = (String) state.value("fear_greed_data").orElse(null);

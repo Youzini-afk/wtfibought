@@ -19,7 +19,6 @@ import org.springframework.ai.chat.prompt.ChatOptions;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.model.tool.ToolCallingChatOptions;
 import org.springframework.ai.model.tool.ToolCallingManager;
-import org.springframework.ai.model.tool.ToolExecutionResult;
 import org.springframework.ai.retry.NonTransientAiException;
 import org.springframework.ai.retry.TransientAiException;
 import org.springframework.ai.tool.definition.ToolDefinition;
@@ -27,7 +26,6 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
-import org.springframework.retry.support.RetryTemplate;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -42,13 +40,12 @@ import java.util.List;
  * 为什么自研：Spring AI 1.1.x 的 OpenAiChatModel 只会说 /v1/chat/completions；
  * Grok Build（经 CPA）/OpenAI 官方思考模型的原生协议是 Responses，走原生协议才能带 reasoning.effort 控思考档位。
  * <p>
- * 与框架的契约（读 spring-ai-alibaba 1.1.2.0 源码确认）：
+ * 与框架的契约（langgraph4j + Spring AI 2.0）：
  * <ul>
- *   <li>AgentLlmNode 默认流式（ChatClient.stream()），QuantLlm/Summarization 走阻塞 call()</li>
- *   <li>agent 的工具一律外部执行（internalToolExecutionEnabled=false，图 ToolNode 执行）——
- *       本类只需返回带 toolCalls 的 AssistantMessage、接受 ToolResponseMessage 入参；
- *       内部执行循环仍按 Spring AI 标准语义实现，兜底非 agent 的 ChatClient.tools() 用法</li>
- *   <li>流式聚合（NodeExecutor）按帧拼 text、按 id 合并 toolCalls：每帧只发增量文本，工具调用在 item 完成时整只发一次</li>
+ *   <li>本类只负责"说"：返回带 toolCalls 的 AssistantMessage、接受 ToolResponseMessage 入参。
+ *       工具一律由图的 ExecuteToolsAction 执行——Spring AI 2.0 已从 ChatModel 层移除内部工具执行</li>
+ *   <li>CallModelAction 走流式（streaming=true），Summarization 等走阻塞 call()</li>
+ *   <li>流式帧由 StreamingChatGenerator 聚合：每帧只发增量文本，工具调用在 item 完成时整只发一次</li>
  * </ul>
  * 无状态模式（不回传加密思考块）：流式聚合会重建消息丢 metadata，跨轮思考复用在此框架下不可行，
  * 每轮思考开销由 reasoning.effort 封顶。
@@ -67,16 +64,18 @@ public class ResponsesChatModel implements ChatModel {
     /** 思考档位 none/low/medium/high；null=不传走模型默认（来自 DB 配置行，非请求级） */
     private final String reasoningEffort;
     private final ToolCallingManager toolCallingManager;
-    private final RetryTemplate retryTemplate;
+
+    /** 瞬时错误重试参数，与 ResilientModelInterceptor 对齐 */
+    private static final int MAX_ATTEMPTS = 3;
+    private static final long INITIAL_BACKOFF_MS = 500;
+    private static final long MAX_BACKOFF_MS = 4000;
 
     public ResponsesChatModel(String apiKey, String baseUrl, String model, Double temperature,
-                              String reasoningEffort, ToolCallingManager toolCallingManager,
-                              RetryTemplate retryTemplate) {
+                              String reasoningEffort, ToolCallingManager toolCallingManager) {
         this.model = model;
         this.temperature = temperature;
         this.reasoningEffort = reasoningEffort;
         this.toolCallingManager = toolCallingManager;
-        this.retryTemplate = retryTemplate;
         // 深研判单次回包可达数百KB，默认256KB codec上限不够
         this.webClient = WebClient.builder()
                 .baseUrl(baseUrl)
@@ -98,17 +97,37 @@ public class ResponsesChatModel implements ChatModel {
 
     @Override
     public @NonNull ChatResponse call(Prompt prompt) {
-        ChatResponse response = retryTemplate.execute(ctx -> doCall(prompt));
-        // Spring AI 标准语义：内部工具执行开启且模型要调工具 → 执行后带结果续问，直到模型给出最终回答
-        // （isInternalToolExecutionEnabled 对 null options 安全：走默认值 true）
-        if (response.hasToolCalls() && ToolCallingChatOptions.isInternalToolExecutionEnabled(prompt.getOptions())) {
-            ToolExecutionResult result = toolCallingManager.executeToolCalls(prompt, response);
-            if (result.returnDirect()) {
-                return response;
+        // 只负责"说"：带 toolCalls 的 AssistantMessage 原样返回，工具由图的 ExecuteToolsAction 执行。
+        // Spring AI 2.0 起 ChatModel 层不再做内部工具执行（internalToolExecutionEnabled 已移除）
+        return callWithRetry(prompt);
+    }
+
+    /**
+     * 瞬时错误退避重试。Spring AI 2.0 起彻底弃用 spring-retry（RetryTemplate 已无处可取），
+     * 逻辑内聚在此——只重试 {@link TransientAiException}(429/5xx)，配置类错误重试也没用。
+     */
+    private ChatResponse callWithRetry(Prompt prompt) {
+        TransientAiException last = null;
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            try {
+                return doCall(prompt);
+            } catch (TransientAiException e) {
+                last = e;
+                if (attempt < MAX_ATTEMPTS) {
+                    sleepBackoff(attempt);
+                }
             }
-            return call(new Prompt(result.conversationHistory(), prompt.getOptions()));
         }
-        return response;
+        throw last;
+    }
+
+    private static void sleepBackoff(int attempt) {
+        try {
+            Thread.sleep(Math.min(INITIAL_BACKOFF_MS << (attempt - 1), MAX_BACKOFF_MS));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("重试退避等待被中断", e);
+        }
     }
 
     private ChatResponse doCall(Prompt prompt) {
@@ -133,31 +152,8 @@ public class ResponsesChatModel implements ChatModel {
 
     @Override
     public @NonNull Flux<ChatResponse> stream(Prompt prompt) {
-        // 是否可能内部执行工具在请求前即可判定：agent（internal=false）和无工具调用（QuantLlm）
-        // 都走纯透传——帧到即发，工作台 token 实时性不受影响
-        if (!mayExecuteToolsInternally(prompt)) {
-            return streamOnce(prompt);
-        }
-        // 内部执行分支（非 agent 的 ChatClient.tools() 用法）：必须攒齐帧才知道要不要调工具
-        return streamOnce(prompt).collectList().flatMapMany(frames -> {
-            if (!hasAnyToolCall(frames)) {
-                return Flux.fromIterable(frames);
-            }
-            ChatResponse merged = mergeFrames(frames);
-            ToolExecutionResult result = toolCallingManager.executeToolCalls(prompt, merged);
-            if (result.returnDirect()) {
-                return Flux.fromIterable(frames);
-            }
-            return stream(new Prompt(result.conversationHistory(), prompt.getOptions()));
-        });
-    }
-
-    private boolean mayExecuteToolsInternally(Prompt prompt) {
-        if (!(prompt.getOptions() instanceof ToolCallingChatOptions toolOptions)) {
-            return false;
-        }
-        return ToolCallingChatOptions.isInternalToolExecutionEnabled(prompt.getOptions())
-                && !toolCallingManager.resolveToolDefinitions(toolOptions).isEmpty();
+        // 纯透传，帧到即发——工具执行归图，本层不攒帧，工作台 token 实时性不受影响
+        return streamOnce(prompt);
     }
 
     /**
@@ -272,24 +268,8 @@ public class ResponsesChatModel implements ChatModel {
         return new ChatResponse(List.of(generation), metadata.build());
     }
 
-    private boolean hasAnyToolCall(List<ChatResponse> frames) {
-        return frames.stream().anyMatch(f -> f.getResult().getOutput().hasToolCalls());
-    }
 
     /** 帧合并（仅内部工具执行分支用）：拼文本、收工具调用，成一个完整 ChatResponse 供 executeToolCalls */
-    private ChatResponse mergeFrames(List<ChatResponse> frames) {
-        StringBuilder text = new StringBuilder();
-        List<AssistantMessage.ToolCall> toolCalls = new ArrayList<>();
-        for (ChatResponse frame : frames) {
-            AssistantMessage output = frame.getResult().getOutput();
-            if (output.getText() != null) {
-                text.append(output.getText());
-            }
-            toolCalls.addAll(output.getToolCalls());
-        }
-        AssistantMessage merged = AssistantMessage.builder().content(text.toString()).toolCalls(toolCalls).build();
-        return new ChatResponse(List.of(new Generation(merged)));
-    }
 
     // ========== 请求构建 ==========
 
@@ -458,7 +438,7 @@ public class ResponsesChatModel implements ChatModel {
         return "未知错误";
     }
 
-    /** 429/5xx 归为瞬时（RetryTemplate 会重试），其余 4xx 直接失败——配置错误重试也没用 */
+    /** 429/5xx 归为瞬时（callWithRetry 会重试），其余 4xx 直接失败——配置错误重试也没用 */
     private RuntimeException toApiException(int status, String body) {
         String message = "Responses API HTTP " + status + ": " + (body.length() > 500 ? body.substring(0, 500) : body);
         if (status == 429 || status >= 500) {

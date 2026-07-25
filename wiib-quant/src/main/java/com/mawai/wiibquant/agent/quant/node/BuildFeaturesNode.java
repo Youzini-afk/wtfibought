@@ -1,7 +1,7 @@
 package com.mawai.wiibquant.agent.quant.node;
 
-import com.alibaba.cloud.ai.graph.OverAllState;
-import com.alibaba.cloud.ai.graph.action.NodeAction;
+import org.bsc.langgraph4j.state.AgentState;
+import org.bsc.langgraph4j.action.NodeAction;
 import com.mawai.wiibcommon.enums.KlineInterval;
 import com.mawai.wiibcommon.market.OrderFlowAggregator;
 
@@ -12,7 +12,7 @@ import java.util.function.Supplier;
  * 特征工程节点：从原始市场数据构建FeatureSnapshot。
  * 具体特征计算委托给 BuildFeaturesBuilder，节点只负责适配 StateGraph。
  */
-public class BuildFeaturesNode implements NodeAction {
+public class BuildFeaturesNode implements NodeAction<AgentState> {
 
     private final BuildFeaturesBuilder builder;
 
@@ -25,7 +25,7 @@ public class BuildFeaturesNode implements NodeAction {
     }
 
     @Override
-    public Map<String, Object> apply(OverAllState state) {
+    public Map<String, Object> apply(AgentState state) {
         return builder.apply(state);
     }
 

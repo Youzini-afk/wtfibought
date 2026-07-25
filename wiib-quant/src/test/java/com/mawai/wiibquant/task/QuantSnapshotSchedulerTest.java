@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.task;
 
-import com.alibaba.cloud.ai.graph.CompiledGraph;
+import org.bsc.langgraph4j.CompiledGraph;
 import com.mawai.wiibcommon.market.KlineHistoryStore;
 import com.mawai.wiibquant.agent.quant.PriceVolatilitySentinel;
 import com.mawai.wiibquant.agent.quant.QuantSnapshotGraphFactory;
@@ -91,7 +91,7 @@ class QuantSnapshotSchedulerTest {
         store.latestOpenTime = closeTime - KlineHistoryStore.DEFAULT_BAR_MILLIS + 1;
 
         // 图产出 snapshot_id=1 → lastSnapshotCloseTime 记账 → watchdog 不重复触发
-        com.alibaba.cloud.ai.graph.OverAllState state = mock(com.alibaba.cloud.ai.graph.OverAllState.class);
+        org.bsc.langgraph4j.state.AgentState state = mock(org.bsc.langgraph4j.state.AgentState.class);
         when(state.value("snapshot_id")).thenReturn(Optional.of(1L));
         when(graph.invoke(org.mockito.ArgumentMatchers.<Map<String, Object>>any())).thenReturn(Optional.of(state));
 
@@ -119,7 +119,7 @@ class QuantSnapshotSchedulerTest {
         when(marketDataService.assemble(any())).thenReturn(MarketAssembly.unavailable("BTCUSDT", Map.of()));
 
         // 图返回 snapshot_id + analysis_id → 深研判记账生效
-        com.alibaba.cloud.ai.graph.OverAllState state = mock(com.alibaba.cloud.ai.graph.OverAllState.class);
+        org.bsc.langgraph4j.state.AgentState state = mock(org.bsc.langgraph4j.state.AgentState.class);
         when(state.value("snapshot_id")).thenReturn(Optional.of(1L));
         when(state.value("analysis_id")).thenReturn(Optional.of(2L));
         when(graph.invoke(org.mockito.ArgumentMatchers.<Map<String, Object>>any())).thenReturn(Optional.of(state));
@@ -196,7 +196,7 @@ class QuantSnapshotSchedulerTest {
         long closeTime = System.currentTimeMillis();
         store.latestCloseTime = closeTime;
 
-        com.alibaba.cloud.ai.graph.OverAllState state = mock(com.alibaba.cloud.ai.graph.OverAllState.class);
+        org.bsc.langgraph4j.state.AgentState state = mock(org.bsc.langgraph4j.state.AgentState.class);
         when(state.value("snapshot_id")).thenReturn(Optional.of(1L));
         when(state.value("analysis_id")).thenReturn(Optional.of(2L));
         when(graph.invoke(org.mockito.ArgumentMatchers.<Map<String, Object>>any())).thenReturn(Optional.of(state));

@@ -1,19 +1,14 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.alibaba.cloud.ai.graph.store.Store;
-import com.alibaba.cloud.ai.graph.store.StoreItem;
-import com.alibaba.cloud.ai.graph.store.StoreSearchResult;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import java.util.List;
-import java.util.Map;
-import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -21,47 +16,49 @@ import static org.mockito.Mockito.when;
 
 class ChatMemoryServiceTest {
 
-    private final Store store = mock(Store.class);
+    private final WorkbenchMemoryStore store = mock(WorkbenchMemoryStore.class);
     private final ChatMemoryService service = new ChatMemoryService(store);
 
     @Test
-    void rememberExtractsMentionedSymbolAndCounts() {
-        when(store.getItem(anyList(), anyString())).thenReturn(Optional.empty());
-
+    void rememberExtractsMentionedSymbol() throws Exception {
         service.remember(1L, "BTC 现在脆弱度怎么样", "脆弱度61，偏高");
 
-        ArgumentCaptor<StoreItem> captor = ArgumentCaptor.forClass(StoreItem.class);
-        verify(store).putItem(captor.capture());
-        StoreItem item = captor.getValue();
-        assertThat(item.getKey()).isEqualTo("BTCUSDT");
-        assertThat(item.getNamespace()).containsExactly("workbench", "1");
-        assertThat(item.getValue().get("count")).isEqualTo(1L);
+        // 计数自增交给 SQL upsert（原子，无先读后写竞态），这里只验证提取到了正确的 symbol
+        verify(store).remember(eq(1L), eq("BTCUSDT"), eq("BTC 现在脆弱度怎么样"), eq("脆弱度61，偏高"));
     }
 
     @Test
-    void rememberAccumulatesExistingCount() {
-        StoreItem existing = StoreItem.of(List.of("workbench", "1"), "BTCUSDT", Map.of("count", 4L));
-        when(store.getItem(anyList(), anyString())).thenReturn(Optional.of(existing));
-
+    void rememberMatchesSymbolCaseInsensitively() throws Exception {
         service.remember(1L, "btc 波动预测", "H6 预计 120bps");
 
-        ArgumentCaptor<StoreItem> captor = ArgumentCaptor.forClass(StoreItem.class);
-        verify(store).putItem(captor.capture());
-        assertThat(captor.getValue().getValue().get("count")).isEqualTo(5L);
+        verify(store).remember(eq(1L), eq("BTCUSDT"), anyString(), anyString());
     }
 
     @Test
-    void rememberSkipsWhenNoWatchSymbolMentioned() {
+    void rememberSkipsWhenNoWatchSymbolMentioned() throws Exception {
         service.remember(1L, "今天天气如何", "不知道");
 
-        verify(store, never()).putItem(any());
+        verify(store, never()).remember(anyLong(), anyString(), anyString(), anyString());
     }
 
     @Test
-    void recallBuildsMemoryPrefix() {
-        StoreItem item = StoreItem.of(List.of("workbench", "1"), "BTCUSDT",
-                Map.of("count", 5L, "lastQuestion", "脆弱度怎么样"));
-        when(store.searchItems(any())).thenReturn(StoreSearchResult.of(List.of(item), 1, 0, 5));
+    void rememberDegradesOnStoreFailure() throws Exception {
+        doThrowOnRemember();
+
+        service.remember(1L, "BTC 现在怎么样", "还行"); // 记忆是增益不是主链，不该往上抛
+
+        verify(store).remember(anyLong(), anyString(), anyString(), anyString());
+    }
+
+    private void doThrowOnRemember() throws Exception {
+        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
+                .when(store).remember(anyLong(), anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void recallBuildsMemoryPrefix() throws Exception {
+        when(store.recall(anyLong(), anyInt()))
+                .thenReturn(List.of(new WorkbenchMemoryStore.Entry("BTCUSDT", 5L, "脆弱度怎么样")));
 
         String memory = service.recall(1L);
 
@@ -69,8 +66,15 @@ class ChatMemoryServiceTest {
     }
 
     @Test
-    void recallDegradesToEmptyOnFailure() {
-        when(store.searchItems(any())).thenThrow(new RuntimeException("db down"));
+    void recallReturnsEmptyWhenNoMemory() throws Exception {
+        when(store.recall(anyLong(), anyInt())).thenReturn(List.of());
+
+        assertThat(service.recall(1L)).isEmpty();
+    }
+
+    @Test
+    void recallDegradesToEmptyOnFailure() throws Exception {
+        when(store.recall(anyLong(), anyInt())).thenThrow(new RuntimeException("db down"));
 
         assertThat(service.recall(1L)).isEmpty();
     }

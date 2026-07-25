@@ -18,9 +18,7 @@
     <modules>
             <module>wiib-common</module>
             <module>wiib-feed</module>
-            <!-- 迁移阶段A：wiib-quant 依赖 spring-ai-alibaba(绑 Spring Framework 6)，升 Boot4 必炸，
-                 暂时移出 build；阶段B 换掉 spring-ai-alibaba → langgraph4j 后接回 -->
-            <!-- <module>wiib-quant</module> -->
+            <module>wiib-quant</module>
             <module>wiib-sim</module>
     </modules>
 
@@ -43,15 +41,6 @@
 
     <dependencyManagement>
         <dependencies>
-            <!-- Spring AI Alibaba BOM（统一管理Spring AI版本） -->
-            <dependency>
-                <groupId>com.alibaba.cloud.ai</groupId>
-                <artifactId>spring-ai-alibaba-bom</artifactId>
-                <version>1.1.2.0</version>
-                <type>pom</type>
-                <scope>import</scope>
-            </dependency>
-
             <dependency>
                 <groupId>com.mawai</groupId>
                 <artifactId>wiib-common</artifactId>

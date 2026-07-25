@@ -1,7 +1,7 @@
 package com.mawai.wiibquant.agent.quant;
 
-import com.alibaba.cloud.ai.graph.CompiledGraph;
-import com.alibaba.cloud.ai.graph.OverAllState;
+import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.state.AgentState;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibcommon.entity.QuantSnapshot;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
@@ -36,8 +36,8 @@ class QuantSnapshotWorkflowTest {
         return snap;
     }
 
-    private CompiledGraph graph() throws Exception {
-        return QuantSnapshotWorkflow.build(snapshotService, deepAnalysisService, null, null);
+    private CompiledGraph<AgentState> graph() throws Exception {
+        return QuantSnapshotWorkflow.build(snapshotService, deepAnalysisService);
     }
 
     @Test
@@ -45,7 +45,7 @@ class QuantSnapshotWorkflowTest {
         when(snapshotService.buildSnapshot(eq("BTCUSDT"), anyLong())).thenReturn(snap());
         when(snapshotService.persist(any(QuantSnapshot.class))).thenReturn(7L);
 
-        Optional<OverAllState> out = graph().invoke(Map.of(
+        Optional<AgentState> out = graph().invoke(Map.of(
                 "target_symbol", "BTCUSDT", "kline_close_time", 123L, "trigger_deep", false));
 
         assertThat(out).isPresent();
@@ -60,7 +60,7 @@ class QuantSnapshotWorkflowTest {
     void skipsPersistWhenBuildReturnsNull() throws Exception {
         when(snapshotService.buildSnapshot(eq("BTCUSDT"), anyLong())).thenReturn(null);
 
-        Optional<OverAllState> out = graph().invoke(Map.of(
+        Optional<AgentState> out = graph().invoke(Map.of(
                 "target_symbol", "BTCUSDT", "kline_close_time", 123L, "trigger_deep", true));
 
         assertThat(out).isPresent();
@@ -83,7 +83,7 @@ class QuantSnapshotWorkflowTest {
                 eq("新闻上下文X"), eq(LEGS), eq("bull论据"), eq("bear论据"))).thenReturn(analysis);
         when(deepAnalysisService.persist(any(QuantDeepAnalysis.class))).thenReturn(88L);
 
-        Optional<OverAllState> out = graph().invoke(Map.of(
+        Optional<AgentState> out = graph().invoke(Map.of(
                 "target_symbol", "BTCUSDT", "kline_close_time", 123L,
                 "trigger_source", "cron_1h", "trigger_deep", true));
 
@@ -105,7 +105,7 @@ class QuantSnapshotWorkflowTest {
         when(deepAnalysisService.judge(anyString(), anyLong(), any(), anyString(),
                 anyString(), anyString(), anyString(), anyString())).thenReturn(null); // LLM 失败研判缺席
 
-        Optional<OverAllState> out = graph().invoke(Map.of(
+        Optional<AgentState> out = graph().invoke(Map.of(
                 "target_symbol", "BTCUSDT", "kline_close_time", 123L,
                 "trigger_source", "sentinel", "trigger_deep", true));
 

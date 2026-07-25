@@ -22,7 +22,7 @@ public class ChatHistoryService {
 
     public ChatHistoryService(DataSource dataSource) {
         this.jdbc = new JdbcTemplate(dataSource);
-        // 启动幂等自建表（与 workbenchStore/PostgresSaver 同哲学，免手工跑 DDL；init.sql 同步留档）
+        // 启动幂等自建表（与 WorkbenchMemoryStore/PostgresSaver 同哲学，免手工跑 DDL；init.sql 同步留档）
         jdbc.execute("""
                 CREATE TABLE IF NOT EXISTS workbench_chat_message (
                     id          BIGSERIAL PRIMARY KEY,

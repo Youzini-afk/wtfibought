@@ -1,44 +1,34 @@
 package com.mawai.wiibquant.agent.quant;
 
-import com.alibaba.cloud.ai.graph.CompiledGraph;
-import com.alibaba.cloud.ai.graph.GraphLifecycleListener;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.QuantSnapshotService;
-import io.micrometer.observation.ObservationRegistry;
-import org.springframework.beans.factory.ObjectProvider;
+import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.state.AgentState;
 import org.springframework.stereotype.Component;
 
 /**
  * 定时轨图工厂：进程内单例缓存。深研判节点经 QuantLlm 门面每次现取当前模型，
- * 模型热更新不需要重建图（图结构与模型解耦）。观测走框架原生三层（P8）。
+ * 模型热更新不需要重建图（图结构与模型解耦）。
  */
 @Component
 public class QuantSnapshotGraphFactory {
 
     private final QuantSnapshotService snapshotService;
     private final DeepAnalysisService deepAnalysisService;
-    private final ObjectProvider<ObservationRegistry> observationRegistryProvider;
-    private final ObjectProvider<GraphLifecycleListener> observationListenerProvider;
-    private volatile CompiledGraph cached;
+    private volatile CompiledGraph<AgentState> cached;
 
     public QuantSnapshotGraphFactory(QuantSnapshotService snapshotService,
-                                     DeepAnalysisService deepAnalysisService,
-                                     ObjectProvider<ObservationRegistry> observationRegistryProvider,
-                                     ObjectProvider<GraphLifecycleListener> observationListenerProvider) {
+                                     DeepAnalysisService deepAnalysisService) {
         this.snapshotService = snapshotService;
         this.deepAnalysisService = deepAnalysisService;
-        this.observationRegistryProvider = observationRegistryProvider;
-        this.observationListenerProvider = observationListenerProvider;
     }
 
-    public CompiledGraph get() throws Exception {
-        CompiledGraph graph = cached;
+    public CompiledGraph<AgentState> get() throws Exception {
+        CompiledGraph<AgentState> graph = cached;
         if (graph != null) return graph;
         synchronized (this) {
             if (cached == null) {
-                cached = QuantSnapshotWorkflow.build(snapshotService, deepAnalysisService,
-                        observationRegistryProvider.getIfAvailable(),
-                        observationListenerProvider.getIfAvailable());
+                cached = QuantSnapshotWorkflow.build(snapshotService, deepAnalysisService);
             }
             return cached;
         }

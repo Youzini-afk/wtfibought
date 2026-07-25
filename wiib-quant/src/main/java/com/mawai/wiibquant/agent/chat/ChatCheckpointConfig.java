@@ -1,54 +1,27 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.alibaba.cloud.ai.graph.checkpoint.BaseCheckpointSaver;
-import com.alibaba.cloud.ai.graph.checkpoint.savers.postgresql.PostgresSaver;
-import com.alibaba.cloud.ai.graph.store.Store;
-import org.springframework.beans.factory.annotation.Value;
+import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
+import org.bsc.langgraph4j.checkpoint.PostgresSaver;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import javax.sql.DataSource;
-import java.net.URI;
-import java.sql.Connection;
-import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 
 /**
- * 工作台持久化配置：PostgresSaver（会话 checkpoint，断连续聊地基）+ DatabaseStore（跨会话长期记忆），
- * 都落主库 PG，框架自动建表。
+ * 工作台会话 checkpoint：落主库 PG，threadId=sessionId，断连续聊与 HITL 中断恢复的地基。
+ * <p>
+ * 直接复用 Spring 的 DataSource（不必手拆 JDBC URL），建表 DDL 全带 IF NOT EXISTS 天然幂等，
+ * 无需先探测表是否存在——这两点都是 spring-ai-alibaba 版缺的，迁到 langgraph4j 后一并省掉。
  */
 @Configuration
 public class ChatCheckpointConfig {
 
-    /** 跨会话长期记忆存储（P5）：复用 Spring 主 DataSource，自动建 store 表（PG 方言，见 PostgresDatabaseStore）。 */
     @Bean
-    public Store workbenchStore(DataSource dataSource) {
-        return new PostgresDatabaseStore(dataSource);
-    }
-
-    @Bean
-    public BaseCheckpointSaver workbenchCheckpointSaver(
-            DataSource dataSource,
-            @Value("${spring.datasource.url}") String url,
-            @Value("${spring.datasource.username}") String user,
-            @Value("${spring.datasource.password}") String password) throws SQLException {
-        // 库的 initTable DDL 非幂等（索引没加 IF NOT EXISTS），表已存在时重跑必炸：先查一把，建过就跳过建表
-        boolean tablesExist;
-        try (Connection conn = dataSource.getConnection();
-             Statement stmt = conn.createStatement();
-             ResultSet rs = stmt.executeQuery("SELECT to_regclass('graphcheckpoint')")) {
-            tablesExist = rs.next() && rs.getString(1) != null;
-        }
-        URI uri = URI.create(url.replaceFirst("^jdbc:", ""));
-        String database = uri.getPath().replaceFirst("^/", "").replaceAll("\\?.*$", "");
+    public BaseCheckpointSaver workbenchCheckpointSaver(DataSource dataSource) throws SQLException {
         return PostgresSaver.builder()
-                .host(uri.getHost())
-                .port(uri.getPort() > 0 ? uri.getPort() : 5432)
-                .database(database)
-                .user(user)
-                .password(password)
-                .createTables(!tablesExist)
+                .datasource(dataSource)
+                .createTables(true)
                 .build();
     }
 }

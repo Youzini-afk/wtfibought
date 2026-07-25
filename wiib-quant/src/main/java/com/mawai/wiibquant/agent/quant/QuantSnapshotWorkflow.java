@@ -1,29 +1,22 @@
 package com.mawai.wiibquant.agent.quant;
 
-import com.alibaba.cloud.ai.graph.CompileConfig;
-import com.alibaba.cloud.ai.graph.CompiledGraph;
-import com.alibaba.cloud.ai.graph.KeyStrategy;
-import com.alibaba.cloud.ai.graph.KeyStrategyFactory;
-import com.alibaba.cloud.ai.graph.StateGraph;
-import com.alibaba.cloud.ai.graph.action.NodeAction;
-import com.alibaba.cloud.ai.graph.checkpoint.config.SaverConfig;
-import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
-import com.alibaba.cloud.ai.graph.GraphLifecycleListener;
 import com.alibaba.fastjson2.JSON;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibcommon.entity.QuantSnapshot;
 import com.mawai.wiibquant.agent.analysis.DeepAnalysisService;
 import com.mawai.wiibquant.agent.toolkit.QuantSnapshotService;
-import io.micrometer.observation.ObservationRegistry;
+import org.bsc.langgraph4j.CompiledGraph;
+import org.bsc.langgraph4j.StateGraph;
+import org.bsc.langgraph4j.action.NodeAction;
+import org.bsc.langgraph4j.state.AgentState;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-import static com.alibaba.cloud.ai.graph.StateGraph.END;
-import static com.alibaba.cloud.ai.graph.StateGraph.START;
-import static com.alibaba.cloud.ai.graph.action.AsyncEdgeAction.edge_async;
-import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
+import static org.bsc.langgraph4j.StateGraph.END;
+import static org.bsc.langgraph4j.StateGraph.START;
+import static org.bsc.langgraph4j.action.AsyncEdgeAction.edge_async;
+import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 
 /**
  * 定时轨主图（P2b 完整形态）：
@@ -31,21 +24,20 @@ import static com.alibaba.cloud.ai.graph.action.AsyncNodeAction.node_async;
  * START → build_snapshot → persist_snapshot → gate 条件边
  *                                   │ 否(纯5m bar)→ END
  *                                   └ 是(1h定频/哨兵插队/手动)→ 深研判段:
- *              news_context → [bull ∥ bear](框架并行边fan-out) → judge(fan-in) → persist_analysis → END
+ *              news_context → [bull ∥ bear](同源多边 fan-out) → judge(fan-in) → persist_analysis → END
  * </pre>
- * Bull∥Bear 用 addEdge(String, List) 原生 fan-out——框架内部走 ParallelNode，替代旧手搓虚拟线程。
+ * Bull∥Bear 靠同源多条边触发 langgraph4j 的 ParallelNode；各分支结果经 Channel 归并，不会互相覆盖。
  * state 只传标量与 JSON 字符串（框架 deepCopy 会破坏 record 的历史坑）；重对象走 MarketDataService 缓存共享。
  * 深研判任一 LLM 步失败只缺席本次研判（占位/null 降级），快照时序不受影响。
- * 观测走框架原生三层（graph/node/edge，P8 替换手搓 wrapper），observationRegistry/listener 可空（测试）。
+ * <p>
+ * 键无需声明 Channel：langgraph4j 对未声明的键默认就是覆盖语义，正是本图全部键要的行为。
  */
 public class QuantSnapshotWorkflow {
 
-    public static CompiledGraph build(QuantSnapshotService snapshotService,
-                                      DeepAnalysisService deepAnalysisService,
-                                      ObservationRegistry observationRegistry,
-                                      GraphLifecycleListener observationListener) throws Exception {
+    public static CompiledGraph<AgentState> build(QuantSnapshotService snapshotService,
+                                                  DeepAnalysisService deepAnalysisService) throws Exception {
         // ===== 快照段（零 LLM）=====
-        NodeAction buildNode = state -> {
+        NodeAction<AgentState> buildNode = state -> {
             String symbol = symbol(state);
             long closeTime = closeTime(state);
             QuantSnapshot snap = snapshotService.buildSnapshot(symbol, closeTime);
@@ -54,8 +46,8 @@ public class QuantSnapshotWorkflow {
             out.put("snapshot_json", snap != null ? JSON.toJSONString(snap) : "");
             return out;
         };
-        NodeAction persistNode = state -> {
-            String json = (String) state.value("snapshot_json").orElse("");
+        NodeAction<AgentState> persistNode = state -> {
+            String json = snapshotJson(state);
             if (json.isEmpty()) {
                 return Map.of();
             }
@@ -64,26 +56,26 @@ public class QuantSnapshotWorkflow {
         };
 
         // ===== 深研判段（LLM，gate 后才进入）=====
-        NodeAction newsContextNode = state -> Map.of(
+        NodeAction<AgentState> newsContextNode = state -> Map.of(
                 "news_context", deepAnalysisService.buildNewsContext());
-        NodeAction bullNode = state -> Map.of(
+        NodeAction<AgentState> bullNode = state -> Map.of(
                 "bull_argument", deepAnalysisService.bullArgue(symbol(state), newsContext(state), volLegsJson(state)));
-        NodeAction bearNode = state -> Map.of(
+        NodeAction<AgentState> bearNode = state -> Map.of(
                 "bear_argument", deepAnalysisService.bearArgue(symbol(state), newsContext(state), volLegsJson(state)));
-        NodeAction judgeNode = state -> {
+        NodeAction<AgentState> judgeNode = state -> {
             QuantDeepAnalysis analysis = deepAnalysisService.judge(
                     symbol(state), closeTime(state),
-                    state.value("snapshot_id").filter(Number.class::isInstance)
+                    state.<Object>value("snapshot_id").filter(Number.class::isInstance)
                             .map(v -> ((Number) v).longValue()).orElse(null),
-                    (String) state.value("trigger_source").orElse("unknown"),
+                    state.<String>value("trigger_source").orElse("unknown"),
                     newsContext(state), volLegsJson(state),
-                    (String) state.value("bull_argument").orElse(""),
-                    (String) state.value("bear_argument").orElse(""));
+                    state.<String>value("bull_argument").orElse(""),
+                    state.<String>value("bear_argument").orElse(""));
             // 实体过 state 走 JSON 字符串（同快照约定）；null=本次研判缺席
             return Map.of("analysis_json", analysis != null ? JSON.toJSONString(analysis) : "");
         };
-        NodeAction persistAnalysisNode = state -> {
-            String json = (String) state.value("analysis_json").orElse("");
+        NodeAction<AgentState> persistAnalysisNode = state -> {
+            String json = state.<String>value("analysis_json").orElse("");
             if (json.isEmpty()) {
                 return Map.of();
             }
@@ -91,7 +83,7 @@ public class QuantSnapshotWorkflow {
             return id != null ? Map.of("analysis_id", id) : Map.of();
         };
 
-        StateGraph graph = new StateGraph(keyStrategies())
+        StateGraph<AgentState> graph = new StateGraph<>(AgentState::new)
                 .addNode("build_snapshot", node_async(buildNode))
                 .addNode("persist_snapshot", node_async(persistNode))
                 .addNode("news_context", node_async(newsContextNode))
@@ -104,61 +96,43 @@ public class QuantSnapshotWorkflow {
         graph.addEdge("build_snapshot", "persist_snapshot");
         // gate：调度层判定好 trigger_deep（1h 定频/哨兵插队/手动），图内只分流——确定性门控不烧 LLM 路由
         graph.addConditionalEdges("persist_snapshot",
-                edge_async(state -> Boolean.TRUE.equals(state.value("trigger_deep").orElse(false))
-                        && !((String) state.value("snapshot_json").orElse("")).isEmpty()
+                edge_async(state -> Boolean.TRUE.equals(state.<Object>value("trigger_deep").orElse(false))
+                        && !snapshotJson(state).isEmpty()
                         ? "deep" : "end"),
                 Map.of("deep", "news_context", "end", END));
-        // Bull∥Bear：框架原生并行边（fan-out → fan-in），内部 ParallelNode 执行
-        graph.addEdge("news_context", List.of("bull", "bear"));
-        graph.addEdge(List.of("bull", "bear"), "judge");
+        // Bull∥Bear：同源两条边 fan-out → 框架内部建 ParallelNode；两条边汇聚 judge 完成 fan-in
+        graph.addEdge("news_context", "bull");
+        graph.addEdge("news_context", "bear");
+        graph.addEdge("bull", "judge");
+        graph.addEdge("bear", "judge");
         graph.addEdge("judge", "persist_analysis");
         graph.addEdge("persist_analysis", END);
 
-        // 空 SaverConfig：禁用默认 MemorySaver（无容量上限会 OOM，历史教训）
-        CompileConfig.Builder compileConfig = CompileConfig.builder()
-                .saverConfig(SaverConfig.builder().build());
-        if (observationRegistry != null && observationListener != null) {
-            compileConfig.observationRegistry(observationRegistry)
-                    .withLifecycleListener(observationListener);
-        }
-        return graph.compile(compileConfig.build());
+        // 不挂 checkpointSaver：本图是定时轨一次性执行，无需断点续跑（langgraph4j 默认就不挂，无需显式禁用）
+        return graph.compile();
     }
 
-    private static KeyStrategyFactory keyStrategies() {
-        return () -> {
-            HashMap<String, KeyStrategy> s = new HashMap<>();
-            s.put("target_symbol", new ReplaceStrategy());
-            s.put("kline_close_time", new ReplaceStrategy());
-            s.put("trigger_source", new ReplaceStrategy());
-            s.put("trigger_deep", new ReplaceStrategy());
-            s.put("snapshot_json", new ReplaceStrategy());
-            s.put("snapshot_id", new ReplaceStrategy());
-            s.put("news_context", new ReplaceStrategy());
-            s.put("bull_argument", new ReplaceStrategy());
-            s.put("bear_argument", new ReplaceStrategy());
-            s.put("analysis_json", new ReplaceStrategy());
-            s.put("analysis_id", new ReplaceStrategy());
-            return s;
-        };
+    private static String symbol(AgentState state) {
+        return state.<String>value("target_symbol").orElse("BTCUSDT");
     }
 
-    private static String symbol(com.alibaba.cloud.ai.graph.OverAllState state) {
-        return (String) state.value("target_symbol").orElse("BTCUSDT");
-    }
-
-    private static long closeTime(com.alibaba.cloud.ai.graph.OverAllState state) {
-        return state.value("kline_close_time")
+    private static long closeTime(AgentState state) {
+        return state.<Object>value("kline_close_time")
                 .filter(Number.class::isInstance).map(v -> ((Number) v).longValue())
                 .orElse(0L);
     }
 
-    private static String newsContext(com.alibaba.cloud.ai.graph.OverAllState state) {
-        return (String) state.value("news_context").orElse("无新闻上下文");
+    private static String newsContext(AgentState state) {
+        return state.<String>value("news_context").orElse("无新闻上下文");
+    }
+
+    private static String snapshotJson(AgentState state) {
+        return state.<String>value("snapshot_json").orElse("");
     }
 
     /** 从 state 快照 JSON 取三腿：深研判引用的 vol 数字与落库快照严格同一份（gate 已保证快照非空）。 */
-    private static String volLegsJson(com.alibaba.cloud.ai.graph.OverAllState state) {
-        String json = (String) state.value("snapshot_json").orElse("");
+    private static String volLegsJson(AgentState state) {
+        String json = snapshotJson(state);
         if (json.isEmpty()) {
             return null;
         }
