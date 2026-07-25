@@ -2,7 +2,7 @@ package com.mawai.wiibsim.service.impl;
 import com.mawai.wiibcommon.cache.CacheService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.dto.BuffStatusDTO;
 import com.mawai.wiibcommon.dto.UserBuffDTO;
 import com.mawai.wiibcommon.entity.UserBuff;

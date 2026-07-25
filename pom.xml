@@ -5,7 +5,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.4.1</version>
+        <version>4.1.0</version>
         <relativePath/> <!-- lookup parent from repository -->
     </parent>
     <groupId>com.mawai</groupId>
@@ -18,7 +18,9 @@
     <modules>
             <module>wiib-common</module>
             <module>wiib-feed</module>
-            <module>wiib-quant</module>
+            <!-- 迁移阶段A：wiib-quant 依赖 spring-ai-alibaba(绑 Spring Framework 6)，升 Boot4 必炸，
+                 暂时移出 build；阶段B 换掉 spring-ai-alibaba → langgraph4j 后接回 -->
+            <!-- <module>wiib-quant</module> -->
             <module>wiib-sim</module>
     </modules>
 
@@ -28,14 +30,14 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <skipTests>true</skipTests>
         <wiib.version>0.0.1-SNAPSHOT</wiib.version>
-        <mybatis-plus.version>3.5.10</mybatis-plus.version>
+        <mybatis-plus.version>3.5.17</mybatis-plus.version>
         <mybatis.version>3.5.19</mybatis.version>
         <postgresql.version>42.7.3</postgresql.version>
-        <sa-token.version>1.42.0</sa-token.version>
+        <sa-token.version>1.45.0</sa-token.version>
         <lombok.version>1.18.36</lombok.version>
         <hutool.version>5.8.24</hutool.version>
-        <pagehelper-starter.version>1.4.5</pagehelper-starter.version>
-        <openapi.version>2.8.4</openapi.version>
+        <pagehelper-starter.version>4.1.1</pagehelper-starter.version>
+        <openapi.version>3.0.3</openapi.version>
         <fastjson2.version>2.0.60</fastjson2.version>
     </properties>
 
@@ -59,7 +61,7 @@
             <!-- MyBatis-Plus -->
             <dependency>
                 <groupId>com.baomidou</groupId>
-                <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+                <artifactId>mybatis-plus-spring-boot4-starter</artifactId>
                 <version>${mybatis-plus.version}</version>
             </dependency>
 
@@ -87,7 +89,7 @@
             <!-- Sa-Token -->
             <dependency>
                 <groupId>cn.dev33</groupId>
-                <artifactId>sa-token-spring-boot3-starter</artifactId>
+                <artifactId>sa-token-spring-boot4-starter</artifactId>
                 <version>${sa-token.version}</version>
             </dependency>
 

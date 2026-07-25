@@ -3,7 +3,7 @@ package com.mawai.wiibsim.service.impl;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.dto.BStockDTO;
 import com.mawai.wiibcommon.entity.BStock;

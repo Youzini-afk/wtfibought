@@ -95,8 +95,9 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
             public void doLogoutSession(String id) {
             }
 
+            // 1.45.0 起签名多了 loginType，与其余回调的 (loginType, loginId, tokenValue, …) 对齐
             @Override
-            public void doRenewTimeout(String tokenValue, Object loginId, long timeout) {
+            public void doRenewTimeout(String loginType, Object loginId, String tokenValue, long timeout) {
             }
         };
     }

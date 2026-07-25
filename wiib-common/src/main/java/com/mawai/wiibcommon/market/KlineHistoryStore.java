@@ -3,7 +3,7 @@ package com.mawai.wiibcommon.market;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.entity.KlineHistory;
 import com.mawai.wiibcommon.market.KlineBar;
 import com.mawai.wiibcommon.market.BinanceRestClient;

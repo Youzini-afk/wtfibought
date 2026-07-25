@@ -21,6 +21,8 @@ public class MonitorController {
 
     @Scheduled(fixedRate = 5000)
     public void pushMonitor() {
-        ws.convertAndSend("/topic/monitor/sim", JvmMetrics.collectLite());
+        // 载荷强转 Object 锁定 convertAndSend(目的地, 载荷)：Spring 7 新增了
+        // convertAndSend(载荷, 消息头Map) 重载，Map 型载荷会同时命中两者而编译不过
+        ws.convertAndSend("/topic/monitor/sim", (Object) JvmMetrics.collectLite());
     }
 }
