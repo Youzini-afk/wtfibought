@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.entity.FuturesOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
+import com.mawai.wiibcommon.entity.UserLedger;
 import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.enums.LedgerBizType;
+import com.mawai.wiibcommon.enums.LedgerWallet;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibcommon.util.TradingDayUtil;
@@ -14,6 +17,7 @@ import com.mawai.wiibsim.mapper.CryptoPositionMapper;
 import com.mawai.wiibsim.mapper.FuturesOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.PredictionBetMapper;
+import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
 import com.mawai.wiibsim.service.BankruptcyService;
 import com.mawai.wiibcommon.cache.CacheService;
@@ -47,6 +51,7 @@ public class BankruptcyServiceImpl implements BankruptcyService {
     private final FuturesPositionIndexService futuresPositionIndexService;
     private final PredictionBetMapper predictionBetMapper;
     private final AssetValuationService assetValuationService;
+    private final UserLedgerMapper userLedgerMapper;
 
     @Value("${trading.initial-balance:10000}")
     private BigDecimal initialBalance;
@@ -149,10 +154,15 @@ public class BankruptcyServiceImpl implements BankruptcyService {
     protected void liquidateUser(Long userId, LocalDate today) {
         LocalDate resetDate = TradingDayUtil.nextTradingDay(today);
 
+        // markBankrupt 是整体覆写型 SQL（五个钱包全置 0），拿不到旧值，而算 delta 非知道旧值不可。
+        // 所以先加行锁读快照：并发的资金 UPDATE 会在这把锁上排队，读到的就是这次清零真正抹掉的金额。
+        // 全项目只有这两个低频方法这么写，正常资金路径一律走 atomic* + RETURNING，不许照抄。
+        User before = userMapper.selectByIdForUpdate(userId);
         int affected = userMapper.markBankrupt(userId, resetDate, today);
         if (affected == 0) {
             return;
         }
+        recordWalletSnapshotDiff(userId, before, BigDecimal.ZERO, LedgerBizType.BANKRUPT_CLEAR, "爆仓清零");
 
         cleanupUserHoldings(userId, "LIQUIDATED");
         log.warn("用户爆仓 userId={} resetDate={}", userId, resetDate);
@@ -160,13 +170,47 @@ public class BankruptcyServiceImpl implements BankruptcyService {
 
     @Transactional(rollbackFor = Exception.class)
     protected void resetUser(Long userId, LocalDate today) {
+        // 同 liquidateUser：resetAfterBankruptcy 也是整体覆写，先加行锁读快照才算得出 delta
+        User before = userMapper.selectByIdForUpdate(userId);
         int affected = userMapper.resetAfterBankruptcy(userId, initialBalance, today);
         if (affected == 0) {
             return;
         }
+        recordWalletSnapshotDiff(userId, before, initialBalance, LedgerBizType.BANKRUPT_RESET, "破产恢复");
 
         cleanupUserHoldings(userId, "CLOSED");
         log.info("用户恢复初始资金 userId={} balance={}", userId, initialBalance);
+    }
+
+    /**
+     * 按快照差额逐钱包补记整体覆写抹掉/写入的钱。
+     * <p>
+     * balanceTarget 是覆写后 balance 的目标值（爆仓=0，破产恢复=初始资金），其余四个钱包两条路径都置 0。
+     * delta = 新值 − 旧值，差为 0 的钱包不记（记一条 delta=0 的空行只是噪音）。
+     */
+    private void recordWalletSnapshotDiff(Long userId, User before, BigDecimal balanceTarget,
+                                          LedgerBizType bizType, String remark) {
+        record Item(LedgerWallet wallet, BigDecimal old, BigDecimal target) {}
+        var items = List.of(
+                new Item(LedgerWallet.BALANCE, before.getBalance(), balanceTarget),
+                new Item(LedgerWallet.FROZEN, before.getFrozenBalance(), BigDecimal.ZERO),
+                new Item(LedgerWallet.GAME, before.getGameBalance(), BigDecimal.ZERO),
+                new Item(LedgerWallet.LOAN_PRINCIPAL, before.getMarginLoanPrincipal(), BigDecimal.ZERO),
+                new Item(LedgerWallet.LOAN_INTEREST, before.getMarginInterestAccrued(), BigDecimal.ZERO));
+
+        for (var it : items) {
+            BigDecimal old = it.old() == null ? BigDecimal.ZERO : it.old();
+            BigDecimal delta = it.target().subtract(old);
+            if (delta.signum() == 0) continue;
+            UserLedger e = new UserLedger();
+            e.setUserId(userId);
+            e.setWallet(it.wallet());
+            e.setBizType(bizType);
+            e.setDelta(delta);
+            e.setBalanceAfter(it.target());
+            e.setRemark(remark);
+            userLedgerMapper.insert(e);
+        }
     }
 
     /** 爆仓清算/破产恢复共用的持仓清理序列；futuresCloseStatus 区分 LIQUIDATED/CLOSED。 */

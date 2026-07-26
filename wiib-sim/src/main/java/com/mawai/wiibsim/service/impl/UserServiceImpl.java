@@ -5,14 +5,16 @@ import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
-import com.mawai.wiibcommon.entity.WalletTransfer;
+import com.mawai.wiibcommon.entity.UserLedger;
 import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.enums.LedgerBizType;
+import com.mawai.wiibcommon.enums.LedgerWallet;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.ledger.Ledger;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
+import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
-import com.mawai.wiibsim.mapper.WalletTransferMapper;
 import com.mawai.wiibsim.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +42,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final CryptoOrderMapper cryptoOrderMapper;
     private final FuturesPositionMapper futuresPositionMapper;
     private final AssetValuationService assetValuationService;
-    private final WalletTransferMapper walletTransferMapper;
+    private final UserLedgerMapper userLedgerMapper;
 
     @Value("${trading.initial-balance:10000}")
     private BigDecimal initialBalance;
@@ -60,10 +62,61 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public void ensureAdminUser() {
         // 幂等：id=1 已存在则 ON CONFLICT 跳过；balance 用配置的初始资金
-        baseMapper.insertAdmin(initialBalance);
+        int inserted = baseMapper.insertAdmin(initialBalance);
         baseMapper.syncIdSequence();
+        // 只有真插进去了才补记。ON CONFLICT DO NOTHING 撞车时返 0（PG 实测 "INSERT 0 0"），
+        // 而本方法每次启动/每次直登都会调一遍，不看这个返回值就是每次都多记一笔凭空的初始资金
+        if (inserted > 0) {
+            recordInitialGrant(1L, initialBalance);
+        }
+    }
+
+    /**
+     * 幂等建/取量化机器人账户。并发重复创建概率极低（quant 每策略仅首次取用时调一次），不加锁。
+     * <p>
+     * 事务边界在这层而不是 controller：建号 INSERT 与补记初始资金必须同生共死，
+     * 只成一半就是一个账实不符、且此后再也发现不了的账户。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public User ensureQuantAccount(String username, BigDecimal initialBalance) {
+        User existing = baseMapper.selectOne(new LambdaQueryWrapper<User>()
+                .eq(User::getUsername, username).last("LIMIT 1"));
+        if (existing != null) {
+            return existing;   // 幂等：已有账户不重复入金
+        }
+
+        User user = new User();
+        user.setUsername(username);
+        user.setLinuxDoId("internal:" + username);   // 机器人标识，避开 OAuth 用户命名空间
+        user.setBalance(initialBalance);
+        user.setFrozenBalance(BigDecimal.ZERO);
+        user.setIsBankrupt(false);
+        user.setBankruptCount(0);
+        baseMapper.insert(user);
+        recordInitialGrant(user.getId(), initialBalance);
+        log.info("创建量化账户 username={} userId={} balance={}", username, user.getId(), initialBalance);
+        return user;
+    }
+
+    /**
+     * 补记建号赠送的初始资金。三个建号入口（OAuth 首登、邀请码注册、量化建号）加 admin 引导
+     * 都走 INSERT，balance 是列值而不是 atomic* 调用，记账切面完全抓不到；
+     * 不补这一笔，用户一落库就是 SUM(delta)=0 而 balance=10000，不变量当场破。
+     */
+    @Override
+    public void recordInitialGrant(Long userId, BigDecimal balance) {
+        UserLedger entry = new UserLedger();
+        entry.setUserId(userId);
+        entry.setWallet(LedgerWallet.BALANCE);
+        entry.setBizType(LedgerBizType.INITIAL_GRANT);
+        entry.setDelta(balance);
+        entry.setBalanceAfter(balance);   // 建号那一刻余额就是这个数，不是估算
+        entry.setRemark("建号赠送");
+        userLedgerMapper.insert(entry);
     }
 
     @Override
@@ -213,6 +266,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     // updateBalance/freezeBalance/... 这些通用方法刻意不标 @Ledger：它们是所有业务的公共出口，
     // 语义由调用方给（标在这里等于把全项目的流水都写成同一个类型）。只有划转这两个是自带语义的终点。
+    //
+    // 划转的唯一记录就是 @Ledger 落的那两条 user_ledger 行（原来另有一张 wallet_transfer 双轨表，
+    // 职责被账本完全覆盖，已删）：转出钱包记 -amount、到账钱包记 +net，
+    // 差额是被销毁的手续费，不落任何钱包——不变量是按 (user_id, wallet) 分别成立的，
+    // 跨钱包不守恒本来就不在不变量里。
     @Override
     @Transactional(rollbackFor = Exception.class)
     @Ledger(WALLET_TRANSFER_OUT)
@@ -222,7 +280,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (r == null) {
             throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
         }
-        insertTransferLog(userId, WalletTransfer.TO_GAME, amount, fee);
         log.info("用户{}划转 余额→游戏: {} 手续费: {} 余额: {} 游戏钱包: {}",
                 userId, amount, fee, r.balance(), r.gameBalance());
     }
@@ -236,7 +293,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         if (r == null) {
             throw new BizException(ErrorCode.GAME_BALANCE_NOT_ENOUGH);
         }
-        insertTransferLog(userId, WalletTransfer.TO_BALANCE, amount, fee);
         log.info("用户{}划转 游戏→余额: {} 手续费: {} 余额: {} 游戏钱包: {}",
                 userId, amount, fee, r.balance(), r.gameBalance());
     }
@@ -246,15 +302,6 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
             throw new BizException(ErrorCode.WALLET_TRANSFER_INVALID);
         }
         return amount.multiply(TRANSFER_FEE_RATE).setScale(2, RoundingMode.HALF_UP);
-    }
-
-    private void insertTransferLog(Long userId, String direction, BigDecimal amount, BigDecimal fee) {
-        WalletTransfer transfer = new WalletTransfer();
-        transfer.setUserId(userId);
-        transfer.setDirection(direction);
-        transfer.setAmount(amount);
-        transfer.setFee(fee);
-        walletTransferMapper.insert(transfer);
     }
 
 }

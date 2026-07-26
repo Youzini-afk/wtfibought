@@ -259,8 +259,7 @@ class UserLedgerRealRunTest {
 
     /**
      * 切面的根本保证：业务代码一行没改、一个注解没加，钱动了账就自动落地。
-     * 语义此刻全是 UNKNOWN（Task 7 才补标注），但"不漏"必须现在就成立——
-     * 漏了的账事后补不回来，语义漏了还能靠 remark 里的调用方类名回溯。
+     * 这里刻意不标注，走的是"没标注→UNKNOWN 兜底"那条路，验的是"不漏"而不是语义。
      */
     @Test
     void 无标注也落账且不变量成立() {
@@ -269,7 +268,8 @@ class UserLedgerRealRunTest {
         userMapper.atomicUpdateBalance(uid, new BigDecimal("-300.00"));
         userMapper.atomicUpdateBalance(uid, new BigDecimal("50.00"));
 
-        // 账本累加 == 当前余额减初始余额（初始那笔由 Task 8 补记，这里的测试用户没有）
+        // 账本累加 == 当前余额减建号余额。本类的测试用户是直接 INSERT 造的、没走建号入口，
+        // 所以没有那条 INITIAL_GRANT（真建号路径的不变量由 LedgerProxyRealRunTest 验）
         BigDecimal sum = ledgerMapper.sumDeltaByWallet(uid, "BALANCE");
         assertThat(sum).isEqualByComparingTo("-250.00");
         assertThat(userMapper.selectById(uid).getBalance()).isEqualByComparingTo("750.00");
@@ -336,7 +336,7 @@ class UserLedgerRealRunTest {
         assertThat(rows).hasSize(17);
 
         User u = userMapper.selectById(uid);
-        // BALANCE 起始是 1000 不是 0（初始那笔 INITIAL_GRANT 由 Task 8 补记），所以减掉起始值再比
+        // BALANCE 起始是 1000 不是 0（本类用户直接 INSERT 造的，没有 INITIAL_GRANT），所以减掉起始值再比
         assertThat(ledgerMapper.sumDeltaByWallet(uid, "BALANCE"))
                 .isEqualByComparingTo(u.getBalance().subtract(new BigDecimal("1000.00")));
         // 另外四个钱包起始都是 0，账本累加应当直接等于 user 表当前值

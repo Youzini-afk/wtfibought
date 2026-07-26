@@ -1,5 +1,6 @@
 package com.mawai.wiibsim.ledger;
 
+import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.type.filter.TypeFilter;
@@ -10,6 +11,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -79,6 +81,27 @@ class LedgerPlacementTest {
                 .toList();
 
         assertThat(bad).as("@Ledger 标在了非 Spring bean 上").isEmpty();
+    }
+
+    /**
+     * 第二个 pointcut 用的是通配 {@code atomicDeductFundingFee*}，将来给 FuturesPositionMapper
+     * 加第三个同前缀方法，它会<b>自动</b>落进切点：调用点若没配 markPositionFee，切面只打一行 WARN
+     * 就静默跳过，钱扣了账没记。第一个 pointcut 有 {@code LedgerRowMapping.HANDLED_METHODS}
+     * 那道反射守卫兜着，这条补上对应的那道，两边标准别不一致。
+     * <p>
+     * 用相等而不是包含：少了=方法被删/改名（切点跟着失效），多了=有人加了同前缀方法，
+     * 两个方向都得报，报了就去 doChargeFundingFeeOne 那儿确认新调用点有没有 markPositionFee。
+     */
+    @Test
+    void 新增同前缀的扣保证金方法必须显式过一遍切点约定() {
+        Set<String> matched = java.util.Arrays.stream(FuturesPositionMapper.class.getDeclaredMethods())
+                .map(Method::getName)
+                .filter(name -> name.startsWith("atomicDeductFundingFee"))
+                .collect(java.util.stream.Collectors.toSet());
+
+        assertThat(matched)
+                .as("落进 positionMarginMutation() 切点的方法集变了：每个都必须有调用点的 markPositionFee")
+                .isEqualTo(Set.of("atomicDeductFundingFee", "atomicDeductFundingFeePartial"));
     }
 
     /** 扫全包的具体类，收集所有带 @Ledger 的声明方法 */

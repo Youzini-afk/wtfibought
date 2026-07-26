@@ -1,20 +1,18 @@
 package com.mawai.wiibsim.service.impl;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.dto.FuturesAddMarginRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.entity.UserLedger;
-import com.mawai.wiibcommon.entity.WalletTransfer;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.enums.LedgerBizType;
 import com.mawai.wiibcommon.enums.LedgerWallet;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
+import com.mawai.wiibsim.controller.InternalFuturesTradeController;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
-import com.mawai.wiibsim.mapper.WalletTransferMapper;
 import com.mawai.wiibsim.service.UserService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +25,7 @@ import org.springframework.transaction.interceptor.TransactionAttributeSource;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,8 +33,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * {@code @Ledger} 真跑验收：注解到底有没有生效；外加 protected 方法上的 {@code @Transactional} 到底
- * 有没有事务边界（后两条用例）。
+ * {@code @Ledger} 真跑验收：注解到底有没有生效；protected 方法上的 {@code @Transactional} 到底
+ * 有没有事务边界；以及<b>切面射程外那几条路径</b>（建号 INSERT、爆仓/破产恢复的整体覆写 UPDATE、
+ * 资金费扣仓位保证金）补记得对不对——那几条全靠业务代码显式记，漏了不报错、事后补不回来。
  * <p>
  * 单测和 LedgerPlacementTest 都只能证明"注解没标在明显拦不到的位置"，证不了"真的拦到了"。
  * 而项目里 28 处标注有 14 处落在 <b>protected + SpringUtils.getAopProxy(this).doXxx()</b> 这个形态上
@@ -69,13 +69,19 @@ class LedgerProxyRealRunTest {
     private CryptoOrderServiceImpl cryptoOrderServiceImpl;
 
     @Autowired
-    private WalletTransferMapper walletTransferMapper;
-
-    @Autowired
     private FuturesPositionMapper positionMapper;
 
     @Autowired
     private FuturesTradingServiceImpl futuresTradingServiceImpl;
+
+    @Autowired
+    private FuturesSettlementServiceImpl futuresSettlementServiceImpl;
+
+    @Autowired
+    private BankruptcyServiceImpl bankruptcyServiceImpl;
+
+    @Autowired
+    private InternalFuturesTradeController internalFuturesTradeController;
 
     @Autowired
     private TransactionAttributeSource transactionAttributeSource;
@@ -102,15 +108,19 @@ class LedgerProxyRealRunTest {
      * 连的是所有者的真实开发库：测试用户会爬进排行榜，跑完必须按 id 清干净。
      * <p>
      * 这几张表都<b>没有 FK</b>，删 user 不会带走它们，得逐张点名：
-     * user_ledger（切面每笔都插）、wallet_transfer（transferToGame 自己插的日志）、
-     * futures_position（事务验证用例造的仓位）。加新用例前先想清楚它会往哪张表落行。
+     * user_ledger（切面每笔都插）、futures_position（事务验证与资金费用例造的仓位）。
+     * 加新用例前先想清楚它会往哪张表落行。
+     * <p>
+     * 刻意<b>不</b>摘 Redis 触发索引：本类的仓位都是直接 INSERT 造的、从没 registerPositionIndex 过，
+     * 而资金费用例走到的 updateLiquidationPrice 只在 zScore 已有该 member 时才 zAdd
+     * （见 FuturesPositionIndexServiceImpl），所以压根没有索引可留。真去调 unregisterAll 反而会挂：
+     * 那批 executePipelined + (StringRedisConnection) 强转在 Spring Boot 4 下抛 ClassCastException，
+     * 是迁移遗留的独立 bug（启动日志"重建futures ZSet索引 成功=0 失败=N"就是它），与账本无关。
      */
     @AfterEach
     void 清掉本次建的测试数据() {
         createdPositionIds.forEach(positionMapper::deleteById);
         createdPositionIds.clear();
-        createdUserIds.forEach(uid -> walletTransferMapper.delete(
-                new LambdaQueryWrapper<WalletTransfer>().eq(WalletTransfer::getUserId, uid)));
         createdUserIds.forEach(ledgerMapper::deleteByUserId);
         createdUserIds.forEach(userMapper::deleteById);
         createdUserIds.clear();
@@ -307,13 +317,17 @@ class LedgerProxyRealRunTest {
 
     /** 造一张逐仓 OPEN 仓位，字段只填 NOT NULL 的那些 */
     private Long newIsolatedPosition(Long userId, String symbol, BigDecimal margin) {
+        return newIsolatedPosition(userId, symbol, margin, new BigDecimal("0.10"));
+    }
+
+    private Long newIsolatedPosition(Long userId, String symbol, BigDecimal margin, BigDecimal quantity) {
         FuturesPosition p = new FuturesPosition();
         p.setUserId(userId);
         p.setSymbol(symbol);
         p.setSide("LONG");
         p.setMarginMode(FuturesPosition.ISOLATED);
         p.setLeverage(10);
-        p.setQuantity(new BigDecimal("0.10"));
+        p.setQuantity(quantity);
         p.setEntryPrice(new BigDecimal("20000.00"));
         p.setMargin(margin);
         p.setFundingFeeTotal(BigDecimal.ZERO);
@@ -321,5 +335,183 @@ class LedgerProxyRealRunTest {
         positionMapper.insert(p);
         createdPositionIds.add(p.getId());
         return p.getId();
+    }
+
+    // ==================== 切面射程外的三条路径：建号 / 爆仓 / 破产恢复 ====================
+
+    /**
+     * 建号是 INSERT（balance 直接是列值），不穿任何 atomic* 方法，切面根本看不见——
+     * 不显式补 INITIAL_GRANT，每个新用户开局就是 SUM(delta)=0 而 balance=10000，不变量当场破。
+     * <p>
+     * 打的是真入口 {@code /internal/futures/ensure-account}（量化机器人建号），不是直接调
+     * recordInitialGrant：后者只能证明那个方法自己没写错，证不了建号路径真的调了它。
+     * 另两个建号入口（OAuth 首登、邀请码注册）调的是同一个 recordInitialGrant，
+     * 但都得先过 StpUtil.login（非 Web 上下文起不来），真跑不了，只能靠代码审查。
+     */
+    @Test
+    void 新建账户落库后不变量立即成立() {
+        String username = "ledger-test-" + System.nanoTime();
+        BigDecimal initial = new BigDecimal("12345.00");
+
+        var body = internalFuturesTradeController.ensureAccount(username, initial).getData();
+        Long uid = (Long) body.get("userId");
+        createdUserIds.add(uid);
+
+        // 就一条 INITIAL_GRANT，delta 和 balanceAfter 都是建号那一刻的余额
+        List<UserLedger> rows = ledgerMapper.selectByCursor(uid, null, null, 10);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().getBizType()).isEqualTo(LedgerBizType.INITIAL_GRANT);
+        assertThat(rows.getFirst().getWallet()).isEqualTo(LedgerWallet.BALANCE);
+        assertThat(rows.getFirst().getBalanceAfter()).isEqualByComparingTo(initial);
+
+        assertBalanceInvariant(uid);
+    }
+
+    /**
+     * 爆仓把五个钱包整体覆写成 0，SQL 名字不叫 atomic*、也拿不到旧值，切面双重抓不到。
+     * 靠 selectByIdForUpdate 读快照后逐钱包补记 −旧值，清零后不变量必须仍成立（两边都是 0）。
+     * <p>
+     * 刻意先把四个钱包都垫成非 0 再爆：只垫余额的话，漏记 FROZEN/GAME/借款那几条也照样绿。
+     * 用 bankruptNow 而不是 checkAndLiquidateAll——后者扫全库，会顺手爆掉所有者的真实账号。
+     */
+    @Test
+    void 爆仓清零后各钱包不变量仍成立() {
+        Long uid = newUserWithGrant("10000.00");
+        LocalDate today = LocalDate.now();
+
+        // 垫场：五个钱包全弄成非 0，且互不相同，漏记哪条哪条红
+        assertThat(userMapper.atomicFreezeBalance(uid, new BigDecimal("400.00"))).isNotNull();
+        assertThat(userMapper.atomicUpdateGameBalance(uid, new BigDecimal("300.00"))).isNotNull();
+        assertThat(userMapper.atomicAddMarginLoanPrincipal(uid, new BigDecimal("500.00"))).isNotNull();
+        assertThat(userMapper.atomicAccrueInterest(uid, new BigDecimal("30.00"), today)).isNotNull();
+        assertAllWalletInvariants(uid);   // 爆仓前先确认起点是平的，否则下面绿了也说明不了问题
+
+        bankruptcyServiceImpl.bankruptNow(uid);
+
+        User after = userMapper.selectById(uid);
+        assertThat(after.getIsBankrupt()).isTrue();
+        assertThat(after.getBalance()).isEqualByComparingTo("0");
+        assertAllWalletInvariants(uid);
+
+        // 光看求和不够：得确认真是"爆仓清零"这几条把账抹平的，而不是恰好凑对了数
+        assertThat(ledgerMapper.selectByCursor(uid, LedgerBizType.BANKRUPT_CLEAR.name(), null, 10))
+                .as("五个钱包都非 0，清零就该记五条")
+                .hasSize(5);
+    }
+
+    /**
+     * 破产恢复：balance 被整体覆写成初始资金，delta 是"目标值 − 快照旧值"而不是初始资金本身。
+     * 恢复要求 bankrupt_reset_date <= today，所以 today 传爆仓时算出来的那个恢复日。
+     * 走 getAopProxy(resetUser) 而不是 resetBankruptUsers——后者扫全库，会恢复所有者的真实破产账号。
+     */
+    @Test
+    void 破产恢复后不变量仍成立() {
+        Long uid = newUserWithGrant("10000.00");
+        bankruptcyServiceImpl.bankruptNow(uid);
+        LocalDate resetDate = userMapper.selectById(uid).getBankruptResetDate();
+
+        SpringUtils.getAopProxy(bankruptcyServiceImpl).resetUser(uid, resetDate);
+
+        User after = userMapper.selectById(uid);
+        assertThat(after.getIsBankrupt()).isFalse();
+        assertThat(after.getBalance()).isGreaterThan(BigDecimal.ZERO);   // 恢复到配置的初始资金
+        assertAllWalletInvariants(uid);
+        assertThat(ledgerMapper.selectByCursor(uid, LedgerBizType.BANKRUPT_RESET.name(), null, 10))
+                .as("清零后只有 balance 从 0 变回初始资金，就一条")
+                .hasSize(1);
+    }
+
+    /**
+     * 资金费在余额扣不动时直接吃仓位保证金——这笔钱不穿 user 表，由第二个 pointcut
+     * （FuturesPositionMapper.atomicDeductFundingFee*）记账，userId 与扣款额靠调用点的
+     * markPositionFee 带进来。切面若没织上或调用点漏标，这里一条流水都没有。
+     * <p>
+     * 余额刻意给 0：支付方三级兜底的第一级 atomicUpdateBalance 必然返 null，才会掉到扣保证金那级。
+     * 断言写成"delta == 实际少掉的保证金、balanceAfter == 库里当前保证金"这种相对式，
+     * 是因为 notional 用的是 Redis 里的实时 mark 价，费额不可预知；数量取 0.001 让费远小于保证金，
+     * 稳定走"够扣"那一级（价格得涨到 5 亿才会掉到扣光那级）。
+     */
+    @Test
+    void 资金费扣保证金走第二个切点记账() {
+        Long uid = newUser("0.00");
+        Long posId = newIsolatedPosition(uid, "BTCUSDT", new BigDecimal("5000.00"), new BigDecimal("0.00100000"));
+        BigDecimal marginBefore = positionMapper.selectById(posId).getMargin();
+
+        // 正费率 + LONG = 本仓应付；protected 方法同包可见，经代理调进来才有 @Ledger/@Transactional
+        SpringUtils.getAopProxy(futuresSettlementServiceImpl)
+                .doChargeFundingFeeOne(posId, new BigDecimal("0.0100"));
+
+        BigDecimal marginAfter = positionMapper.selectById(posId).getMargin();
+        assertThat(marginAfter).as("保证金必须真被扣了，否则本用例什么都没验到").isLessThan(marginBefore);
+
+        List<UserLedger> rows = ledgerMapper.selectByCursor(uid, null, null, 10);
+        assertThat(rows).hasSize(1);
+        UserLedger row = rows.getFirst();
+        assertThat(row.getWallet()).isEqualTo(LedgerWallet.POSITION_MARGIN);
+        assertThat(row.getBizType()).isEqualTo(LedgerBizType.FUNDING_FEE_FROM_MARGIN);
+        assertThat(row.getDelta()).isEqualByComparingTo(marginAfter.subtract(marginBefore));
+        // balanceAfter 取自同条 UPDATE 的 RETURNING margin，不是事后补查也不是写死的 0
+        assertThat(row.getBalanceAfter()).isEqualByComparingTo(marginAfter);
+        assertThat(row.getRefType()).isEqualTo("POSITION");
+        assertThat(row.getRefId()).isEqualTo(posId);
+        assertThat(row.getSymbol()).isEqualTo("BTCUSDT");
+    }
+
+    /**
+     * 第三级兜底"保证金也不够、直接扣光"：那条 SQL 是整体覆写（SET margin = 0），扣款额只能从
+     * <b>锁内快照</b>来。断言 delta 恰等于建仓时那 0.01，就是在钉死"记的是 selectMarginForUpdate
+     * 读到的真实保证金"而不是 611 行那个无锁快照，也不是恒为 0 的 RETURNING 值。
+     * <p>
+     * 保证金给 0.01：资金费按 mark 价算最少也有 0.20（价格取不到会退回开仓价 20000 × 0.001 × 1%），
+     * 必然扣不动、掉到这一级。checkLiquidation 只有这一级返 true，用它钉住分支——
+     * 万一价格离谱到费还不够 0.01，那条断言会红而不是悄悄测成"够扣"那级。
+     */
+    @Test
+    void 资金费扣光保证金记的是锁内真实扣款额() {
+        Long uid = newUser("0.00");
+        Long posId = newIsolatedPosition(uid, "BTCUSDT", new BigDecimal("0.01"), new BigDecimal("0.00100000"));
+
+        var result = SpringUtils.getAopProxy(futuresSettlementServiceImpl)
+                .doChargeFundingFeeOne(posId, new BigDecimal("0.0100"));
+
+        assertThat(result.checkLiquidation())
+                .as("checkLiquidation=true 只可能来自'扣光'那一级，false 说明走成了'够扣'、本用例没测到东西")
+                .isTrue();
+        assertThat(positionMapper.selectById(posId).getMargin()).isEqualByComparingTo("0");
+
+        List<UserLedger> rows = ledgerMapper.selectByCursor(uid, null, null, 10);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().getBizType()).isEqualTo(LedgerBizType.FUNDING_FEE_FROM_MARGIN);
+        assertThat(rows.getFirst().getDelta())
+                .as("扣款额必须是锁内读到的真实保证金 0.01，不是那笔算出来的资金费、也不是 0")
+                .isEqualByComparingTo("-0.01");
+        assertThat(rows.getFirst().getBalanceAfter()).isEqualByComparingTo("0");
+    }
+
+    /** 建号入口造的用户：直接 INSERT + 补一条 INITIAL_GRANT，起点就满足不变量 */
+    private Long newUserWithGrant(String balance) {
+        Long uid = newUser(balance);
+        userService.recordInitialGrant(uid, new BigDecimal(balance));
+        return uid;
+    }
+
+    /** 五个钱包逐个对不变量：SUM(delta) == user 表当列值（POSITION_MARGIN 不参与，见 LedgerWallet 注释） */
+    private void assertAllWalletInvariants(Long uid) {
+        User u = userMapper.selectById(uid);
+        assertWallet(uid, LedgerWallet.BALANCE, u.getBalance());
+        assertWallet(uid, LedgerWallet.FROZEN, u.getFrozenBalance());
+        assertWallet(uid, LedgerWallet.GAME, u.getGameBalance());
+        assertWallet(uid, LedgerWallet.LOAN_PRINCIPAL, u.getMarginLoanPrincipal());
+        assertWallet(uid, LedgerWallet.LOAN_INTEREST, u.getMarginInterestAccrued());
+    }
+
+    private void assertBalanceInvariant(Long uid) {
+        assertWallet(uid, LedgerWallet.BALANCE, userMapper.selectById(uid).getBalance());
+    }
+
+    private void assertWallet(Long uid, LedgerWallet wallet, BigDecimal expected) {
+        assertThat(ledgerMapper.sumDeltaByWallet(uid, wallet.name()))
+                .as("钱包 %s 的 SUM(delta) 必须等于 user 表当列值", wallet)
+                .isEqualByComparingTo(expected == null ? BigDecimal.ZERO : expected);
     }
 }

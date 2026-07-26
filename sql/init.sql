@@ -71,24 +71,9 @@ COMMENT ON COLUMN invite_code.max_uses IS '最大可用次数';
 COMMENT ON COLUMN invite_code.used_count IS '已用次数（注册时原子+1，防并发超用）';
 COMMENT ON COLUMN invite_code.enabled IS '是否可用（作废置 FALSE）';
 
--- ============================================
--- 1c. 钱包划转流水表（余额钱包 ↔ 游戏钱包）
--- ============================================
-CREATE TABLE IF NOT EXISTS wallet_transfer (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL,
-    direction VARCHAR(12) NOT NULL,
-    amount DECIMAL(18,2) NOT NULL,
-    fee DECIMAL(18,2) NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-COMMENT ON TABLE wallet_transfer IS '钱包划转流水（审计用）';
-COMMENT ON COLUMN wallet_transfer.direction IS '方向：TO_GAME=余额→游戏 TO_BALANCE=游戏→余额';
-COMMENT ON COLUMN wallet_transfer.amount IS '划转金额（恒为正，转出方全额扣）';
-COMMENT ON COLUMN wallet_transfer.fee IS '手续费（1%，到账=amount-fee，费即销毁）';
-
-CREATE INDEX IF NOT EXISTS idx_wt_user ON wallet_transfer(user_id, created_at DESC);
+-- 1c. 钱包划转流水表 wallet_transfer 已删：职责被 user_ledger 完全覆盖
+--     （划转记 WALLET_TRANSFER_OUT/IN 两条，差额即销毁的手续费）。旧库执行：
+--     DROP TABLE IF EXISTS wallet_transfer;
 
 -- ============================================
 -- 13. 每日Buff表
@@ -799,6 +784,10 @@ CREATE INDEX IF NOT EXISTS idx_notif_unread ON notification(user_id, is_read, cr
 -- 禁言（评论区管理用）。重置账户刻意不清此列，否则被禁言者可靠重置逃避处罚
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
 COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=未禁言；永久禁言存2099年。到期自动解禁，无需定时任务';
+
+--新版本删掉这两列(待执行不进入commit)
+ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;
+ALTER TABLE futures_order DROP COLUMN IF EXISTS expire_at;
 
 -- ============================================
 -- 30. 用户资金流水账本

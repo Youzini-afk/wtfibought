@@ -1,15 +1,15 @@
 package com.mawai.wiibsim.controller;
 
-import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.dto.FuturesCloseRequest;
 import com.mawai.wiibcommon.dto.FuturesOpenRequest;
 import com.mawai.wiibcommon.dto.FuturesOrderResponse;
 import com.mawai.wiibcommon.dto.FuturesPositionDTO;
+import com.mawai.wiibcommon.dto.FuturesStopLossRequest;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
-import com.mawai.wiibsim.mapper.UserMapper;
+import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
 import com.mawai.wiibsim.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -41,8 +41,8 @@ import java.util.Map;
 public class InternalFuturesTradeController {
 
     private final FuturesTradingService tradingService;
+    private final FuturesRiskService riskService;
     private final UserService userService;
-    private final UserMapper userMapper;
 
     @PostMapping("/{userId}/open")
     public Result<FuturesOrderResponse> open(@PathVariable Long userId, @RequestBody FuturesOpenRequest request) {
@@ -52,6 +52,13 @@ public class InternalFuturesTradeController {
     @PostMapping("/{userId}/close")
     public Result<FuturesOrderResponse> close(@PathVariable Long userId, @RequestBody FuturesCloseRequest request) {
         return Result.ok(tradingService.closePosition(userId, request));
+    }
+
+    /** 修改止损（quant 持仓管理：TURTLE 2R 保本等）。 */
+    @PostMapping("/{userId}/stop-loss")
+    public Result<Void> setStopLoss(@PathVariable Long userId, @RequestBody FuturesStopLossRequest request) {
+        riskService.setStopLoss(userId, request);
+        return Result.ok();
     }
 
     @PostMapping("/{userId}/cancel/{orderId}")
@@ -93,25 +100,12 @@ public class InternalFuturesTradeController {
 
     /**
      * 幂等创建量化机器人账户：username 已存在直接返回，不重复入金。
-     * 并发重复创建概率极低（quant 每策略仅首次取用时调一次），不加锁。
+     * 建号 + 补记初始资金的事务边界在 UserService 那层（同生共死，理由见该方法注释）。
      */
     @PostMapping("/ensure-account")
     public Result<Map<String, Object>> ensureAccount(@RequestParam String username,
                                                      @RequestParam BigDecimal initialBalance) {
-        User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
-                .eq(User::getUsername, username).last("LIMIT 1"));
-        if (user == null) {
-            user = new User();
-            user.setUsername(username);
-            user.setLinuxDoId("internal:" + username);   // 机器人标识，避开 OAuth 用户命名空间
-            user.setBalance(initialBalance);
-            user.setFrozenBalance(BigDecimal.ZERO);
-            user.setIsBankrupt(false);
-            user.setBankruptCount(0);
-            userMapper.insert(user);
-            log.info("[InternalFutures] 创建量化账户 username={} userId={} balance={}",
-                    username, user.getId(), initialBalance);
-        }
+        User user = userService.ensureQuantAccount(username, initialBalance);
         return Result.ok(Map.of("userId", user.getId(), "balance", user.getBalance()));
     }
 }

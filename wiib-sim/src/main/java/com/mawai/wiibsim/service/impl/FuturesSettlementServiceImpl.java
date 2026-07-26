@@ -645,8 +645,7 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
         // 支付方三级兜底：余额 → 保证金 → 保证金扣光并触发强平复核
         // 注意：这句返 null（余额不够）是正常分支，切面照样把 mark 取走丢掉、不记账，
-        // 不会泄漏到下面扣保证金那条 SQL 上。后两级扣的是仓位保证金（FuturesPositionMapper），
-        // 切面此刻只切 UserMapper，那两笔还没有账本行——连同 markPositionFee 一起在下一个任务落地。
+        // 不会泄漏到下面扣保证金那条 SQL 上。
         BigDecimal fee = transfer;
         LedgerCtx.mark(FUNDING_FEE_PAY, "POSITION", pos.getId());
         BigDecimal afterPay = userMapper.atomicUpdateBalance(pos.getUserId(), fee.negate());
@@ -656,17 +655,31 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
             return new FundingFeeChargeResult(true, false);
         }
 
-        int affected = positionMapper.atomicDeductFundingFee(pos.getId(), fee);
-        if (affected > 0) {
-            BigDecimal newMargin = pos.getMargin().subtract(fee);
+        // 后两级扣的是仓位保证金，不穿过 user 表。那条 SQL 的参数里只有 positionId，
+        // 切面既拿不到 userId 也拿不到扣款额，两者都得在这儿标进去。
+        // 注意 fee 是未舍入值而 margin 是 numeric(18,2)：极端情况（fee 第三位小数恰为 5）
+        // 账本 delta 与 balanceAfter 的差会比 1 分多/少一点，不影响不变量（POSITION_MARGIN 不参与对账）
+        LedgerCtx.markPositionFee(pos.getUserId(), pos.getId(), fee);
+        BigDecimal marginAfter = positionMapper.atomicDeductFundingFee(pos.getId(), fee);
+        if (marginAfter != null) {
             BigDecimal liqPrice = positionIndexService.calcStaticLiqPrice(pos.getSymbol(), pos.getSide(), pos.getEntryPrice(),
-                    newMargin, pos.getQuantity());
+                    marginAfter, pos.getQuantity());
             positionIndexService.updateLiquidationPrice(pos.getId(), pos.getSymbol(), pos.getSide(), liqPrice);
             return new FundingFeeChargeResult(true, false);
         }
 
-        affected = positionMapper.atomicDeductFundingFeePartial(pos.getId());
-        if (affected > 0) {
+        // 扣光那条连金额参数都没有（SET margin = 0），扣的就是当前全部保证金，同样由调用点带进来。
+        // 但不能拿 611 行那次 selectById 的 pos.getMargin()：那是无锁快照，并发追加/减少保证金后
+        // 它就不是实际扣款额了，记出来的会是"delta=旧快照 / balanceAfter=0"这种自相矛盾的行。
+        // 按项目对整体覆写的既定做法先加行锁读一次，锁住之后 UPDATE 抹掉的就是这个数。
+        // 读不到（仓位已关/已删）说明没什么可扣，直接返回——紧跟的 UPDATE 本来也一行不改
+        BigDecimal deducted = positionMapper.selectMarginForUpdate(pos.getId());
+        if (deducted == null) {
+            return new FundingFeeChargeResult(false, false);
+        }
+        LedgerCtx.markPositionFee(pos.getUserId(), pos.getId(), deducted);
+        marginAfter = positionMapper.atomicDeductFundingFeePartial(pos.getId());
+        if (marginAfter != null) {
             FuturesPosition updated = positionMapper.selectById(pos.getId());
             if (updated != null && "OPEN".equals(updated.getStatus())) {
                 BigDecimal liqPrice = positionIndexService.calcStaticLiqPrice(

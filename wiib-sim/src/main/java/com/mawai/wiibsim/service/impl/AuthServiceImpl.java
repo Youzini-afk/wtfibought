@@ -113,8 +113,14 @@ public class AuthServiceImpl implements AuthService {
                 user.setBalance(initialBalance);
                 try {
                     userService.save(user);
+                    // 建号走 INSERT，记账切面（只切 atomic* 资金方法）抓不到，必须显式补这一笔，
+                    // 否则新用户一落库就是 SUM(delta)=0 而 balance=10000
+                    userService.recordInitialGrant(user.getId(), initialBalance);
                 } catch (DuplicateKeyException e) {
-                    // 并发回调抢先创建，重查后继续登录
+                    // 本意是"并发回调抢先创建，重查后继续登录"（那一笔 INITIAL_GRANT 由抢先者记了，不重复记）。
+                    // 但在 PG 上这条恢复路径其实走不通：本方法带 @Transactional，save 撞唯一键后
+                    // 整个事务已 aborted，紧跟的 findByLinuxDoId 会直接失败——要真恢复得先开 SAVEPOINT。
+                    // 属既存问题，不在本次范围；无论走哪支都不会重复记账，故不动逻辑只把注释写准。
                     user = userService.findByLinuxDoId(linuxDoId);
                     if (user == null) throw e;
                 }
@@ -221,6 +227,8 @@ public class AuthServiceImpl implements AuthService {
         } catch (DuplicateKeyException e) {
             throw new BizException("用户名已存在");
         }
+        // 同 OAuth 首登：建号是 INSERT，切面抓不到，初始资金得自己补记
+        userService.recordInitialGrant(user.getId(), initialBalance);
         StpUtil.login(user.getId());
         log.info("邀请码注册成功: {} UserId={} inviteCodeId={}", name, user.getId(), codeId);
         return StpUtil.getTokenValue();

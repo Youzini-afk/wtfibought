@@ -4,7 +4,6 @@ import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.WalletTransferRequest;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
-import com.mawai.wiibcommon.entity.WalletTransfer;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
@@ -34,11 +33,11 @@ public class WalletController {
         if (user == null) throw new BizException(ErrorCode.USER_NOT_FOUND);
         if (Boolean.TRUE.equals(user.getIsBankrupt())) throw new BizException(ErrorCode.USER_BANKRUPT);
 
-        if (WalletTransfer.TO_GAME.equals(request.getDirection())) {
+        if (WalletTransferRequest.TO_GAME.equals(request.getDirection())) {
             // 转出=全仓池流出：转到踩维持保证金线的直接拒（转出后下个tick就爆仓，提醒解决不了）
             crossMarginService.assertOutflowAllowed(userId, request.getAmount());
             userService.transferToGame(userId, request.getAmount());
-        } else if (WalletTransfer.TO_BALANCE.equals(request.getDirection())) {
+        } else if (WalletTransferRequest.TO_BALANCE.equals(request.getDirection())) {
             userService.transferToBalance(userId, request.getAmount());
         } else {
             throw new BizException(ErrorCode.PARAM_ERROR);
@@ -59,7 +58,7 @@ public class WalletController {
                                                @RequestParam String direction,
                                                @RequestParam BigDecimal amount) {
         Map<String, Object> resp = new HashMap<>();
-        boolean outflow = WalletTransfer.TO_GAME.equals(direction);
+        boolean outflow = WalletTransferRequest.TO_GAME.equals(direction);
         if (!outflow || !crossMarginService.hasCrossPositions(userId)) {
             resp.put("restricted", false);
             resp.put("allowed", true);

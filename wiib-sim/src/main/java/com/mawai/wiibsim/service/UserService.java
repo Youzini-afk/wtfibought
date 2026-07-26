@@ -28,6 +28,21 @@ public interface UserService extends IService<User> {
     void ensureAdminUser();
 
     /**
+     * 幂等建/取量化机器人账户（username 唯一）。已存在直接返回、不重复入金；
+     * 新建时连带补记初始资金，与建号同一事务。
+     */
+    User ensureQuantAccount(String username, BigDecimal initialBalance);
+
+    /**
+     * 补记建号赠送的初始资金。建号走的是 INSERT（balance 是列值，不穿任何 atomic 方法），
+     * 记账切面抓不到——不补这一笔，用户开局账本就对不上余额。
+     * <p>
+     * <b>只给建号与账号重置路径用</b>（OAuth 首登、邀请码注册、ensureQuantAccount、AccountPurgeTx）。
+     * 它是凭空造账本行的口子，别拿去当通用入账方法——那会让不变量凭空成立。
+     */
+    void recordInitialGrant(Long userId, BigDecimal balance);
+
+    /**
      * 获取用户资产概览
      */
     UserDTO getUserPortfolio(Long userId);

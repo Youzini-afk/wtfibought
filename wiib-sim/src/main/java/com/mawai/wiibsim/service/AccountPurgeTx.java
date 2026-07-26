@@ -33,7 +33,8 @@ public class AccountPurgeTx {
     private final VideoPokerGameMapper videoPokerGameMapper;
     private final UserAssetSnapshotMapper userAssetSnapshotMapper;
     private final UserBuffMapper userBuffMapper;
-    private final WalletTransferMapper walletTransferMapper;
+    private final UserLedgerMapper userLedgerMapper;
+    private final UserService userService;
 
     @Value("${trading.initial-balance:10000}")
     BigDecimal initialBalance;
@@ -58,12 +59,15 @@ public class AccountPurgeTx {
         // 流水与快照
         userAssetSnapshotMapper.delete(eq(UserAssetSnapshot.class, UserAssetSnapshot::getUserId, userId));
         userBuffMapper.delete(eq(UserBuff.class, UserBuff::getUserId, userId));
-        walletTransferMapper.delete(eq(WalletTransfer.class, WalletTransfer::getUserId, userId));
+        userLedgerMapper.deleteByUserId(userId);   // 账本随账户一起重来
 
         userMapper.resetToInitial(userId, initialBalance);
+        // 账本刚清空、resetToInitial 又是整体覆写（切面抓不到），补一条初始资金让不变量重新成立。
+        // 这儿不需要 selectByIdForUpdate 读旧值：旧账本整张删了，新账本从这一笔起算
+        userService.recordInitialGrant(userId, initialBalance);
     }
 
-    /** 12 张表都是同一个 user_id 条件，抽掉重复的 wrapper 构造 */
+    /** 这 11 张表都是同一个 user_id 条件，抽掉重复的 wrapper 构造（账本第 12 张走自己的 deleteByUserId） */
     private static <T> LambdaQueryWrapper<T> eq(Class<T> type, SFunction<T, ?> column, long userId) {
         return new LambdaQueryWrapper<>(type).eq(column, userId);
     }
