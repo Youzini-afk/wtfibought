@@ -16,13 +16,8 @@ spring:
         version: 1.0.0
         type: SYNC
         instructions: "WhatIfIBought 量化只读工具：市场快照/脆弱度/期权IV/vol预测/regime/验证记分卡"
-    # RetryTemplate 独立装配，AiAgentRuntimeManager 手建模型时注入，仍然生效
-    retry:
-      max-attempts: 10
-      backoff:
-        initial-interval: 1000
-        multiplier: 2
-        max-interval: 30000
+    # 注：Spring AI 2.0 起弃用 spring-retry，spring.ai.retry.* 已无人读取（原配置在此，误以为仍生效）。
+    # 重试落在两处代码里：ResponsesChatModel（自研协议层）与 ResilientChatService（ReactAgent 层）
     # 关闭 OpenAI 全部6类模型自动装配（各自独立开关，只关chat其余仍会因缺api-key拒绝启动）：
     # LLM 配置唯一来源是 DB，AiAgentRuntimeManager 启动读取手建
     model:
@@ -83,12 +78,21 @@ trading:
 quant:
   analysis:
     enabled: true
+  # 研判工作台对话轨（ChatAgentFactory）
+  workbench:
+    run-model-call-limit: 12           # summarizer 单轮 ReAct 的模型调用上限，达到即提前收尾（防"查完这个又查那个"死转烧钱）
+    summarize-threshold-tokens: 32000  # 历史估算 token 超此值触发压缩：浅模型把老消息总结成一段替换原文，免得撞破模型窗口
+    summarize-keep-messages: 6         # 压缩后保留的最近消息条数（首条用户消息另外无条件保留原文）
+    # summarizer 在 BlockBeats 之外补的那一路新闻来自模型自带的联网搜索，搜到的是哪个平台随模型走
+    #（当前 grok 出的是 X）。这里配的是回答里的来源标签名，只影响 [X]/[BlockBeats+X] 怎么标；
+    # 换模型改这里，提示词不用动。留空则标 [Web]
+    news-supplement-source: X
 
 # 插拔式策略实盘信号运行时：默认关闭；启用后读取实时流并记录 LIVE 信号
 strategy:
   runtime:
     enabled: true
-    enabled-ids: FIBO,LIQFADE,SQZMOM,TURTLE   # 四策略全启，各自部署篮子见 StrategyConfig
+    enabled-ids: FIBO,LIQFADE,SQZMOM,TURTLE   # 四策略全启
     liquidation-window-minutes: 30
     liquidation-threshold-usdt: 500000
   execution:

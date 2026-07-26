@@ -2,6 +2,10 @@ package com.mawai.wiibquant.agent.chat;
 
 import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.bsc.langgraph4j.checkpoint.PostgresSaver;
+import org.bsc.langgraph4j.prebuilt.MessagesState;
+import org.bsc.langgraph4j.serializer.StateSerializer;
+import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
+import org.springframework.ai.chat.messages.Message;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -17,10 +21,24 @@ import java.sql.SQLException;
 @Configuration
 public class ChatCheckpointConfig {
 
+    /**
+     * 状态序列化器：主图、专家子图、saver 三处共用这一个，缺一处就出事。
+     * <p>
+     * 必须是 Jackson 版而非默认的 ObjectStreamStateSerializer：Spring AI 的 Message 全族
+     * 不实现 Serializable，而 CompiledGraph 每存一次 checkpoint 都先按主图的序列化器 cloneState()，
+     * 用 Java 对象流会当场 NotSerializableException。
+     */
     @Bean
-    public BaseCheckpointSaver workbenchCheckpointSaver(DataSource dataSource) throws SQLException {
+    public StateSerializer<MessagesState<Message>> workbenchStateSerializer() {
+        return new SpringAIJacksonStateSerializer<>(MessagesState::new);
+    }
+
+    @Bean
+    public BaseCheckpointSaver workbenchCheckpointSaver(
+            DataSource dataSource, StateSerializer<MessagesState<Message>> stateSerializer) throws SQLException {
         return PostgresSaver.builder()
                 .datasource(dataSource)
+                .stateSerializer(stateSerializer)
                 .createTables(true)
                 .build();
     }

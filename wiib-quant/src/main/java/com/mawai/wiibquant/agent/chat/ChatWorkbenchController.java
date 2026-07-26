@@ -1,7 +1,5 @@
 package com.mawai.wiibquant.agent.chat;
 
-import com.alibaba.fastjson2.JSON;
-import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
@@ -19,6 +17,7 @@ import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -28,7 +27,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -38,7 +36,6 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiConsumer;
 
 /**
  * 研判工作台对话入口（P4）：SSE 流式暴露 Supervisor 多 agent 调度全过程。
@@ -60,6 +57,8 @@ public class ChatWorkbenchController {
     private final ChatMemoryService chatMemoryService;
     private final ChatHistoryService chatHistoryService;
     private final BaseCheckpointSaver checkpointSaver;
+    /** 删会话时物理清 checkpoint 用（release 只做标记不删数据） */
+    private final JdbcTemplate jdbcTemplate;
     private final WorkbenchRunRegistry runRegistry;
     private final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
     /** 心跳专用：只发注释帧(微秒级)，单线程够所有会话用；虚拟线程不支持定时调度故用平台线程 */
@@ -147,8 +146,18 @@ public class ChatWorkbenchController {
         // checkpoint 是尽力清：失败只影响存储占用，不影响"列表里已删"的用户观感
         try {
             checkpointSaver.release(RunnableConfig.builder().threadId(sessionId).build());
+        } catch (IllegalStateException e) {
+            // 会话没真跑通过图就没有 lg4jthread 行，release 无处着力——属正常不是故障
+            log.debug("[Workbench] 会话无活跃 checkpoint 线程 sessionId={}", sessionId);
         } catch (Exception e) {
             log.warn("[Workbench] checkpoint 释放失败 sessionId={} msg={}", sessionId, e.toString());
+        }
+        // release 只标记 is_released，state 数据仍留库——删会话语义是真删，
+        // 按 thread_name 物理清掉（lg4jcheckpoint 有 ON DELETE CASCADE，行不存在则为无害空操作）
+        try {
+            jdbcTemplate.update("DELETE FROM lg4jthread WHERE thread_name = ?", sessionId);
+        } catch (Exception e) {
+            log.warn("[Workbench] checkpoint 物理删除失败 sessionId={} msg={}", sessionId, e.toString());
         }
         return Result.ok(null);
     }
@@ -169,103 +178,11 @@ public class ChatWorkbenchController {
         return Result.ok(null);
     }
 
-    /**
-     * 路由指令过滤：supervisor 派发专家时按协议输出裸 JSON 数组（如 ["news_agent"]），
-     * 属内部控制流不该进用户答案。按段缓冲——段首是 '[' 的段先扣住不外发，
-     * 段结束时仍是合法字符串数组即整段丢弃，否则原文补发（答案恰好以 [ 开头的场景）。
-     * <p>
-     * 分段边界靠框架每次 LLM 调用末尾的 *_FINISHED 聚合帧（见 chat 方法内说明），
-     * 不能靠节点名切换：所有 ReactAgent 的模型节点都叫 _AGENT_MODEL_，名字永远不变。
-     * 按 key(node|agent) 分桶：supervisor 一次派发多个专家时子 agent 并行跑、chunk 交错到达，
-     * 共用一个缓冲会互相污染判定状态。
-     */
-    static final class RoutingFilter {
-        /** sink(key, text)：key=node|agent，调用方按 agent 区分答案流/过程流 */
-        private final BiConsumer<String, String> sink;
-        private final Map<String, Segment> segments = new LinkedHashMap<>();
-
-        RoutingFilter(BiConsumer<String, String> sink) {
-            this.sink = sink;
-        }
-
-        void onChunk(String key, String chunk) {
-            segments.computeIfAbsent(key, Segment::new).onChunk(chunk);
-        }
-
-        /** 一次 LLM 调用结束：被扣住的段若确是路由数组即丢弃，否则补发。 */
-        void endSegment(String key) {
-            Segment segment = segments.remove(key);
-            if (segment != null) {
-                segment.end();
-            }
-        }
-
-        /** 流结束兜底：异常中断等场景可能没有对应的聚合帧，把在途段全部收尾。 */
-        void endAll() {
-            segments.values().forEach(Segment::end);
-            segments.clear();
-        }
-
-        private final class Segment {
-            private final String key;
-            private final StringBuilder buf = new StringBuilder();
-            private boolean decided = false;
-            private boolean hold = false;
-
-            Segment(String key) {
-                this.key = key;
-            }
-
-            void onChunk(String chunk) {
-                if (decided && !hold) {
-                    sink.accept(key, chunk);
-                    return;
-                }
-                buf.append(chunk);
-                if (!decided) {
-                    String lead = buf.toString().stripLeading();
-                    if (lead.isEmpty()) return;
-                    decided = true;
-                    hold = lead.charAt(0) == '[';
-                    if (!hold) {
-                        sink.accept(key, buf.toString());
-                        buf.setLength(0);
-                    }
-                }
-            }
-
-            void end() {
-                if (!buf.isEmpty() && !(hold && isRoutingArray(buf.toString()))) {
-                    sink.accept(key, buf.toString());
-                }
-                buf.setLength(0);
-            }
-        }
-
-        private static boolean isRoutingArray(String text) {
-            String t = text.trim();
-            if (!t.startsWith("[") || !t.endsWith("]")) return false;
-            try {
-                JSONArray arr = JSON.parseArray(t);
-                return arr != null && !arr.isEmpty() && arr.stream().allMatch(e -> e instanceof String);
-            } catch (Exception e) {
-                return false;
-            }
-        }
-    }
-
     private void run(SseChannel channel, long userId, String sessionId, String message) {
         // 答案流/过程流分离：专家的结论是"工作过程"（前端折叠展示、不落历史），
-        // 只有 supervisor 的汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
+        // 只有 summarizer 的汇总才是答案——否则单专家问题会"专家一遍+汇总一遍"重复输出
         StringBuilder answer = new StringBuilder();
         StringBuilder expertLog = new StringBuilder();
-        RoutingFilter filter = new RoutingFilter((key, text) -> {
-            answer.append(text);
-            channel.send("token", new JSONObject()
-                    .fluentPut("text", text)
-                    .fluentPut("agent", "supervisor")
-                    .fluentPut("role", "answer"));
-        });
         // 深研判这类工具在图内同步阻塞跑，期间通道零字节。心跳全程喂着，中间层才不会当连接死了掐断
         ScheduledFuture<?> heartbeat = heartbeatScheduler.scheduleWithFixedDelay(
                 channel::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
@@ -291,21 +208,32 @@ public class ChatWorkbenchController {
                                     event -> onExpertProgress(channel, expertLog, event))
                     .build();
 
-            graph.stream(Map.of("messages", new UserMessage(enriched)), config)
-                    .forEachAsync(output -> {
-                        if (channel.isClosed()) {
-                            return;
-                        }
-                        // 只有 supervisor 是流式的（专家走阻塞 invoke），流出的增量即答案 token
-                        if (output instanceof StreamingOutput<?> streaming) {
-                            String chunk = streaming.chunk();
-                            if (chunk != null && !chunk.isEmpty()) {
-                                // 经路由过滤外发：supervisor 的派发 JSON 数组是内部控制流，不进答案
-                                filter.onChunk(output.node(), chunk);
-                            }
-                        }
-                    }).join();
-            filter.endAll();   // 收尾：在途段若是被扣住的路由数组即丢弃，否则补发
+            // 派发轮次与已派名单每轮提问都清零：它们存在 state 里会随 checkpoint 续聊带过来，
+            // 不重置的话同一会话聊几轮后就永远达上限 / 永远"已取过数"，再也不派专家了。
+            // 必须用普通迭代消费而非 forEachAsync：后者 thenCompose 递归自链，
+            // 每个流式 chunk 叠一层栈帧，长回答（数千帧）会 StackOverflowError（真跑实证过）
+            for (var output : graph.stream(Map.of(
+                    "messages", new UserMessage(enriched),
+                    ChatAgentFactory.DISPATCH_ROUND_KEY, 0,
+                    ChatAgentFactory.DISPATCHED_KEY, List.of()), config)) {
+                // 断连后不发帧但继续消费：图要跑完落历史，前端靠 status+历史补答案
+                if (channel.isClosed()) {
+                    continue;
+                }
+                // 只有 summarizer 是流式的（专家走阻塞 invoke、router 走阻塞 call），
+                // 所以流出来的增量必然是最终答案，直接外发即可——
+                // 路由已改走 tool_call，不再有"派发指令混在文本里要过滤"这回事
+                if (output instanceof StreamingOutput<?> streaming) {
+                    String chunk = streaming.chunk();
+                    if (chunk != null && !chunk.isEmpty()) {
+                        answer.append(chunk);
+                        channel.send("token", new JSONObject()
+                                .fluentPut("text", chunk)
+                                .fluentPut("agent", "supervisor") // 前端事件契约不变
+                                .fluentPut("role", "answer"));
+                    }
+                }
+            }
 
             // HITL：本轮 agent 触发了贵操作待确认 → 弹确认卡（approve 后前端自动补发继续指令）
             approvalRegistry.drainPending(sessionId).ifPresent(pendingRequest ->
@@ -332,7 +260,10 @@ public class ChatWorkbenchController {
             if (!channel.isClosed()) {
                 channel.send("error", new JSONObject()
                         .fluentPut("message", e.getMessage() != null ? e.getMessage() : "研判失败，请重试"));
-                channel.completeWithError(e);
+                // 正常收尾而非 completeWithError：原因已随上面的 error 事件发出去了，
+                // 再把异常抛回 MVC 只会让 GlobalExceptionHandler 往 event-stream 里写 JSON，
+                // 撞 HttpMessageNotWritableException，反而把真实错误盖掉
+                channel.complete();
             }
         } finally {
             heartbeat.cancel(false);
@@ -421,11 +352,5 @@ public class ChatWorkbenchController {
             }
         }
 
-        void completeWithError(Throwable t) {
-            synchronized (writeLock) {
-                closed.set(true);
-                emitter.completeWithError(t);
-            }
-        }
     }
 }

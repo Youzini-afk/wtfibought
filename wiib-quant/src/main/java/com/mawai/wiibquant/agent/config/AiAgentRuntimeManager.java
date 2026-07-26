@@ -203,10 +203,11 @@ public class AiAgentRuntimeManager {
         }
 
         // Spring AI 2.0 起底层换成官方 OpenAI SDK，连接参数经 OpenAiSetup 建 client（照抄官方
-        // OpenAiChatAutoConfiguration 的建法）；SDK 重试给 0——重试与兜底统一由应用层承担，两层叠乘只会放大尾延迟
+        // OpenAiChatAutoConfiguration 的建法）。maxRetries=3 与 ResponsesChatModel 对齐：
+        // 阻塞路径的重试统一归模型层，ResilientChatService 只管兜底切换，避免两层叠乘放大尾延迟
         OpenAIClient openAiClient = OpenAiSetup.setupSyncClient(
                 config.getBaseUrl(), config.getApiKey(), null, null, null, null,
-                false, false, config.getModel(), null, 0, null, null,
+                false, false, config.getModel(), null, 3, null, null,
                 observationRegistry, null, List.of());
 
         OpenAiChatOptions.Builder options = OpenAiChatOptions.builder()

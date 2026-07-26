@@ -16,7 +16,9 @@ import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -27,7 +29,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code ReactAgent.builder().build(chatServiceFactory)} 允许换实现——重试/兜底放这一层，
  * 对图与节点完全透明。（原 spring-ai-alibaba 版本是 ModelInterceptor，同一套逻辑换了个挂载点。）
  * <p>
- * 流式语义（错误发生在订阅期，只能在流水线上处理）：
+ * 韧性分层（两条路径职责不同，别再往回加）：
+ * <ul>
+ *   <li><b>阻塞 execute</b>：只兜底不重试。重试归模型层——ResponsesChatModel 自带退避、
+ *       OpenAI 走 SDK 的 maxRetries；这里再来一轮就是 3×3=9 次，纯放大尾延迟</li>
+ *   <li><b>流式 streamingExecute</b>：重试在这一层。模型层的流式路径不做重试，
+ *       错误发生在订阅期只能在流水线上处理</li>
+ * </ul>
+ * 流式的两个细节：
  * <ul>
  *   <li>重试：冷流重订阅=重新发起请求；仅在尚未向下游吐出任何帧时重试（吐过帧再重订阅
  *       会让下游聚合器拼出重复文本），NonTransient（4xx 配置类错误）不重试</li>
@@ -57,14 +66,41 @@ public class ResilientChatService implements ReactAgent.ChatService {
         this.chatOptions = agentBuilder.tools().isEmpty()
                 || !(primaryModel.getOptions() instanceof ToolCallingChatOptions toolOptions)
                 ? null
-                : toolOptions.mutate().toolCallbacks(agentBuilder.tools()).build();
+                : optionsWithTools(toolOptions, agentBuilder, builder.forceFirstToolChoice);
         this.systemMessage = SystemMessage.builder()
                 .text(agentBuilder.systemMessage().orElse("You are a helpful AI Assistant answering questions."))
                 .build();
     }
 
+    /**
+     * 强制首轮工具调用的信号键，经 toolContext 捎给 {@link ResponsesChatModel}。
+     * 走 options 而不是模型构造参数：同一个 ChatModel 实例被多个 agent 共用，
+     * 只有"这个 agent 必须先拿真实数据"是 agent 自己的属性。
+     */
+    public static final String FORCE_FIRST_TOOL_CHOICE = "wiib_force_first_tool_choice";
+
+    /**
+     * 每次调用都强制用工具的信号键，给"单次结构化调用"用（如路由节点：要的就是一个 tool_call）。
+     * 与 {@link #FORCE_FIRST_TOOL_CHOICE} 的区别：后者只管首轮，因为 ReactAgent 是循环，
+     * 拿到工具结果后必须放开否则收不了尾；单次调用没有这个顾虑，且不能被"历史里有工具消息"误判成非首轮。
+     */
+    public static final String FORCE_TOOL_CHOICE = "wiib_force_tool_choice";
+
     public static Builder builder() {
         return new Builder();
+    }
+
+    private static ChatOptions optionsWithTools(ToolCallingChatOptions source,
+                                                ReactAgentBuilder<?, ?> agentBuilder, String forceFirstToolChoice) {
+        var options = source.mutate().toolCallbacks(agentBuilder.tools());
+        if (forceFirstToolChoice != null) {
+            // 没设过工具上下文时 getToolContext() 给的是 null，不是空 Map
+            Map<String, Object> context = source.getToolContext() == null
+                    ? new HashMap<>() : new HashMap<>(source.getToolContext());
+            context.put(FORCE_FIRST_TOOL_CHOICE, forceFirstToolChoice);
+            options.toolContext(context);
+        }
+        return options.build();
     }
 
     @Override
@@ -99,29 +135,23 @@ public class ResilientChatService implements ReactAgent.ChatService {
                 });
     }
 
+    /**
+     * 阻塞路径只做兜底，不重试——重试是模型层的职责（ResponsesChatModel 自带退避、
+     * OpenAI 走 SDK 的 maxRetries）。这里再来一轮会叠乘成 3×3=9 次，纯粹放大尾延迟。
+     * 流式路径相反：模型层不重试，重试全在下面的 streamingExecute 里。
+     */
     @Override
     public ChatResponse execute(List<Message> messages) {
         List<Message> withSystem = withSystem(messages);
-        RuntimeException last = null;
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            try {
-                return primaryModel.call(promptOf(withSystem, chatOptions));
-            } catch (NonTransientAiException e) {
-                last = e; // 配置类错误重试也没用，直接进兜底判断
-                break;
-            } catch (RuntimeException e) {
-                last = e;
-                if (attempt < maxAttempts) {
-                    log.warn("模型调用失败，退避重试 {}/{}: {}", attempt + 1, maxAttempts, e.toString());
-                    sleepBackoff(attempt);
-                }
+        try {
+            return primaryModel.call(promptOf(withSystem, chatOptions));
+        } catch (RuntimeException e) {
+            if (fallbackModel == null) {
+                throw e;
             }
-        }
-        if (fallbackModel != null) {
-            log.warn("主模型调用失败（已重试），切换兜底模型: {}", String.valueOf(last));
+            log.warn("主模型调用失败（模型层已重试过），切换兜底模型: {}", e.toString());
             return fallbackModel.call(promptOf(withSystem, fallbackOptions()));
         }
-        throw last;
     }
 
     private List<Message> withSystem(List<Message> messages) {
@@ -151,15 +181,6 @@ public class ResilientChatService implements ReactAgent.ChatService {
                 .build();
     }
 
-    private void sleepBackoff(int attempt) {
-        try {
-            Thread.sleep(Math.min(initialDelayMs << (attempt - 1), maxDelayMs));
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new IllegalStateException("重试退避等待被中断", e);
-        }
-    }
-
     public static class Builder {
 
         private ChatModel primaryModel;
@@ -167,6 +188,17 @@ public class ResilientChatService implements ReactAgent.ChatService {
         private int maxAttempts = 3;
         private long initialDelayMs = 500;
         private long maxDelayMs = 4000;
+        private String forceFirstToolChoice;
+
+        /**
+         * 首轮强制用工具（"required" 或具体工具名）。给"必须拿真实数据"的专家用：
+         * 模型多半自带联网/搜索等内置能力，tool_choice=auto 时会绕开挂上去的工具自己答。
+         * 只作用于首轮，拿到工具结果后恢复 auto，否则模型收不了尾。
+         */
+        public Builder forceFirstToolChoice(String forceFirstToolChoice) {
+            this.forceFirstToolChoice = forceFirstToolChoice;
+            return this;
+        }
 
         public Builder model(ChatModel primaryModel) {
             this.primaryModel = primaryModel;

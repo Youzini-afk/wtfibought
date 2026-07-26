@@ -1,0 +1,92 @@
+package com.mawai.wiibquant.agent.chat;
+
+import org.bsc.langgraph4j.RunnableConfig;
+import org.bsc.langgraph4j.streaming.StreamingOutput;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
+import java.util.stream.Collectors;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * 真跑验收（非单测）：起完整 Spring 上下文，真连 DB 配置的 LLM 代理与本地 PG/Redis，
+ * 按 Controller 同款方式驱动一轮完整对话。单测把框架 mock 掉了（mock BaseCheckpointSaver、
+ * mock ChatModel），绿了不代表链路通——框架契约边界的验证空白由本类补。
+ * <p>
+ * 会真烧 LLM token，默认跳过，显式开启才跑。跑法（项目根）：
+ * <pre>
+ * WIIB_REAL_RUN=1 mvn -o test -pl wiib-quant -DskipTests=false \
+ *   -Dtest=ChatWorkbenchRealRunTest -Dsurefire.failIfNoSpecifiedTests=false
+ * </pre>
+ * 日志看点：[Responses] 请求 tool_choice=… / toolCalls=…、[NewsTool] 预取、[Workbench] 派发轮次。
+ */
+@SpringBootTest(properties = {
+        // 只验对话链路：策略信号/实盘执行/AI 分析轨全关，测试期间不许背景任务下单写库
+        "strategy.runtime.enabled=false",
+        "strategy.execution.enabled=false",
+        "quant.analysis.enabled=false"
+})
+@EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
+class ChatWorkbenchRealRunTest {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatWorkbenchRealRunTest.class);
+
+    @Autowired
+    private ChatAgentFactory chatAgentFactory;
+
+    @Test
+    void 一轮新闻加行情提问全链路真跑() throws Exception {
+        var graph = chatAgentFactory.chatGraph();
+        String sessionId = "wb-1-realrun-" + UUID.randomUUID();
+        List<ChatAgentFactory.ExpertProgress> events = new CopyOnWriteArrayList<>();
+        StringBuilder answer = new StringBuilder();
+
+        RunnableConfig config = RunnableConfig.builder()
+                .threadId(sessionId)
+                .addMetadata(ChatAgentFactory.PROGRESS_SINK_KEY,
+                        (Consumer<ChatAgentFactory.ExpertProgress>) events::add)
+                .build();
+
+        // 输入形态与 ChatWorkbenchController.run 完全一致：问题 + 派发键清零 + 普通迭代消费
+        // （forEachAsync 递归自链，长回答栈溢出——真跑实证过）。
+        // 纯新闻问题复刻实测暴露过的病：summarizer 拿到专家清单后用自己的 X 搜索重写一遍
+        for (var output : graph.stream(Map.of(
+                "messages", new UserMessage("最近有什么重要的加密货币新闻？"),
+                ChatAgentFactory.DISPATCH_ROUND_KEY, 0,
+                ChatAgentFactory.DISPATCHED_KEY, List.of()), config)) {
+            if (output instanceof StreamingOutput<?> streaming) {
+                String chunk = streaming.chunk();
+                if (chunk != null) answer.append(chunk);
+            }
+        }
+
+        for (ChatAgentFactory.ExpertProgress e : events) {
+            log.info("[RealRun] 专家事件 agent={} phase={} text={}", e.agent(), e.phase(),
+                    e.text() == null ? null : e.text().substring(0, Math.min(2000, e.text().length())));
+        }
+        log.info("[RealRun] 最终回答（{}字）：{}", answer.length(), answer);
+
+        // 链路底线：汇总有产出；新闻问题至少派出过一个专家
+        assertThat(answer.toString()).isNotBlank();
+        Map<String, Long> starts = events.stream()
+                .filter(e -> ChatAgentFactory.ExpertProgress.START.equals(e.phase()))
+                .collect(Collectors.groupingBy(ChatAgentFactory.ExpertProgress::agent, Collectors.counting()));
+        assertThat(starts).isNotEmpty();
+        // 同一专家最多 start 一次：DISPATCHED_KEY 去重生效，回环必然收敛
+        assertThat(starts).allSatisfy((agent, count) -> assertThat(count).isLessThanOrEqualTo(1L));
+        // 输出契约：news_agent 的 BlockBeats 条目必须存活在最终回答里（标可因联网佐证升级为
+        // 合并标）——只剩补充源的标即 summarizer 丢弃专家清单自己重写了，正是要防的回归
+        assertThat(answer.toString()).containsAnyOf("[BlockBeats]", chatAgentFactory.mergedTag());
+    }
+}

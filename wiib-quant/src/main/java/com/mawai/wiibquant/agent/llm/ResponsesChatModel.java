@@ -8,6 +8,7 @@ import org.jspecify.annotations.NonNull;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.ToolResponseMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.ChatGenerationMetadata;
 import org.springframework.ai.chat.metadata.ChatResponseMetadata;
 import org.springframework.ai.chat.metadata.DefaultUsage;
@@ -33,6 +34,7 @@ import reactor.core.publisher.Mono;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * OpenAI Responses API（/v1/responses）协议的 ChatModel 实现。
@@ -84,8 +86,13 @@ public class ResponsesChatModel implements ChatModel {
                 .build();
     }
 
+    /**
+     * Spring AI 2.0 的契约方法是 getOptions()，getDefaultOptions() 已退化为它的转发别名。
+     * 覆写成旧名会命中接口默认实现（返回普通 ChatOptions 而非 ToolCallingChatOptions），
+     * ResilientChatService 构造时 instanceof 恒假 → 专家/汇总的工具全程挂不上（真跑实证过）。
+     */
     @Override
-    public ChatOptions getDefaultOptions() {
+    public ChatOptions getOptions() {
         ToolCallingChatOptions.Builder builder = ToolCallingChatOptions.builder().model(model);
         if (temperature != null) {
             builder.temperature(temperature);
@@ -343,10 +350,48 @@ public class ResponsesChatModel implements ChatModel {
                             .fluentPut("parameters", JSON.parseObject(def.inputSchema())));
                 }
                 body.put("tools", tools);
-                body.put("tool_choice", "auto");
+                // 是否强制用工具：模型自带联网/搜索等内置能力，auto 下不保证用挂上去的工具，
+                // 数据源必须可控的场景用强制兜住（代码级保证，不赌模型自觉）。两种强制语义不能混：
+                //   always —— 每次都强制。单次结构化调用用（router 要的就是一个 tool_call）
+                //   first  —— 只强制首轮。ReactAgent 循环用，拿到工具结果后必须放开才收得了尾；
+                //             判据是"最后一条用户消息之后还没有 ToolResponseMessage"。
+                //             只看这一段：summarizer 子图与主图共享 state，它用过深研判工具后
+                //             TRM 会永留会话历史，扫全历史会让之后每个专家的首轮都被误判成非首轮
+                // 没设过工具上下文时 getToolContext() 给的是 null（summarizer 就是这种）
+                Map<String, Object> toolContext = toolOptions.getToolContext();
+                Object always = toolContext == null ? null : toolContext.get(ResilientChatService.FORCE_TOOL_CHOICE);
+                Object first = toolContext == null ? null : toolContext.get(ResilientChatService.FORCE_FIRST_TOOL_CHOICE);
+                boolean firstTurn = isFirstTurn(prompt.getInstructions());
+                body.put("tool_choice", always != null ? always.toString()
+                        : (first != null && firstTurn ? first.toString() : "auto"));
             }
         }
+        // 请求侧证据日志，与响应侧 toolCalls 日志对称：排"模型不调工具"先看这——
+        // tool_choice=null 即压根没发工具定义，required/auto 则是强制与否的实据
+        JSONArray toolsOut = body.getJSONArray("tools");
+        log.info("[Responses] 请求 model={} stream={} tool_choice={} tools={}",
+                body.getString("model"), stream, body.getString("tool_choice"),
+                toolsOut == null ? List.of() : toolsOut.stream()
+                        .map(t -> ((JSONObject) t).getString("name")).toList());
         return body;
+    }
+
+    /**
+     * 首轮判定：最后一条用户消息之后没有工具回执才算首轮。
+     * 只看这一段而非全历史——summarizer 子图与主图共享 state，它用过深研判工具后
+     * ToolResponseMessage 永留会话历史，扫全历史会让之后每个专家的首轮强制全部失效。
+     */
+    static boolean isFirstTurn(List<Message> history) {
+        for (int i = history.size() - 1; i >= 0; i--) {
+            Message m = history.get(i);
+            if (m instanceof ToolResponseMessage) {
+                return false;
+            }
+            if (m instanceof UserMessage) {
+                return true;
+            }
+        }
+        return true;
     }
 
     private JSONObject messageItem(String role, String contentType, String text) {
@@ -375,6 +420,10 @@ public class ResponsesChatModel implements ChatModel {
                 }
             }
         }
+
+        // 工具是否真被调用：toolCalls 空=模型自己答的（内置搜索/记忆），没走我们挂上去的工具
+        log.info("[Responses] {} toolCalls={} 文本{}字", model,
+                toolCalls.stream().map(AssistantMessage.ToolCall::name).toList(), text.length());
 
         AssistantMessage message = AssistantMessage.builder().content(text).toolCalls(toolCalls).build();
         Generation generation = new Generation(message, ChatGenerationMetadata.builder()

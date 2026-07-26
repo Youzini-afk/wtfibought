@@ -25,6 +25,7 @@ public class NewsToolkit {
             获取最近的重要快讯列表（标题+正文+来源+时间）。快讯已是完整内容，无需再精读单篇。""")
     public String newsSearch() {
         List<NewsFlash> flashes = newsCache.getFlashes();
+        log.info("[NewsTool] news_search 被调用，BlockBeats 快讯 {} 条", flashes.size());
         if (flashes.isEmpty()) {
             JSONObject out = new JSONObject();
             out.put("available", false);

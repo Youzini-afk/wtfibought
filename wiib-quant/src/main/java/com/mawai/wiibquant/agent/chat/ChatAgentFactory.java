@@ -19,22 +19,29 @@ import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.action.NodeActionWithConfig;
 import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
+import org.bsc.langgraph4j.serializer.StateSerializer;
 import org.bsc.langgraph4j.spring.ai.agent.ReactAgent;
-import org.bsc.langgraph4j.spring.ai.serializer.jackson.SpringAIJacksonStateSerializer;
+import org.bsc.langgraph4j.state.AppenderChannel;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatModel;
+import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.ai.model.tool.ToolCallingChatOptions;
+import org.springframework.ai.tool.ToolCallback;
+import org.springframework.ai.tool.annotation.Tool;
+import org.springframework.ai.tool.annotation.ToolParam;
+import org.springframework.ai.tool.method.MethodToolCallbackProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import static org.bsc.langgraph4j.StateGraph.END;
 import static org.bsc.langgraph4j.StateGraph.START;
@@ -72,8 +79,42 @@ public class ChatAgentFactory {
     public static final String NEWS_AGENT = "news_agent";
     public static final Set<String> EXPERT_AGENTS = Set.of(MARKET_AGENT, QUANT_AGENT, NEWS_AGENT);
 
-    /** 派发名单在 state 里的键：条件边写入，专家节点读取判断"轮到我没有" */
+    /** 结束派发、转去汇总的信号值。对齐 langgraph4j 官方 how-to 的 Router.next 值域（含 FINISH） */
+    static final String FINISH = "FINISH";
+
+    /**
+     * 路由工具：只用来让模型**结构化地**表达"下一步给谁"，方法体永远不会被执行。
+     * <p>
+     * 为什么是工具而不是"让模型输出 JSON 数组再解析"：后者是我们自己发明的，四个框架没人这么做，
+     * 代价已经实测过——路由指令混在文本里会泄漏给用户（["news_agent"]["news_agent"]）、
+     * 会作为 AssistantMessage 进历史被模型照抄、解析还脆。alibaba 的 issue #4320/#4266
+     * 记录的 routing instability + infinite loops 是同一个病。
+     * 走 function calling 后参数天然结构化，且 tool_call 不进文本 token 流。
+     */
+    public static class RouterTool {
+        @Tool(name = "route", description = """
+                决定下一步。需要真实数据时给出专家名；专家数据已够、可以作答时给 ["FINISH"]。""")
+        public String route(@ToolParam(description = """
+                下一步去向：market_agent(行情/持仓/清算/期权/脆弱度)、quant_agent(波动率预测/regime/预测战绩)、
+                news_agent(加密新闻快讯)，或 ["FINISH"] 表示不再派发、直接作答。""") List<String> next) {
+            return "";
+        }
+    }
+
+    /** 路由结果在 state 里的键：router 节点写入，条件边只读它，绝不解析消息文本 */
+    static final String NEXT_KEY = "router_next";
+    /** 派发名单在 state 里的键：router 写入，专家节点读取判断"轮到我没有" */
     static final String DISPATCH_KEY = "dispatch_list";
+    /** 本轮提问已经派过的专家（累积）：同一个不再派第二次，见 {@link #route} */
+    static final String DISPATCHED_KEY = "dispatched_agents";
+    /** 派发轮次计数键：主图回环的保险丝*/
+    static final String DISPATCH_ROUND_KEY = "dispatch_round";
+    /**
+     * 派发轮次上限。ModelCallLimiter 挂在 supervisor 的工具边上，管不到主图回环
+     * （supervisor → dispatch → 专家 → join → supervisor 不过工具节点），这条路得自己数。
+     * 一轮派发拿数据 + 一轮补充足够，留 3 是余量；超了强制收尾，总比撞框架 25 次硬上限抛异常强。
+     */
+    static final int MAX_DISPATCH_ROUNDS = 3;
     /** 进度 sink 在 RunnableConfig metadata 里的键（值为 {@code Consumer<ExpertProgress>}） */
     public static final String PROGRESS_SINK_KEY = "workbench_progress_sink";
 
@@ -90,11 +131,25 @@ public class ChatAgentFactory {
         public static final String ERROR = "error";
     }
 
-    private static final String NODE_SUPERVISOR = "supervisor";
+    private static final String NODE_ROUTER = "router";
     private static final String NODE_DISPATCH = "dispatch";
     private static final String NODE_JOIN = "join";
+    private static final String NODE_SUMMARIZER = "summarizer";
     private static final String GOTO_DISPATCH = "dispatch";
-    private static final String GOTO_END = "end";
+    private static final String GOTO_SUMMARIZE = "summarize";
+
+    private static final String ROUTER_INSTRUCTION = """
+            你是研判工作台的调度器。看完对话后，用 route 工具给出下一步：
+            - 还需要真实数据 → 给专家名：market_agent(实时行情/持仓/清算/期权/脆弱度)、
+              quant_agent(波动率预测/regime/预测战绩)、news_agent(加密新闻快讯，BlockBeats 快讯源)
+            - 涉及行情、预测、新闻的问题必须先派专家取数，不要凭记忆判断
+            - 对话里已有专家返回的数据、足够回答用户了 → 给 ["FINISH"]
+            - 同一批专家已经取过数就不要重复派，改给 ["FINISH"]
+            只调用 route 工具，不要输出任何文字。""";
+
+    /** 路由工具的 callback：常量化，避免每次建图重新反射扫描 */
+    private static final List<ToolCallback> ROUTER_TOOLS = List.of(
+            MethodToolCallbackProvider.builder().toolObjects(new RouterTool()).build().getToolCallbacks());
 
     private final AiAgentRuntimeManager runtimeManager;
     private final MarketToolkit marketToolkit;
@@ -102,30 +157,54 @@ public class ChatAgentFactory {
     private final NewsToolkit newsToolkit;
     private final DeepAnalysisToolkit deepAnalysisToolkit;
     private final BaseCheckpointSaver checkpointSaver;
+    /** 与 saver 同一个实例：序列化格式不一致会导致 checkpoint 写得进读不出 */
+    private final StateSerializer<MessagesState<Message>> stateSerializer;
     private final int runModelCallLimit;
     private final int summarizeThresholdTokens;
     private final int summarizeKeepMessages;
+    /** 补充源在回答里的标签，如 [X]；源名可配，见构造参数 supplementSource 的说明 */
+    private final String supplementTag;
+    /** 两边都有的事件合并后的标签，如 [BlockBeats+X] */
+    private final String mergedTag;
 
     private volatile CompiledGraph<MessagesState<Message>> cached;
 
+    /**
+     * @param supplementSource 补充源名。BlockBeats 之外那一路是 summarizer 模型自带的联网搜索捞的，
+     *                         搜到的是哪个平台随模型走（当前 grok 出的是 X），换模型就未必还是它。
+     *                         所以提示词里一律只说"联网搜索"不点名平台，只有输出标签用这个名字——
+     *                         换源改配置一处，提示词不用动
+     */
     public ChatAgentFactory(AiAgentRuntimeManager runtimeManager,
                             MarketToolkit marketToolkit,
                             QuantForecastToolkit quantForecastToolkit,
                             NewsToolkit newsToolkit,
                             DeepAnalysisToolkit deepAnalysisToolkit,
                             BaseCheckpointSaver checkpointSaver,
+                            StateSerializer<MessagesState<Message>> stateSerializer,
                             @Value("${quant.workbench.run-model-call-limit:12}") int runModelCallLimit,
                             @Value("${quant.workbench.summarize-threshold-tokens:32000}") int summarizeThresholdTokens,
-                            @Value("${quant.workbench.summarize-keep-messages:6}") int summarizeKeepMessages) {
+                            @Value("${quant.workbench.summarize-keep-messages:6}") int summarizeKeepMessages,
+                            @Value("${quant.workbench.news-supplement-source:}") String supplementSource) {
         this.runtimeManager = runtimeManager;
         this.marketToolkit = marketToolkit;
         this.quantForecastToolkit = quantForecastToolkit;
         this.newsToolkit = newsToolkit;
         this.deepAnalysisToolkit = deepAnalysisToolkit;
         this.checkpointSaver = checkpointSaver;
+        this.stateSerializer = stateSerializer;
         this.runModelCallLimit = runModelCallLimit;
         this.summarizeThresholdTokens = summarizeThresholdTokens;
         this.summarizeKeepMessages = summarizeKeepMessages;
+        // 不配就用中性的 Web：标签总得有个名字，但代码里不该替某个平台站队
+        String source = supplementSource == null || supplementSource.isBlank() ? "Web" : supplementSource.trim();
+        this.supplementTag = "[" + source + "]";
+        this.mergedTag = "[BlockBeats+" + source + "]";
+    }
+
+    /** 合并标签（[BlockBeats+源名]）：提示词与真跑断言共用一处，改了源名断言自动跟上 */
+    public String mergedTag() {
+        return mergedTag;
     }
 
     /** 对话图单例（编译含 PostgresSaver），模型刷新事件后重建。 */
@@ -156,92 +235,111 @@ public class ChatAgentFactory {
         ChatModel fallback = runtime.chatChatModel();
 
         Map<String, CompiledGraph<MessagesState<Message>>> experts = new LinkedHashMap<>();
-        experts.put(MARKET_AGENT, expertGraph(light, marketToolkit, """
+        experts.put(MARKET_AGENT, expertGraph(light, marketToolkit, "required", """
                 你是市场状态专家。用工具获取真实数据回答，所有结论必须引用工具返回的具体数字；
-                数据不可用(available=false)时如实告知，绝不编造。回答精炼中文。"""));
-        experts.put(QUANT_AGENT, expertGraph(light, quantForecastToolkit, """
+                数据不可用(available=false)时如实告知，绝不编造。
+                只回答行情/持仓/清算/期权/脆弱度，新闻等其他领域即使知道也不要写，有对应专家负责。
+                回答精炼中文。"""));
+        experts.put(QUANT_AGENT, expertGraph(light, quantForecastToolkit, "required", """
                 你是量化预测专家。工具给的是本系统的 vol/regime 预测与实盘验证战绩。
                 本系统验证过的能力是波动幅度与风险预测；方向预测无验证优势。被问涨跌方向时
                 不要生硬拒绝——给双向波动情景 + 风险提示（幅度、regime、脆弱度），说明方向确定性低的原因。
                 被问"预测准不准"时调 scorecard 用真实战绩回答（QLIKE 越低越好，improvement>0=跑赢基准）。
+                只回答波动/风险/预测战绩，新闻等其他领域即使知道也不要写，有对应专家负责。
                 回答精炼中文，引用具体数字。"""));
-        experts.put(NEWS_AGENT, expertGraph(light, newsToolkit, """
-                你是加密新闻专家。用 news_search 拿最近重要快讯列表（已是完整内容）；
-                输出"事件+可能影响"的精炼中文摘要，标注消息源，不评价真伪不给投资建议。"""));
+        // 新闻专家只管 BlockBeats：数据走"预取"（news_search 无参数，预取 100% 保证快讯在
+        // 上下文里，不依赖模型行为；不挂 function tool——实测挂着它 auto 下还会再调一次纯浪费）。
+        // 联网补的那一路不归它：模型的服务端搜索关不掉（grok 实测所有请求参数/换模型均无效），
+        // 与其在两处禁，不如把搜索正式划给 summarizer 当职责、这里明令禁用——预取喂饱后它没有搜索动机，禁得住
+        experts.put(NEWS_AGENT, expertGraph(light, null, null, """
+                你是加密新闻专家。对话里已附上 BlockBeats 快讯原文（约20条），只基于它输出清单：
+                每条格式：[BlockBeats] + 事件一句话 + 可能影响一句话，按市场影响力从高到低排序，
+                同一事件的多条快讯合并为一条，除合并外不要删减。
+                严禁把你联网搜索到的任何内容写进回答——这部分由上游汇总者负责。
+                不评价真伪、不给投资建议。原文为空时如实说"暂无快讯"，绝不编造。输出精炼中文。"""));
 
-        StateGraph<MessagesState<Message>> graph = new StateGraph<>(MessagesState.SCHEMA, MessagesState::new);
-        graph.addNode(NODE_SUPERVISOR, supervisorGraph(deep, light, fallback));
+        // 序列化器必须显式给：默认重载装的是 Java 对象流，存 checkpoint 时 clone 不动 Spring AI Message
+        StateGraph<MessagesState<Message>> graph = new StateGraph<>(MessagesState.SCHEMA, stateSerializer);
+        graph.addNode(NODE_ROUTER, node_async(state -> route(state, light)));
         graph.addNode(NODE_DISPATCH, node_async(state -> Map.of()));
-        experts.forEach((name, expert) -> addExpertNode(graph, name, expert));
+        // 只有 news 需要预取（工具无参、必调）；market/quant 的工具要按问题选 symbol，交给模型
+        experts.forEach((name, expert) -> addExpertNode(graph, name, expert,
+                NEWS_AGENT.equals(name) ? newsToolkit::newsSearch : null));
         graph.addNode(NODE_JOIN, node_async(state -> Map.of()));
+        graph.addNode(NODE_SUMMARIZER, summarizerGraph(deep, light, fallback));
 
-        graph.addEdge(START, NODE_SUPERVISOR);
-        // supervisor 说了什么决定下一步：JSON 数组=派发，其余=最终答案
-        graph.addConditionalEdges(NODE_SUPERVISOR, edge_async(this::routeAfterSupervisor),
-                Map.of(GOTO_DISPATCH, NODE_DISPATCH, GOTO_END, END));
+        graph.addEdge(START, NODE_ROUTER);
+        // 条件边只读 router 写好的结构化结果，绝不解析消息文本（对齐官方 how-to 的 state.next()）
+        graph.addConditionalEdges(NODE_ROUTER, edge_async(ChatAgentFactory::nextFromState),
+                Map.of(GOTO_DISPATCH, NODE_DISPATCH, GOTO_SUMMARIZE, NODE_SUMMARIZER));
         // 三条同源边 → 框架内部建 ParallelNode；三条边汇聚 join 完成 fan-in
         for (String name : experts.keySet()) {
             graph.addEdge(NODE_DISPATCH, name);
             graph.addEdge(name, NODE_JOIN);
         }
-        graph.addEdge(NODE_JOIN, NODE_SUPERVISOR); // 回环：带着专家结果再让 supervisor 判断
+        graph.addEdge(NODE_JOIN, NODE_ROUTER);      // 回环：带着专家数据再判一次还要不要补数据
+        graph.addEdge(NODE_SUMMARIZER, END);
 
         return graph.compile(CompileConfig.builder().checkpointSaver(checkpointSaver).build());
     }
 
     /**
-     * 状态序列化器：checkpoint 的 state_data 列是 JSONB，必须用 Jackson 版（Java 序列化流塞不进去），
-     * 顺带 JSON 可读，线上排查能直接看 state 内容。Spring AI 的 Message 子类由该模块的 handler 认领。
+     * 专家 agent：浅模型 + 自己那套工具的 ReAct 循环。
+     *
+     * @param toolkit              可空。null=纯预取/纯模型能力的专家（如 news），不挂任何 function tool
+     * @param forceFirstToolChoice "required"=首轮强制调工具（工具带参数、数据必须模型现取的专家）；
+     *                             null=不强制
      */
-    private static SpringAIJacksonStateSerializer<MessagesState<Message>> stateSerializer() {
-        return new SpringAIJacksonStateSerializer<>(MessagesState::new);
-    }
-
-    /** 专家 agent：浅模型 + 自己那套工具的 ReAct 循环。 */
-    private CompiledGraph<MessagesState<Message>> expertGraph(ChatModel model, Object toolkit, String instruction)
+    private CompiledGraph<MessagesState<Message>> expertGraph(ChatModel model, Object toolkit,
+                                                              String forceFirstToolChoice, String instruction)
             throws Exception {
-        return ReactAgent.<MessagesState<Message>>builder()
+        ReactAgent.Builder<MessagesState<Message>> builder = ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(model)
-                .stateSerializer(stateSerializer())
-                .defaultSystem(instruction)
-                .toolsFromObject(toolkit)
-                .build(ResilientChatService.builder().model(model).asFactory())
+                .stateSerializer(stateSerializer)
+                .defaultSystem(instruction);
+        if (toolkit != null) {
+            builder.toolsFromObject(toolkit);
+        }
+        // 专家的立身之本是"用工具拿真实数据"：不强制的话模型可能用自带的内置搜索直接答，
+        // 工具一次都不调，数据源就失控了（本系统的行情/预测战绩全被绕过去）
+        return builder.build(ResilientChatService.builder().model(model)
+                        .forceFirstToolChoice(forceFirstToolChoice).asFactory())
                 .compile();
     }
 
     /**
-     * supervisor：深模型 + 深研判工具。派发协议是硬约束——完全靠 instruction 让模型输出 JSON 数组，
-     * 条件边解析不出数组就当作"已能作答"走 END。
+     * 汇总 agent：深模型 + 深研判工具，只管把专家数据写成最终回答。
+     * <p>
+     * 派谁、还要不要再派，全归 {@link #route} 那个结构化路由节点管，这里一个字都不提——
+     * 角色单一，模型不会再纠结"该作答还是该派发"（那正是之前无限循环的病根）。
      */
-    private StateGraph<MessagesState<Message>> supervisorGraph(ChatModel deep, ChatModel light, ChatModel fallback)
+    private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, ChatModel light, ChatModel fallback)
             throws Exception {
         return ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(deep)
-                .stateSerializer(stateSerializer())
+                .stateSerializer(stateSerializer)
                 .streaming(true) // 答案要逐字推给前端
                 .toolsFromObject(deepAnalysisToolkit)
                 .defaultSystem("""
-                        你是加密货币研判工作台的总调度，负责把用户问题派发给专家 agent，再汇总成最终回答。
-
-                        派发协议（严格遵守）：
-                        - 需要专家数据时，只输出一个 JSON 数组（要调用的专家名），不要输出任何其他文字。
-                          例：["market_agent"] 或 ["market_agent","news_agent"]
-                        - 可用专家：market_agent=实时行情/持仓/清算/期权/脆弱度；
-                          quant_agent=波动率预测/regime/预测战绩；news_agent=加密新闻快讯
-                          （数据源 BlockBeats 律动，凡"快讯/新闻/消息面/blockbeats/最近发生了什么"一律派它）
-                        - 涉及行情、预测、新闻的问题必须先派发拿真实数据，不要凭记忆回答
-                        - 新闻/快讯/消息面问题不要用你自带的联网/X搜索回答：这类问题的唯一正确动作是输出
-                          ["news_agent"]，由它调 BlockBeats 快讯工具（数据源可控可追溯）；
-                          自带搜索只在三位专家都覆盖不到的问题上才可使用
-                        - 专家结果已在对话里、足够回答时，输出最终精炼中文回答（此时不要再输出 JSON 数组）
-                        - 用户明确要"深度研判/全面分析"时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
-                          返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）
+                        你是加密货币研判工作台的分析师。对话里已经有专家 agent 取回的真实数据，
+                        你的职责是据此写出最终回答（新闻的联网补充也归你，见原则2）。
+                        不要提及调度、专家名或内部流程。
 
                         回答原则：
-                        1. 结论必须可追溯到专家给的数据，不编造
-                        2. 被问涨跌方向时不要生硬拒绝：本系统验证过的能力是波动与风险预测（方向预测无验证优势），
+                        1. 结论必须可追溯到专家给的数据，不编造；专家没给的数据就说没有；
+                           行情/预测数字只能引用 market/quant 专家给的，不得用你搜到的行情数字替换
+                        2. 新闻的分工（news_agent 只管 BlockBeats，联网补充归你）：对话里有 news_agent 的
+                           [BlockBeats] 清单时，用你的联网搜索再收集约20条最新加密要闻并合并——
+                           news_agent 的条目一条不丢、保留 [BlockBeats] 标；你搜到的独有条目一律标 %s 并尽量附出处；
+                           同一事件两边都有则合并为一条标 %s。按市场影响力排序取前30条，
+                           不足30就全部输出，除去重外不删减。只列真实搜到的，搜不到就只用专家清单
+                        3. 被问涨跌方向时不要生硬拒绝：本系统验证过的能力是波动与风险预测（方向预测无验证优势），
                            给"双向情景 + 当前风险画像 + 仓位/止损等风控参考"，并说明方向确定性低的原因
-                        3. 信号矛盾时大方说"看不清"，这是专业而不是失职""")
+                        4. 信号矛盾时大方说"看不清"，这是专业而不是失职
+                        5. 用户明确要"深度研判/全面分析"时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
+                           返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）
+
+                        输出精炼中文。""".formatted(supplementTag, mergedTag))
                 .addCallModelHook(wrapBefore(new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages)))
                 .addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit))
                 .build(ResilientChatService.builder()
@@ -269,23 +367,133 @@ public class ChatAgentFactory {
                 });
     }
 
-    private static Map<String, Object> mergeUpdates(Map<String, Object> compression, Map<String, Object> modelResult) {
+    /**
+     * 合并压缩与模型产出。两边都会写 messages 键，但语义相反：压缩给的是「整体替换」
+     * （{@link AppenderChannel.ReplaceAllWith}），模型给的是「追加」。直接 putAll 会让替换被追加盖掉，
+     * 压缩等于白做——state 仍是未压缩的老历史，下次调用还得重压一遍烧钱。
+     * 正解是把模型本轮的新消息接到压缩后历史的尾巴上，整体替换写回。
+     */
+    @SuppressWarnings("unchecked")
+    static Map<String, Object> mergeUpdates(Map<String, Object> compression, Map<String, Object> modelResult) {
         Map<String, Object> merged = new LinkedHashMap<>(compression);
-        merged.putAll(modelResult); // 模型产出优先：messages 键由它承载本轮新消息
+        merged.putAll(modelResult);
+        if (!(compression.get("messages") instanceof AppenderChannel.ReplaceAllWith<?>(List<?> newValues))) {
+            return merged; // 没压缩：模型产出照常追加
+        }
+        List<Message> all = new ArrayList<>((List<Message>) newValues);
+        switch (modelResult.get("messages")) {
+            case Collection<?> many -> many.forEach(m -> all.add((Message) m));
+            case Message message -> all.add(message);
+            case null, default -> { }
+        }
+        merged.put("messages", new AppenderChannel.ReplaceAllWith<>(all));
         return merged;
     }
 
-    /** 专家节点：没轮到自己就零成本返回，轮到了才真跑并推进度事件。 */
+    /**
+     * 路由节点：一次模型调用，强制用 route 工具**结构化**给出去向。
+     * <p>
+     * 产出只写 state 的 {@link #NEXT_KEY}/{@link #DISPATCH_KEY}，<b>不进 messages</b>——
+     * 路由是控制流不是对话内容。之前把它当消息塞进历史，直接导致三件事：
+     * 泄漏给用户看、被模型照抄着反复派发、解析 {@code ["a"]["a"]} 失败。
+     */
+    Map<String, Object> route(MessagesState<Message> state, ChatModel model) {
+        int round = state.<Number>value(DISPATCH_ROUND_KEY).map(Number::intValue).orElse(0);
+        if (round >= MAX_DISPATCH_ROUNDS) {
+            log.warn("[Workbench] 派发轮次达上限 {}，转汇总", MAX_DISPATCH_ROUNDS);
+            return Map.of(NEXT_KEY, FINISH);
+        }
+        List<String> next = askRouter(model, state.messages());
+        if (next.isEmpty() || next.contains(FINISH)) {
+            return Map.of(NEXT_KEY, FINISH);
+        }
+        // 同一专家不重复派：它取的数这一轮内不会变，再派一次只是空转烧钱，
+        // 而且这正是死循环的来源（模型总觉得"再查一次说不定有新东西"）。
+        // 靠代码收敛，不指望模型自觉说 FINISH
+        List<String> done = state.<List<String>>value(DISPATCHED_KEY).orElse(List.of());
+        List<String> fresh = next.stream().filter(name -> !done.contains(name)).toList();
+        if (fresh.isEmpty()) {
+            log.info("[Workbench] {} 本轮已取过数，转汇总", next);
+            return Map.of(NEXT_KEY, FINISH);
+        }
+        log.info("[Workbench] 派发 {}（第 {} 轮）", fresh, round + 1);
+        return Map.of(NEXT_KEY, GOTO_DISPATCH,
+                DISPATCH_KEY, fresh,
+                DISPATCHED_KEY, Stream.concat(done.stream(), fresh.stream()).toList(),
+                DISPATCH_ROUND_KEY, round + 1);
+    }
+
+    /** 问模型"下一步给谁"。强制走 route 工具，模型没法用自由文本糊弄过去。 */
+    private List<String> askRouter(ChatModel model, List<Message> history) {
+        List<Message> messages = new ArrayList<>(history.size() + 1);
+        messages.add(new SystemMessage(ROUTER_INSTRUCTION));
+        messages.addAll(history);
+        try {
+            ChatResponse response = model.call(new Prompt(messages, ToolCallingChatOptions.builder()
+                    .toolCallbacks(ROUTER_TOOLS)
+                    // 用"每次都强制"而非"首轮强制"：router 是单次调用，
+                    // 而 summarizer 用过工具后主图历史里就有 ToolResponseMessage，会被误判成非首轮
+                    .toolContext(Map.of(ResilientChatService.FORCE_TOOL_CHOICE, "required"))
+                    .build()));
+            return parseRouteCall(Objects.requireNonNull(response.getResult()).getOutput());
+        } catch (Exception e) {
+            // 路由失败不该把整轮对话拖死：退化成"不派发直接作答"，用户至少拿得到回复
+            log.warn("[Workbench] 路由调用失败，转汇总", e);
+            return List.of(FINISH);
+        }
+    }
+
+    /** 从 tool_call 参数里取专家名单。结构化解析，不碰自由文本。 */
+    static List<String> parseRouteCall(AssistantMessage message) {
+        for (AssistantMessage.ToolCall call : message.getToolCalls()) {
+            if (!"route".equals(call.name())) {
+                continue;
+            }
+            JSONArray next = JSON.parseObject(call.arguments()).getJSONArray("next");
+            if (next == null || next.isEmpty()) {
+                return List.of();
+            }
+            List<String> names = new ArrayList<>(next.size());
+            for (Object item : next) {
+                if (FINISH.equals(item)) {
+                    return List.of(FINISH);
+                }
+                if (item instanceof String name && EXPERT_AGENTS.contains(name)) {
+                    names.add(name);
+                }
+            }
+            return names;
+        }
+        return List.of();
+    }
+
+    /** 条件边：只读 state 里的结构化结果，读不到就保守收尾（绝不悬空）。 */
+    static String nextFromState(MessagesState<Message> state) {
+        return state.<String>value(NEXT_KEY).filter(GOTO_DISPATCH::equals).isPresent()
+                ? GOTO_DISPATCH : GOTO_SUMMARIZE;
+    }
+
+    /**
+     * 专家节点：没轮到自己就零成本返回，轮到了才真跑并推进度事件。
+     *
+     * @param preload 可空。非空则先把数据取好随消息喂进去，不指望模型自己调工具——
+     *                无参工具（如 news_search）用这种方式才能保证数据一定到位
+     */
     private void addExpertNode(StateGraph<MessagesState<Message>> graph, String name,
-                               CompiledGraph<MessagesState<Message>> expert) {
+                               CompiledGraph<MessagesState<Message>> expert, Supplier<String> preload) {
         NodeActionWithConfig<MessagesState<Message>> action = (state, config) -> {
             if (!dispatched(state, name)) {
                 return Map.of();
             }
             progress(config, new ExpertProgress(name, ExpertProgress.START, null));
             try {
+                List<Message> input = new ArrayList<>(state.messages());
+                // 包装文案保持中性：怎么用这份数据（独占还是与搜索合并）由各专家的 instruction 定
+                if (preload != null) {
+                    input.add(new UserMessage("【以下是系统预取的原始数据】\n" + preload.get()));
+                }
                 Message reply = expert
-                        .invoke(Map.of("messages", new ArrayList<>(state.messages())), subConfig(config, name))
+                        .invoke(Map.of("messages", input), subConfig(config, name))
                         .flatMap(MessagesState::lastMessage)
                         .orElse(null);
                 String text = reply == null ? "" : reply.getText();
@@ -323,45 +531,4 @@ public class ChatAgentFactory {
         return state.<List<String>>value(DISPATCH_KEY).orElse(List.of()).contains(name);
     }
 
-    /**
-     * 路由判定：supervisor 最后一句是合法的专家名 JSON 数组就派发，否则视为最终答案结束本轮。
-     * 派发名单写进 state 供专家节点自检——条件边只能选一个目标，选不了"并行哪几个"。
-     */
-    private String routeAfterSupervisor(MessagesState<Message> state) {
-        List<String> names = parseDispatch(state.lastMessage().map(Message::getText).orElse(null));
-        if (names.isEmpty()) {
-            return GOTO_END;
-        }
-        // AgentState 无 setter，派发名单借 data() 就地写入——本图单线程推进，无并发风险
-        state.data().put(DISPATCH_KEY, names);
-        log.info("[Workbench] supervisor 派发 {}", names);
-        return GOTO_DISPATCH;
-    }
-
-    /** 解析派发数组；任何解析不出合法专家名的情况都返回空列表（=不派发）。 */
-    static List<String> parseDispatch(String text) {
-        if (text == null || text.isBlank()) {
-            return List.of();
-        }
-        String trimmed = text.trim();
-        if (!trimmed.startsWith("[") || !trimmed.endsWith("]")) {
-            return List.of();
-        }
-        try {
-            JSONArray array = JSON.parseArray(trimmed);
-            if (array == null || array.isEmpty()) {
-                return List.of();
-            }
-            List<String> names = new ArrayList<>(array.size());
-            for (Object item : array) {
-                if (!(item instanceof String name) || !EXPERT_AGENTS.contains(name)) {
-                    return List.of(); // 混入未知名字视为整体无效，宁可当答案也不乱派
-                }
-                names.add(name);
-            }
-            return names;
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
 }

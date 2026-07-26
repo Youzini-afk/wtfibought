@@ -17,6 +17,11 @@ class VerificationTaskTest {
     private final NarrativeVerificationService narrativeService = mock(NarrativeVerificationService.class);
     private final VerificationTask task = new VerificationTask(volService, narrativeService);
 
+    {
+        // @Value 字段纯单测拿不到默认值（boolean 停在 false 把门挡死），手动拨到生产默认 true
+        org.springframework.test.util.ReflectionTestUtils.setField(task, "analysisEnabled", true);
+    }
+
     @Test
     void barCloseTriggersBothTracksImmediately() {
         task.onKlineClosed(new KlineClosedEvent(this, "btcusdt", "5m", 123L));
