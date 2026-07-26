@@ -799,3 +799,34 @@ CREATE INDEX IF NOT EXISTS idx_notif_unread ON notification(user_id, is_read, cr
 -- 禁言（评论区管理用）。重置账户刻意不清此列，否则被禁言者可靠重置逃避处罚
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
 COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=未禁言；永久禁言存2099年。到期自动解禁，无需定时任务';
+
+-- ============================================
+-- 30. 用户资金流水账本
+-- ============================================
+CREATE TABLE IF NOT EXISTS user_ledger (
+    id            BIGSERIAL PRIMARY KEY,
+    user_id       BIGINT NOT NULL,
+    wallet        VARCHAR(32) NOT NULL,
+    biz_type      VARCHAR(32) NOT NULL,
+    delta         DECIMAL(18,2) NOT NULL,
+    balance_after DECIMAL(18,2) NOT NULL,
+    fee           DECIMAL(18,2),
+    ref_type      VARCHAR(16),
+    ref_id        BIGINT,
+    symbol        VARCHAR(32),
+    remark        VARCHAR(128),
+    created_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+COMMENT ON TABLE user_ledger IS '用户资金流水账本';
+COMMENT ON COLUMN user_ledger.wallet IS '钱包：BALANCE/FROZEN/GAME/LOAN_PRINCIPAL/LOAN_INTEREST/POSITION_MARGIN';
+COMMENT ON COLUMN user_ledger.biz_type IS '业务类型，见 LedgerBizType 枚举';
+COMMENT ON COLUMN user_ledger.delta IS '变动额，有符号，正入负出';
+COMMENT ON COLUMN user_ledger.balance_after IS '该钱包变动后余额，取自同条 UPDATE 的 RETURNING，不重查';
+COMMENT ON COLUMN user_ledger.fee IS 'delta 中含的手续费；仅费与本金同条 SQL 时用（现货买卖、划转）。纯注释字段，不参与求和校验';
+COMMENT ON COLUMN user_ledger.ref_id IS '关联单号，账单可点进对应订单';
+
+-- 账单分页：按用户倒序翻页
+CREATE INDEX IF NOT EXISTS idx_ledger_user_time ON user_ledger(user_id, id DESC);
+-- 按类型筛选
+CREATE INDEX IF NOT EXISTS idx_ledger_user_biz ON user_ledger(user_id, biz_type, id DESC);

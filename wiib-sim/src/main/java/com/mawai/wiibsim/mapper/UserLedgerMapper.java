@@ -1,0 +1,42 @@
+package com.mawai.wiibsim.mapper;
+
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.mawai.wiibcommon.entity.UserLedger;
+import org.apache.ibatis.annotations.Delete;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@Mapper
+public interface UserLedgerMapper extends BaseMapper<UserLedger> {
+
+    /** 不变量校验：某钱包全部流水累加，应等于 user 表当前该列的值 */
+    @Select("SELECT COALESCE(SUM(delta), 0) FROM user_ledger WHERE user_id = #{userId} AND wallet = #{wallet}")
+    BigDecimal sumDeltaByWallet(@Param("userId") Long userId, @Param("wallet") String wallet);
+
+    /** 账号重置用：账本随账户一起清空，之后补一条 INITIAL_GRANT */
+    @Delete("DELETE FROM user_ledger WHERE user_id = #{userId}")
+    int deleteByUserId(@Param("userId") Long userId);
+
+    /**
+     * 账单分页（游标翻页，吃 idx_ledger_user_time）。
+     * beforeId 传 null 取最新一页；bizType 传 null 不筛类型。
+     */
+    @Select("""
+            <script>
+            SELECT * FROM user_ledger
+            WHERE user_id = #{userId}
+            <if test="bizType != null"> AND biz_type = #{bizType} </if>
+            <if test="beforeId != null"> AND id &lt; #{beforeId} </if>
+            ORDER BY id DESC
+            LIMIT #{limit}
+            </script>
+            """)
+    List<UserLedger> selectByCursor(@Param("userId") Long userId,
+                                    @Param("bizType") String bizType,
+                                    @Param("beforeId") Long beforeId,
+                                    @Param("limit") int limit);
+}
