@@ -11,13 +11,11 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.bsc.langgraph4j.RunnableConfig;
-import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.bsc.langgraph4j.streaming.StreamingOutput;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -56,9 +54,7 @@ public class ChatWorkbenchController {
     private final ApprovalRegistry approvalRegistry;
     private final ChatMemoryService chatMemoryService;
     private final ChatHistoryService chatHistoryService;
-    private final BaseCheckpointSaver checkpointSaver;
-    /** 删会话时物理清 checkpoint 用（release 只做标记不删数据） */
-    private final JdbcTemplate jdbcTemplate;
+    private final WorkbenchCheckpointStore checkpointStore;
     private final WorkbenchRunRegistry runRegistry;
     private final ExecutorService streamExecutor = Executors.newVirtualThreadPerTaskExecutor();
     /** 心跳专用：只发注释帧(微秒级)，单线程够所有会话用；虚拟线程不支持定时调度故用平台线程 */
@@ -143,22 +139,8 @@ public class ChatWorkbenchController {
             return Result.fail("会话不存在或无权限");
         }
         chatHistoryService.deleteSession(sessionId);
-        // checkpoint 是尽力清：失败只影响存储占用，不影响"列表里已删"的用户观感
-        try {
-            checkpointSaver.release(RunnableConfig.builder().threadId(sessionId).build());
-        } catch (IllegalStateException e) {
-            // 会话没真跑通过图就没有 lg4jthread 行，release 无处着力——属正常不是故障
-            log.debug("[Workbench] 会话无活跃 checkpoint 线程 sessionId={}", sessionId);
-        } catch (Exception e) {
-            log.warn("[Workbench] checkpoint 释放失败 sessionId={} msg={}", sessionId, e.toString());
-        }
-        // release 只标记 is_released，state 数据仍留库——删会话语义是真删，
-        // 按 thread_name 物理清掉（lg4jcheckpoint 有 ON DELETE CASCADE，行不存在则为无害空操作）
-        try {
-            jdbcTemplate.update("DELETE FROM lg4jthread WHERE thread_name = ?", sessionId);
-        } catch (Exception e) {
-            log.warn("[Workbench] checkpoint 物理删除失败 sessionId={} msg={}", sessionId, e.toString());
-        }
+        // 展示记录与续聊上下文是两套存储，删会话得都清
+        checkpointStore.purge(sessionId);
         return Result.ok(null);
     }
 

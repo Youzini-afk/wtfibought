@@ -1,6 +1,8 @@
 package com.mawai.wiibquant.agent.chat;
 
 import com.mawai.wiibcommon.constant.QuantConstants;
+import com.mawai.wiibcommon.dto.WorkbenchMemoryEntry;
+import com.mawai.wiibquant.mapper.WorkbenchMemoryMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -19,7 +21,7 @@ public class ChatMemoryService {
     private static final int SUMMARY_MAX = 200;
     private static final int RECALL_LIMIT = 5;
 
-    private final WorkbenchMemoryStore store;
+    private final WorkbenchMemoryMapper memoryMapper;
 
     /** 对话完成后规则化提取写入（异步调用方保证不阻塞 SSE 收尾）。 */
     public void remember(long userId, String question, String answer) {
@@ -29,7 +31,7 @@ public class ChatMemoryService {
                 continue;
             }
             try {
-                store.remember(userId, symbol, truncate(question), truncate(answer));
+                memoryMapper.upsert(userId, symbol, truncate(question), truncate(answer));
             } catch (Exception e) {
                 // 记忆是增益不是主链，失败只记日志；单个 symbol 失败不影响其余
                 log.warn("[Memory] 写入失败 userId={} symbol={}", userId, symbol, e);
@@ -39,9 +41,9 @@ public class ChatMemoryService {
 
     /** 召回：拼成注入对话的前缀段；无记忆返回空串。 */
     public String recall(long userId) {
-        List<WorkbenchMemoryStore.Entry> entries;
+        List<WorkbenchMemoryEntry> entries;
         try {
-            entries = store.recall(userId, RECALL_LIMIT);
+            entries = memoryMapper.selectRecent(userId, RECALL_LIMIT);
         } catch (Exception e) {
             log.warn("[Memory] 召回失败 userId={}", userId, e);
             return "";
@@ -50,10 +52,10 @@ public class ChatMemoryService {
             return "";
         }
         StringBuilder sb = new StringBuilder("【用户历史偏好（跨会话记忆）】\n");
-        for (WorkbenchMemoryStore.Entry entry : entries) {
-            sb.append("- ").append(entry.symbol()).append(" 关注").append(entry.hitCount()).append("次");
-            if (entry.lastQuestion() != null) {
-                sb.append("，上次问：").append(entry.lastQuestion());
+        for (WorkbenchMemoryEntry entry : entries) {
+            sb.append("- ").append(entry.getSymbol()).append(" 关注").append(entry.getHitCount()).append("次");
+            if (entry.getLastQuestion() != null) {
+                sb.append("，上次问：").append(entry.getLastQuestion());
             }
             sb.append("\n");
         }

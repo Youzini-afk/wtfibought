@@ -1,10 +1,14 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.mawai.wiibcommon.entity.WorkbenchChatMessage;
+import com.mawai.wiibquant.mapper.WorkbenchChatMessageMapper;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import javax.sql.DataSource;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 
 /**
@@ -14,27 +18,12 @@ import java.util.List;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ChatHistoryService {
 
     private static final int TITLE_MAX = 40;
 
-    private final JdbcTemplate jdbc;
-
-    public ChatHistoryService(DataSource dataSource) {
-        this.jdbc = new JdbcTemplate(dataSource);
-        // 启动幂等自建表（与 WorkbenchMemoryStore/PostgresSaver 同哲学，免手工跑 DDL；init.sql 同步留档）
-        jdbc.execute("""
-                CREATE TABLE IF NOT EXISTS workbench_chat_message (
-                    id          BIGSERIAL PRIMARY KEY,
-                    session_id  VARCHAR(80) NOT NULL,
-                    user_id     BIGINT NOT NULL,
-                    role        VARCHAR(10) NOT NULL,
-                    content     TEXT NOT NULL,
-                    created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )""");
-        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id)");
-        jdbc.execute("CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC)");
-    }
+    private final WorkbenchChatMessageMapper messageMapper;
 
     /** 会话摘要：标题=首条用户消息截断。 */
     public record SessionSummary(String sessionId, String title, int messageCount, long lastAt) {}
@@ -45,51 +34,55 @@ public class ChatHistoryService {
     public void append(String sessionId, long userId, String role, String content) {
         if (content == null || content.isBlank()) return;
         try {
-            jdbc.update("INSERT INTO workbench_chat_message (session_id, user_id, role, content) VALUES (?, ?, ?, ?)",
-                    sessionId, userId, role, content);
+            WorkbenchChatMessage row = new WorkbenchChatMessage();
+            row.setSessionId(sessionId);
+            row.setUserId(userId);
+            row.setRole(role);
+            row.setContent(content);
+            // createdAt 由全局 MetaObjectHandler 填，不手塞
+            messageMapper.insert(row);
         } catch (Exception e) {
             log.warn("[ChatHistory] 写入失败 sessionId={}", sessionId, e);
         }
     }
 
-    /** 我的会话列表，按最后活跃倒序。 */
+    /** 我的会话列表，按最后活跃倒序。标题在这截——省略号规则属展示逻辑，不进 SQL。 */
     public List<SessionSummary> sessions(long userId, int limit) {
-        return jdbc.query("""
-                        SELECT m.session_id,
-                               (SELECT f.content FROM workbench_chat_message f
-                                 WHERE f.session_id = m.session_id AND f.role = 'user'
-                                 ORDER BY f.id LIMIT 1) AS title,
-                               COUNT(*) AS cnt,
-                               MAX(m.created_at) AS last_at
-                          FROM workbench_chat_message m
-                         WHERE m.user_id = ?
-                         GROUP BY m.session_id
-                         ORDER BY last_at DESC
-                         LIMIT ?""",
-                (rs, i) -> new SessionSummary(
-                        rs.getString("session_id"),
-                        truncate(rs.getString("title")),
-                        rs.getInt("cnt"),
-                        rs.getTimestamp("last_at").getTime()),
-                userId, limit);
+        return messageMapper.selectSessions(userId, limit).stream()
+                .map(row -> new SessionSummary(
+                        row.getSessionId(),
+                        truncate(row.getTitle()),
+                        row.getMessageCount(),
+                        toEpochMillis(row.getLastAt())))
+                .toList();
     }
 
     /** 删除整个会话的展示记录，调用方已做归属校验。 */
     public void deleteSession(String sessionId) {
-        jdbc.update("DELETE FROM workbench_chat_message WHERE session_id = ?", sessionId);
+        messageMapper.delete(new LambdaQueryWrapper<WorkbenchChatMessage>()
+                .eq(WorkbenchChatMessage::getSessionId, sessionId));
     }
 
-    /** 单会话全部消息（升序），调用方已做归属校验。 */
+    /** 单会话全部消息（按 id 升序＝发生顺序），调用方已做归属校验。 */
     public List<ChatMessage> messages(String sessionId) {
-        return jdbc.query("""
-                        SELECT role, content, created_at FROM workbench_chat_message
-                         WHERE session_id = ? ORDER BY id""",
-                (rs, i) -> new ChatMessage(rs.getString(1), rs.getString(2), rs.getTimestamp(3).getTime()),
-                sessionId);
+        return messageMapper.selectList(new LambdaQueryWrapper<WorkbenchChatMessage>()
+                        .eq(WorkbenchChatMessage::getSessionId, sessionId)
+                        .orderByAsc(WorkbenchChatMessage::getId))
+                .stream()
+                .map(row -> new ChatMessage(row.getRole(), row.getContent(), toEpochMillis(row.getCreatedAt())))
+                .toList();
     }
 
     private static String truncate(String s) {
         if (s == null || s.isBlank()) return "（无标题）";
         return s.length() > TITLE_MAX ? s.substring(0, TITLE_MAX) + "…" : s;
+    }
+
+    /**
+     * 前端契约是毫秒时间戳。列是不带时区的 timestamp，按本机时区还原成 epoch——
+     * 这跟原先 {@code ResultSet.getTimestamp().getTime()} 的口径完全一致（JDBC 也是按 JVM 默认时区解释钟面时间）。
+     */
+    private static long toEpochMillis(LocalDateTime time) {
+        return time.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 }

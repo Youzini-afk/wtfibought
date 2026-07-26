@@ -1,5 +1,7 @@
 package com.mawai.wiibquant.agent.chat;
 
+import com.mawai.wiibcommon.dto.WorkbenchMemoryEntry;
+import com.mawai.wiibquant.mapper.WorkbenchMemoryMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -16,49 +18,45 @@ import static org.mockito.Mockito.when;
 
 class ChatMemoryServiceTest {
 
-    private final WorkbenchMemoryStore store = mock(WorkbenchMemoryStore.class);
-    private final ChatMemoryService service = new ChatMemoryService(store);
+    private final WorkbenchMemoryMapper memoryMapper = mock(WorkbenchMemoryMapper.class);
+    private final ChatMemoryService service = new ChatMemoryService(memoryMapper);
 
     @Test
-    void rememberExtractsMentionedSymbol() throws Exception {
+    void rememberExtractsMentionedSymbol() {
         service.remember(1L, "BTC 现在脆弱度怎么样", "脆弱度61，偏高");
 
         // 计数自增交给 SQL upsert（原子，无先读后写竞态），这里只验证提取到了正确的 symbol
-        verify(store).remember(eq(1L), eq("BTCUSDT"), eq("BTC 现在脆弱度怎么样"), eq("脆弱度61，偏高"));
+        verify(memoryMapper).upsert(eq(1L), eq("BTCUSDT"), eq("BTC 现在脆弱度怎么样"), eq("脆弱度61，偏高"));
     }
 
     @Test
-    void rememberMatchesSymbolCaseInsensitively() throws Exception {
+    void rememberMatchesSymbolCaseInsensitively() {
         service.remember(1L, "btc 波动预测", "H6 预计 120bps");
 
-        verify(store).remember(eq(1L), eq("BTCUSDT"), anyString(), anyString());
+        verify(memoryMapper).upsert(eq(1L), eq("BTCUSDT"), anyString(), anyString());
     }
 
     @Test
-    void rememberSkipsWhenNoWatchSymbolMentioned() throws Exception {
+    void rememberSkipsWhenNoWatchSymbolMentioned() {
         service.remember(1L, "今天天气如何", "不知道");
 
-        verify(store, never()).remember(anyLong(), anyString(), anyString(), anyString());
+        verify(memoryMapper, never()).upsert(anyLong(), anyString(), anyString(), anyString());
     }
 
     @Test
-    void rememberDegradesOnStoreFailure() throws Exception {
-        doThrowOnRemember();
+    void rememberDegradesOnStoreFailure() {
+        when(memoryMapper.upsert(anyLong(), anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("db down"));
 
         service.remember(1L, "BTC 现在怎么样", "还行"); // 记忆是增益不是主链，不该往上抛
 
-        verify(store).remember(anyLong(), anyString(), anyString(), anyString());
-    }
-
-    private void doThrowOnRemember() throws Exception {
-        org.mockito.Mockito.doThrow(new RuntimeException("db down"))
-                .when(store).remember(anyLong(), anyString(), anyString(), anyString());
+        verify(memoryMapper).upsert(anyLong(), anyString(), anyString(), anyString());
     }
 
     @Test
-    void recallBuildsMemoryPrefix() throws Exception {
-        when(store.recall(anyLong(), anyInt()))
-                .thenReturn(List.of(new WorkbenchMemoryStore.Entry("BTCUSDT", 5L, "脆弱度怎么样")));
+    void recallBuildsMemoryPrefix() {
+        when(memoryMapper.selectRecent(anyLong(), anyInt()))
+                .thenReturn(List.of(entry("BTCUSDT", 5L, "脆弱度怎么样")));
 
         String memory = service.recall(1L);
 
@@ -66,16 +64,24 @@ class ChatMemoryServiceTest {
     }
 
     @Test
-    void recallReturnsEmptyWhenNoMemory() throws Exception {
-        when(store.recall(anyLong(), anyInt())).thenReturn(List.of());
+    void recallReturnsEmptyWhenNoMemory() {
+        when(memoryMapper.selectRecent(anyLong(), anyInt())).thenReturn(List.of());
 
         assertThat(service.recall(1L)).isEmpty();
     }
 
     @Test
-    void recallDegradesToEmptyOnFailure() throws Exception {
-        when(store.recall(anyLong(), anyInt())).thenThrow(new RuntimeException("db down"));
+    void recallDegradesToEmptyOnFailure() {
+        when(memoryMapper.selectRecent(anyLong(), anyInt())).thenThrow(new RuntimeException("db down"));
 
         assertThat(service.recall(1L)).isEmpty();
+    }
+
+    private static WorkbenchMemoryEntry entry(String symbol, long hitCount, String lastQuestion) {
+        WorkbenchMemoryEntry e = new WorkbenchMemoryEntry();
+        e.setSymbol(symbol);
+        e.setHitCount(hitCount);
+        e.setLastQuestion(lastQuestion);
+        return e;
     }
 }

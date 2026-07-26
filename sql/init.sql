@@ -692,7 +692,7 @@ COMMENT ON TABLE quant_narrative_verification IS '叙事对账:Judge三情景概
 COMMENT ON COLUMN quant_narrative_verification.range_cut_bps IS '实际情景判定界=挂靠快照H12腿lowCut(90天|收益|下三分位,基率≈1/3均分),PIT禁止重算';
 COMMENT ON COLUMN quant_narrative_verification.status IS 'VERIFIED=已对账/SKIPPED=不可对账(缺档界或情景损坏或K线缺口超宽限)';
 
--- ============ workbench_chat_message：工作台对话历史（展示用；续聊上下文走 graphcheckpoint） ============
+-- ============ workbench_chat_message：工作台对话历史（展示用；续聊上下文走 langgraph4j 的 lg4j* 表） ============
 CREATE TABLE IF NOT EXISTS workbench_chat_message (
     id          BIGSERIAL PRIMARY KEY,
     session_id  VARCHAR(80) NOT NULL,
@@ -703,7 +703,22 @@ CREATE TABLE IF NOT EXISTS workbench_chat_message (
 );
 CREATE INDEX IF NOT EXISTS idx_wb_chat_session ON workbench_chat_message (session_id, id);
 CREATE INDEX IF NOT EXISTS idx_wb_chat_user ON workbench_chat_message (user_id, id DESC);
-COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,quant启动时幂等自建(ChatHistoryService)';
+COMMENT ON TABLE workbench_chat_message IS '工作台对话历史(展示用):user/assistant按会话落库,session_id与lg4jthread.thread_name同值';
+
+-- ============ workbench_memory：工作台跨会话长期记忆（规则化写入，不烧 LLM） ============
+-- 每用户最多 WATCH_SYMBOLS 条，召回只按 user_id 走主键前缀，量小不另建索引
+CREATE TABLE IF NOT EXISTS workbench_memory (
+    user_id             BIGINT      NOT NULL,
+    symbol              VARCHAR(32) NOT NULL,
+    hit_count           BIGINT      NOT NULL DEFAULT 1,
+    last_question       TEXT,
+    last_answer_summary TEXT,
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, symbol)
+);
+COMMENT ON TABLE workbench_memory IS '工作台跨会话记忆:用户关注过哪些symbol及次数,召回后拼进对话prompt前缀';
+COMMENT ON COLUMN workbench_memory.hit_count IS '关注次数,由 ON CONFLICT DO UPDATE 原子自增,避免先读后写丢计数';
+COMMENT ON COLUMN workbench_memory.last_answer_summary IS '只进库不出库:留作排查用,召回时不查此列';
 
 -- ============================================
 -- 27. 留言板评论（全站唯一，无附着实体）
