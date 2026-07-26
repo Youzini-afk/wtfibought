@@ -33,19 +33,27 @@ public class User {
     /** 注册用的邀请码ID（可追溯，OAuth用户为空） */
     private Long inviteCodeId;
 
-    /** 余额钱包（交易：现货/B股/合约/杠杆，也是全仓保证金池） */
+    /** 余额钱包（交易：现货/B股/合约/杠杆，也是全仓保证金池）。
+        updateStrategy=NEVER：资金字段禁止随实体更新——否则 updateById 会把读取时刻的旧值
+        整行写回，覆盖掉期间发生的交易（AuthServiceImpl 登录更新资料时踩过）。
+        资金只能走 UserMapper 的原子方法。 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal balance;
 
     /** 冻结余额（限价买单冻结的资金，属余额钱包） */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal frozenBalance;
 
     /** 游戏钱包（Mines/扑克/21点/预测市场，与全仓风险隔离） */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal gameBalance;
 
     /** 杠杆借款本金 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal marginLoanPrincipal;
 
     /** 杠杆应计利息（未支付） */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal marginInterestAccrued;
 
     /** 杠杆计息上次日期（用于补记） */
