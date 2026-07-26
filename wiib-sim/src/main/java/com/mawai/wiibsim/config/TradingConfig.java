@@ -39,9 +39,6 @@ public class TradingConfig {
     /** 合约taker手续费率（默认0.04%，市价/强平成交） */
     private BigDecimal futuresTakerCommissionRate = new BigDecimal("0.0004");
 
-    /** 限价单最长有效期（小时） */
-    private int limitOrderMaxHours = 24;
-
     /** 杠杆/融资配置 */
     private Margin margin = new Margin();
 
@@ -72,15 +69,6 @@ public class TradingConfig {
         private BigDecimal balanceTolerance = new BigDecimal("0.05");
         /** 仓位操作分布式锁超时时间（秒） */
         private int lockTimeoutSeconds = 30;
-    }
-
-    /** 限价单并发处理配置 */
-    private LimitOrderProcessing limitOrderProcessing = new LimitOrderProcessing();
-
-    @Data
-    public static class LimitOrderProcessing {
-        /** 最大并发处理订单数（建议设为数据库连接池的一半） */
-        private int maxConcurrency = 50;
     }
 
     /** 是否启用交易时段限制 */

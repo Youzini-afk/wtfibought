@@ -8,8 +8,6 @@ public interface FuturesSettlementService {
 
     void recoverLimitOrders(String symbol, BigDecimal periodLow, BigDecimal periodHigh);
 
-    void expireLimitOrders();
-
     void executeTriggeredOrders();
 
     void chargeFundingFeeAll();

@@ -136,7 +136,6 @@ final class FuturesHelper {
         resp.setCommission(order.getCommission());
         resp.setRealizedPnl(order.getRealizedPnl());
         resp.setStatus(order.getStatus());
-        resp.setExpireAt(order.getExpireAt());
         resp.setCreatedAt(order.getCreatedAt());
         return resp;
     }

@@ -31,7 +31,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -315,8 +314,6 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             if (affected == 0) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
         }
 
-        LocalDateTime expireAt = LocalDateTime.now().plusHours(tradingConfig.getLimitOrderMaxHours());
-
         FuturesOrder order = new FuturesOrder();
         order.setUserId(userId);
         order.setSymbol(request.getSymbol());
@@ -329,7 +326,6 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         order.setFrozenAmount(frozenAmount);
         order.setCommission(commission);
         order.setStatus("PENDING");
-        order.setExpireAt(expireAt);
 
         String side = request.getSide();
         order.setStopLosses(buildStopLosses(request.getStopLosses(), side, limitPrice, quantity));
@@ -482,7 +478,6 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             throw new BizException(ErrorCode.FUTURES_INVALID_QUANTITY);
         }
 
-        LocalDateTime expireAt = LocalDateTime.now().plusHours(tradingConfig.getLimitOrderMaxHours());
         String orderSide = "LONG".equals(position.getSide()) ? "CLOSE_LONG" : "CLOSE_SHORT";
         boolean isTaker = isLimitTaker(orderSide, limitPrice, markPrice);
         BigDecimal closeValue = limitPrice.multiply(closeQty).setScale(2, RoundingMode.HALF_UP);
@@ -500,7 +495,6 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         order.setLimitPrice(limitPrice);
         order.setCommission(commission);
         order.setStatus("PENDING");
-        order.setExpireAt(expireAt);
         orderMapper.insert(order);
 
         addToLimitZSet(order, cacheService);

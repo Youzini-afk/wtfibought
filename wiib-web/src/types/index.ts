@@ -209,7 +209,6 @@ export interface CryptoOrder {
   triggerPrice?: number;
   triggeredAt?: string;
   status: string;
-  expireAt?: string;
   createdAt: string;
 }
 
@@ -364,7 +363,6 @@ export interface FuturesOrder {
   commission?: number;
   realizedPnl?: number;
   status: string;
-  expireAt?: string;
   createdAt: string;
   isAiTrader?: boolean;
 }

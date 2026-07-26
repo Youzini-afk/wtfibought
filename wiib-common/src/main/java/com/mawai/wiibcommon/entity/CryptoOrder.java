@@ -44,13 +44,11 @@ public class CryptoOrder {
 
     private LocalDateTime triggeredAt;
 
-    /** PENDING/TRIGGERED/FILLED/CANCELLED/EXPIRED */
+    /** PENDING/TRIGGERED/FILLED/CANCELLED */
     private String status;
 
     /** 折扣率（如95表示95折，null无折扣） */
     private BigDecimal discountPercent;
-
-    private LocalDateTime expireAt;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

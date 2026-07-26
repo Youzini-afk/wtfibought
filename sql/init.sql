@@ -212,7 +212,6 @@ CREATE TABLE IF NOT EXISTS crypto_order (
     triggered_at TIMESTAMP,
     status VARCHAR(20) NOT NULL,
     discount_percent DECIMAL(5,2),
-    expire_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -231,13 +230,11 @@ COMMENT ON COLUMN crypto_order.filled_amount IS '成交金额';
 COMMENT ON COLUMN crypto_order.commission IS '手续费';
 COMMENT ON COLUMN crypto_order.trigger_price IS '触发价格';
 COMMENT ON COLUMN crypto_order.triggered_at IS '触发时间';
-COMMENT ON COLUMN crypto_order.status IS 'PENDING/TRIGGERED/FILLED/CANCELLED/EXPIRED';
-COMMENT ON COLUMN crypto_order.expire_at IS '过期时间';
+COMMENT ON COLUMN crypto_order.status IS 'PENDING/TRIGGERED/FILLED/CANCELLED';
 
 CREATE INDEX IF NOT EXISTS idx_crypto_order_user ON crypto_order(user_id);
 CREATE INDEX IF NOT EXISTS idx_crypto_order_status ON crypto_order(status, order_type);
 CREATE INDEX IF NOT EXISTS idx_crypto_order_symbol ON crypto_order(symbol, status);
-CREATE INDEX IF NOT EXISTS idx_crypto_order_expire ON crypto_order(expire_at);
 
 -- ============================================
 -- 17. 矿工游戏记录表
@@ -340,7 +337,6 @@ CREATE TABLE IF NOT EXISTS futures_order (
     stop_losses JSONB,
     take_profits JSONB,
     status VARCHAR(20) NOT NULL,
-    expire_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -363,8 +359,7 @@ COMMENT ON COLUMN futures_order.commission IS '手续费';
 COMMENT ON COLUMN futures_order.realized_pnl IS '已实现盈亏';
 COMMENT ON COLUMN futures_order.stop_losses IS '止损列表(JSONB)';
 COMMENT ON COLUMN futures_order.take_profits IS '止盈列表(JSONB)';
-COMMENT ON COLUMN futures_order.status IS '状态：PENDING/TRIGGERED/FILLED/CANCELLED/EXPIRED/LIQUIDATED';
-COMMENT ON COLUMN futures_order.expire_at IS '过期时间';
+COMMENT ON COLUMN futures_order.status IS '状态：PENDING/TRIGGERED/FILLED/CANCELLED/LIQUIDATED';
 
 CREATE INDEX IF NOT EXISTS idx_fo_user ON futures_order(user_id);
 CREATE INDEX IF NOT EXISTS idx_fo_position ON futures_order(position_id);

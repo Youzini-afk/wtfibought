@@ -97,12 +97,17 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             CompletableFuture<?>[] cfs = users.stream()
                     .map(user -> CompletableFuture.runAsync(() -> {
+                        // acquire 单独一段：没拿到许可就退出，绝不能落进下面的 finally——
+                        // 那样 release 会凭空多发一个许可，并发数就突破限流了
                         try {
                             semaphore.acquire();
-                            snapshotMapper.upsert(computeSnapshot(user, yesterday, cryptoPriceMap, sets));
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             log.warn("快照用户{}被中断: {}", user.getId(), e.getMessage());
+                            return;
+                        }
+                        try {
+                            snapshotMapper.upsert(computeSnapshot(user, yesterday, cryptoPriceMap, sets));
                         } catch (Exception e) {
                             log.warn("快照用户{}失败: {}", user.getId(), e.getMessage(), e);
                         } finally {
@@ -194,12 +199,16 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
             CompletableFuture<?>[] cfs = users.stream()
                     .map(user -> CompletableFuture.runAsync(() -> {
+                        // 同 snapshotAll：acquire 失败必须直接 return，不能走到 release
                         try {
                             semaphore.acquire();
-                            snapshots.put(user.getId(), computeSnapshot(user, date, cryptoPriceMap, sets));
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             log.warn("实时快照用户{}被中断: {}", user.getId(), e.getMessage());
+                            return;
+                        }
+                        try {
+                            snapshots.put(user.getId(), computeSnapshot(user, date, cryptoPriceMap, sets));
                         } catch (Exception e) {
                             log.warn("实时快照用户{}失败: {}", user.getId(), e.getMessage(), e);
                         } finally {

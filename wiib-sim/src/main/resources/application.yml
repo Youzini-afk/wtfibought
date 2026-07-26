@@ -71,12 +71,7 @@ trading:
   # 手续费率（0.05%）
   commission-rate: 0.0005
   # 市价单滑点保护（±2%）
-  # 限价单最长有效期（小时）
-  limit-order-max-hours: 24
   # 乐观锁最大重试次数
-  # 限价单并发处理配置
-  limit-order-processing:
-    max-concurrency: 15
   # 是否启用交易时段限制（游戏模式可关闭）
   trading-hours-enabled: true
   # 交易时段（仅当trading-hours-enabled=true时生效）

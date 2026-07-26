@@ -22,6 +22,5 @@ public class CryptoOrderResponse {
     private LocalDateTime triggeredAt;
     private String status;
     private BigDecimal discountPercent;
-    private LocalDateTime expireAt;
     private LocalDateTime createdAt;
 }

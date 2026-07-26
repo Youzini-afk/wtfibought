@@ -381,7 +381,7 @@ public class SimExecutionService implements StrategyExecutionPort {
                 log.info("[SimExec] 限价成交 {}:{} posId={} fill={}", strategyId, symbol,
                         order.getPositionId(), order.getFilledPrice());
             }
-            case "CANCELLED", "EXPIRED" -> {
+            case "CANCELLED" -> {
                 log.info("[SimExec] LIMIT 终态={} {}:{} 回FLAT", status, strategyId, symbol);
                 st.reset();
             }

@@ -22,10 +22,6 @@ public interface CryptoOrderService extends IService<CryptoOrder> {
     /** 执行已触发的限价单 */
     void  executeTriggeredOrders();
 
-    /** 过期限价单处理 */
-    void expireLimitOrders();
-
-
     /** WS价格到达时检查限价单（事件驱动） */
     void onPriceUpdate(String symbol, BigDecimal price);
 

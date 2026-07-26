@@ -43,7 +43,6 @@ const STATUS_MAP: Record<string, { label: string; variant: 'default' | 'secondar
   SETTLING: { label: '结算中', variant: 'warning' },
   FILLED: { label: '已成交', variant: 'success' },
   CANCELLED: { label: '已取消', variant: 'secondary' },
-  EXPIRED: { label: '已过期', variant: 'secondary' },
   LIQUIDATED: { label: '已强平', variant: 'destructive' },
   STOP_LOSS: { label: '已止损', variant: 'warning' },
   TAKE_PROFIT: { label: '已止盈', variant: 'success' },

@@ -33,12 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.*;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.TimeUnit;
 
 import static com.mawai.wiibsim.service.impl.FuturesHelper.*;
 
@@ -482,56 +477,6 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
             Thread.startVirtualThread(() -> triggerLimitOrder(Long.parseLong(Objects.requireNonNull(tuple.getValue())), limitPrice));
         }
         return hits.size();
-    }
-
-    // ==================== 过期限价单处理 ====================
-
-    @Override
-    public void expireLimitOrders() {
-        List<FuturesOrder> expiredOrders = orderMapper.selectList(new LambdaQueryWrapper<FuturesOrder>()
-                .eq(FuturesOrder::getStatus, "PENDING")
-                .eq(FuturesOrder::getOrderType, "LIMIT")
-                .lt(FuturesOrder::getExpireAt, LocalDateTime.now()));
-        if (expiredOrders.isEmpty()) return;
-
-        int maxConcurrency = tradingConfig.getLimitOrderProcessing().getMaxConcurrency();
-        Semaphore semaphore = new Semaphore(maxConcurrency);
-
-        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (FuturesOrder order : expiredOrders) {
-                executor.submit(() -> {
-                    try {
-                        if (!semaphore.tryAcquire(5, TimeUnit.SECONDS)) return;
-                        try { processExpiredOrder(order); }
-                        finally { semaphore.release(); }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                });
-            }
-        }
-    }
-
-    private void processExpiredOrder(FuturesOrder order) {
-        try {
-            SpringUtils.getAopProxy(this).doExpireOrder(order);
-        } catch (Exception e) {
-            log.error("futures过期订单处理失败 orderId={}", order.getId(), e);
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    protected void doExpireOrder(FuturesOrder order) {
-        int affected = orderMapper.casUpdateStatus(order.getId(), "PENDING", "EXPIRED");
-        if (affected == 0) return;
-
-        removeFromLimitZSet(order, cacheService);
-
-        if (!order.getOrderSide().startsWith("CLOSE") && !FuturesPosition.CROSS.equals(order.getMarginMode())) {
-            userMapper.atomicUnfreezeBalance(order.getUserId(), order.getFrozenAmount());
-        }
-
-        log.info("futures限价单过期 orderId={}", order.getId());
     }
 
     // ==================== 补处理TRIGGERED孤儿单 ====================

@@ -63,13 +63,12 @@ public class ScheduledTasks {
         });
     }
 
-    /** crypto每小时：过期 + 孤儿TRIGGERED执行 */
+    /** crypto每小时：孤儿TRIGGERED执行 */
     @Scheduled(cron = "0 0 * * * *")
     public void cryptoHourlyMaintenance() {
         Thread.startVirtualThread(() -> {
             try {
                 cryptoOrderService.executeTriggeredOrders();
-                cryptoOrderService.expireLimitOrders();
             } catch (Exception e) {
                 log.error("crypto小时维护失败", e);
             }
@@ -88,13 +87,12 @@ public class ScheduledTasks {
         });
     }
 
-    /** futures每小时：过期 + 孤儿TRIGGERED执行 */
+    /** futures每小时：孤儿TRIGGERED执行 */
     @Scheduled(cron = "0 0 * * * *")
     public void futuresHourlyMaintenance() {
         Thread.startVirtualThread(() -> {
             try {
                 futuresSettlementService.executeTriggeredOrders();
-                futuresSettlementService.expireLimitOrders();
             } catch (Exception e) {
                 log.error("futures小时维护失败", e);
             }

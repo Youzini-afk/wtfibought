@@ -26,7 +26,6 @@ import com.mawai.wiibsim.service.BStockService;
 import com.mawai.wiibsim.service.CrossMarginService;
 import com.mawai.wiibsim.service.MarginAccountService;
 import com.mawai.wiibsim.service.UserService;
-import com.mawai.wiibsim.util.ConcurrentBatch;
 import com.mawai.wiibsim.util.RedisLockUtil;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
@@ -39,7 +38,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -248,7 +246,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         cryptoPositionService.addPosition(userId, symbol, quantity, price, discount);
 
         CryptoOrder order = buildOrder(userId, symbol, OrderSide.BUY.getCode(), OrderType.MARKET.getCode(),
-                quantity, 1, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), null);
+                quantity, 1, null, price, amount, commission, null, OrderStatus.FILLED.getCode());
         order.setDiscountPercent(discountPercent); // 折扣率
         baseMapper.insert(order);
         log.info("crypto市价买入 userId={} {} qty={} price={} amount={}", userId, symbol, quantity, price, amount);
@@ -263,7 +261,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         cryptoPositionService.addPosition(userId, symbol, quantity, price, BigDecimal.ZERO);
 
         CryptoOrder order = buildOrder(userId, symbol, OrderSide.BUY.getCode(), OrderType.MARKET.getCode(),
-                quantity, leverage, null, price, amount, commission, null, OrderStatus.FILLED.getCode(), null);
+                quantity, leverage, null, price, amount, commission, null, OrderStatus.FILLED.getCode());
         baseMapper.insert(order);
         log.info("crypto杠杆买入 userId={} {} qty={} price={} leverage={} borrowed={}", userId, symbol, quantity, price, leverage, borrowed);
         return buildResponse(order);
@@ -281,7 +279,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         String status = instant ? OrderStatus.FILLED.getCode() : OrderStatus.SETTLING.getCode();
 
         CryptoOrder order = buildOrder(userId, symbol, OrderSide.SELL.getCode(), OrderType.MARKET.getCode(),
-                quantity, 1, null, price, amount, commission, null, status, null);
+                quantity, 1, null, price, amount, commission, null, status);
         baseMapper.insert(order);
 
         if (instant) {
@@ -299,10 +297,9 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
 
     private CryptoOrderResponse createLimitBuyOrder(Long userId, CryptoOrderRequest request, BigDecimal freezeAmount) {
         userService.freezeBalance(userId, freezeAmount);
-        LocalDateTime expireAt = LocalDateTime.now().plusHours(tradingConfig.getLimitOrderMaxHours());
 
         CryptoOrder order = buildOrder(userId, request.getSymbol(), OrderSide.BUY.getCode(), OrderType.LIMIT.getCode(),
-                request.getQuantity(), 1, request.getLimitPrice(), null, null, null, freezeAmount, OrderStatus.PENDING.getCode(), expireAt);
+                request.getQuantity(), 1, request.getLimitPrice(), null, null, null, freezeAmount, OrderStatus.PENDING.getCode());
         baseMapper.insert(order);
         addToLimitZSet(order);
         log.info("crypto限价买单 userId={} {} qty={} limit={} frozen={}", userId, request.getSymbol(), request.getQuantity(), request.getLimitPrice(), freezeAmount);
@@ -311,10 +308,9 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
 
     private CryptoOrderResponse createLimitSellOrder(Long userId, CryptoOrderRequest request) {
         cryptoPositionService.freezePosition(userId, request.getSymbol(), request.getQuantity());
-        LocalDateTime expireAt = LocalDateTime.now().plusHours(tradingConfig.getLimitOrderMaxHours());
 
         CryptoOrder order = buildOrder(userId, request.getSymbol(), OrderSide.SELL.getCode(), OrderType.LIMIT.getCode(),
-                request.getQuantity(), 1, request.getLimitPrice(), null, null, null, null, OrderStatus.PENDING.getCode(), expireAt);
+                request.getQuantity(), 1, request.getLimitPrice(), null, null, null, null, OrderStatus.PENDING.getCode());
         baseMapper.insert(order);
         addToLimitZSet(order);
         log.info("crypto限价卖单 userId={} {} qty={} limit={}", userId, request.getSymbol(), request.getQuantity(), request.getLimitPrice());
@@ -397,48 +393,6 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
             else addSettlement(order.getUserId(), order.getId(), netAmount);
         }
         return true;
-    }
-
-    // ==================== 过期限价单处理 ====================
-
-    @Override
-    public void expireLimitOrders() {
-        List<CryptoOrder> expiredOrders = baseMapper.selectList(new LambdaQueryWrapper<CryptoOrder>()
-                .eq(CryptoOrder::getStatus, OrderStatus.PENDING.getCode())
-                .eq(CryptoOrder::getOrderType, OrderType.LIMIT.getCode())
-                .lt(CryptoOrder::getExpireAt, LocalDateTime.now()));
-        if (expiredOrders.isEmpty()) return;
-
-        ConcurrentBatch.run(expiredOrders,
-                tradingConfig.getLimitOrderProcessing().getMaxConcurrency(),
-                this::processExpiredOrder);
-    }
-
-    private void processExpiredOrder(CryptoOrder order) {
-        String lockKey = "crypto:order:execute:" + order.getId();
-        String lockValue = redisLockUtil.tryLock(lockKey, 30);
-        if (lockValue == null) return;
-        try {
-            SpringUtils.getAopProxy(this).doExpireOrder(order);
-        } catch (Exception e) {
-            log.error("crypto过期订单处理失败 orderId={}", order.getId(), e);
-        } finally {
-            redisLockUtil.unlock(lockKey, lockValue);
-        }
-    }
-
-    @Transactional(rollbackFor = Exception.class)
-    protected void doExpireOrder(CryptoOrder order) {
-        int affected = baseMapper.casUpdateStatus(order.getId(), OrderStatus.PENDING.getCode(), OrderStatus.EXPIRED.getCode());
-        if (affected == 0) return;
-
-        removeFromLimitZSet(order);
-
-        if (OrderSide.BUY.getCode().equals(order.getOrderSide())) {
-            userService.unfreezeBalance(order.getUserId(), order.getFrozenAmount());
-        } else {
-            cryptoPositionService.unfreezePosition(order.getUserId(), order.getSymbol(), order.getQuantity());
-        }
     }
 
     // ==================== WS事件驱动限价单 ====================
@@ -641,7 +595,7 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     private CryptoOrder buildOrder(Long userId, String symbol, String orderSide, String orderType,
                                     BigDecimal quantity, int leverage, BigDecimal limitPrice,
                                     BigDecimal filledPrice, BigDecimal filledAmount, BigDecimal commission,
-                                    BigDecimal frozenAmount, String status, LocalDateTime expireAt) {
+                                    BigDecimal frozenAmount, String status) {
         CryptoOrder order = new CryptoOrder();
         order.setUserId(userId);
         order.setSymbol(symbol);
@@ -655,7 +609,6 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         order.setCommission(commission);
         order.setFrozenAmount(frozenAmount);
         order.setStatus(status);
-        order.setExpireAt(expireAt);
         return order;
     }
 
@@ -685,7 +638,6 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         resp.setTriggeredAt(order.getTriggeredAt());
         resp.setStatus(order.getStatus());
         resp.setDiscountPercent(order.getDiscountPercent());
-        resp.setExpireAt(order.getExpireAt());
         resp.setCreatedAt(order.getCreatedAt());
         return resp;
     }

@@ -14,8 +14,7 @@ public enum OrderStatus {
     TRIGGERED("TRIGGERED", "已触发"),
     SETTLING("SETTLING", "结算中"),
     FILLED("FILLED", "已成交"),
-    CANCELLED("CANCELLED", "已取消"),
-    EXPIRED("EXPIRED", "已过期");
+    CANCELLED("CANCELLED", "已取消");
 
     private final String code;
     private final String desc;

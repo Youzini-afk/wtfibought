@@ -87,6 +87,11 @@ public class MarginAccountServiceImpl implements MarginAccountService {
         if (affected == 0) {
             throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
         }
+        // 本金已还清：清掉计息起算点。留着的话下次借款时 COALESCE 会保留旧值，
+        // 把还清后这段没欠钱的空档天数一并算成利息
+        if (principal.subtract(paidPrincipal).compareTo(BigDecimal.ZERO) <= 0) {
+            userMapper.clearMarginInterestLastDate(userId);
+        }
 
         log.info("现金流入自动还款 userId={} amount={} paidInterest={} paidPrincipal={} creditBalance={} reason={}",
                 userId, amount, paidInterest, paidPrincipal, creditedToBalance, reason);
