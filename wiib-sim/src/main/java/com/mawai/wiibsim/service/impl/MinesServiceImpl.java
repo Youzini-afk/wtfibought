@@ -97,6 +97,12 @@ public class MinesServiceImpl implements MinesService {
 
     @Override
     public MinesGameStateDTO bet(Long userId, BigDecimal amount) {
+        // 事务由 executeInLockTx 编程式开（加锁→开事务→业务→提交→放锁）：扣钱、建局、切面记的账同生共死。
+        // 别在这儿叠 @Transactional：注解事务在进锁之前就开，顺序变成"先放锁后提交"，
+        // 后一个请求抢到锁时读到的还是旧余额（前一笔还没提交，PG 不脏读但会读到过期值），
+        // 前置校验就基于过期值判断了；而且白占着连接干等抢锁（最多 3 秒）。
+        // "锁外事务内"是项目既定范式，见 FuturesTradingServiceImpl.addMargin/doAddMargin。
+        // 顺序有 GameLockExecutorTest 兜着，反了会红。
         return gameLock.executeInLockTx(LK, userId, () -> {
             if (amount == null || amount.compareTo(MIN_BET) < 0 || amount.compareTo(MAX_BET) > 0) {
                 throw new BizException(ErrorCode.MINES_INVALID_BET);
@@ -147,6 +153,9 @@ public class MinesServiceImpl implements MinesService {
 
     @Override
     public MinesGameStateDTO reveal(Long userId, int cell) {
+        // 翻完最后一格会走 doCashout 派彩，所以这里也是资金入口之一。
+        // 事务同 bet 由 executeInLockTx 提供，别叠 @Transactional（理由见 bet）。
+        // 要给派彩标账本语义就标在这个方法上——doCashout 是私有的，AOP 拦不到。
         return gameLock.executeInLockTx(LK, userId, () -> {
             if (cell < 0 || cell >= GRID_SIZE) {
                 throw new BizException(ErrorCode.MINES_INVALID_CELL);
@@ -218,6 +227,8 @@ public class MinesServiceImpl implements MinesService {
 
     @Override
     public MinesGameStateDTO cashout(Long userId) {
+        // 主动兑现入口，经 doCashout 派彩。事务同 bet，别叠 @Transactional（理由见 bet）。
+        // 派彩的账本语义标在这里，不是标在私有的 doCashout 上。
         return gameLock.executeInLockTx(LK, userId, () -> {
             MinesSession session = gameLock.requireSession(SK, userId, ErrorCode.MINES_NO_ACTIVE_GAME);
             requirePlaying(session);
@@ -233,6 +244,10 @@ public class MinesServiceImpl implements MinesService {
 
     // ==================== 内部逻辑 ====================
 
+    // 派彩点。虽是私有方法，但两个调用点(reveal/cashout)都在 executeInLockTx 的 lambda 里跑，
+    // 事务已挂在当前线程上——编程式事务不看代理，所以这里不吃"同类自调用绕过代理"那个坑，不用拆 protected。
+    // 反过来说：靠 AOP 生效的注解一律不能标这个方法（private + 同类自调用，两道都拦死、会静默失效），
+    // 要标就标到 reveal / cashout 两个 public 入口上。
     private MinesGameStateDTO doCashout(Long userId, MinesSession session, BigDecimal multiplier) {
         BigDecimal payout = session.getBetAmount().multiply(multiplier).setScale(2, RoundingMode.HALF_UP);
 

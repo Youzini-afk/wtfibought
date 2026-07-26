@@ -185,6 +185,9 @@ public class PredictionServiceImpl implements PredictionService {
         long ws = currentWindowStart();
         String lockKey = "prediction:buy:" + ws + ":" + userId;
 
+        // 事务用编程式而不是 @Transactional：锁在外事务在内（加锁→开事务→提交→放锁），
+        // 注解事务会把 begin 提到抢锁之前，变成"先放锁后提交"，还白占着连接等锁。
+        // 广播刻意留在事务外——发出去就撤不回，事务回滚了广播已经出去就是假消息
         return redisLockUtil.executeWithLock(lockKey, 10, 3000, () -> {
             PredictionBetResponse response = transactionTemplate.execute(tx -> {
                 PredictionRound round = roundMapper.selectOne(
@@ -229,6 +232,7 @@ public class PredictionServiceImpl implements PredictionService {
     @Override
     public PredictionBetResponse sell(Long userId, Long betId, BigDecimal contracts) {
         String lockKey = "prediction:sell:" + betId;
+        // 同 buy：锁在外事务在内，改卖单状态+回款+切面记账同生共死，别叠 @Transactional
         return redisLockUtil.executeWithLock(lockKey, 10, 3000, () -> {
             PredictionBetResponse response = transactionTemplate.execute(tx -> {
                 PredictionBet bet = betMapper.selectById(betId);
@@ -486,6 +490,21 @@ public class PredictionServiceImpl implements PredictionService {
 
         PredictionRound settled;
         try {
+            // 【事务粒度：整个回合一个事务，不是每个用户一个】
+            // 这里不是"一批互相独立的任务"，而是一件事：回合定盘 + 全部注单改状态 + 全部派彩。
+            // 注单状态是 settleDraw/settleWon/settleLost 三条批量 UPDATE 一次刷完的，
+            // 拆成按用户提交的话，状态先落地、派彩后失败 = 有人标了 WON 却没拿到钱，
+            // 而 casSettleRound 已把回合置 SETTLED、再也不会重跑，这笔钱静默丢掉。
+            //
+            // 【但整批回滚不等于"安全"——这条必须先看完再动手】
+            // 本方法没有任何重试或补偿：驱动它的 PredictionRoundConsumer 用 receiveAutoAck
+            // (等价 XREADGROUP NOACK，消息根本不进 PEL)，onMessage 又把异常 catch 掉只打 ERROR，
+            // 生产端只发一次不补发，也没有任何 @Scheduled 兜这个回合。而 prevWs 是按当前时钟
+            // 现算的，下一次 settle 事件算的已是另一个窗口。
+            // 所以整批回滚 = 这个回合永久停在 LOCKED、没人捞。
+            // 别被"钱一分没动"骗了：用户买入时的 cost + commission 早在上一个事务里扣掉了，
+            // 而 sell 要求回合 OPEN(见本类 sell 内的状态校验)——回合永久 LOCKED 意味着
+            // 这笔本金既卖不掉也退不了，永久冻结。失败是"自洽但需要人工介入"，不是"无害"。
             settled = transactionTemplate.execute(status -> {
                 PredictionRound round = roundMapper.selectOne(
                         new LambdaQueryWrapper<PredictionRound>().eq(PredictionRound::getWindowStart, prevWs));
