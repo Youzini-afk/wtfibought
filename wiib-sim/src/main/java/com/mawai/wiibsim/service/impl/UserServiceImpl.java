@@ -8,6 +8,7 @@ import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.entity.WalletTransfer;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibsim.ledger.Ledger;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -22,6 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.WALLET_TRANSFER_IN;
+import static com.mawai.wiibcommon.enums.LedgerBizType.WALLET_TRANSFER_OUT;
 
 /**
  * 用户服务实现
@@ -207,8 +211,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     /** 划转手续费率 1%：转出方全额扣，到账 = amount − fee，手续费即销毁（平台无账户） */
     private static final BigDecimal TRANSFER_FEE_RATE = new BigDecimal("0.01");
 
+    // updateBalance/freezeBalance/... 这些通用方法刻意不标 @Ledger：它们是所有业务的公共出口，
+    // 语义由调用方给（标在这里等于把全项目的流水都写成同一个类型）。只有划转这两个是自带语义的终点。
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(WALLET_TRANSFER_OUT)
     public void transferToGame(Long userId, BigDecimal amount) {
         BigDecimal fee = validateAndCalcFee(amount);
         var r = baseMapper.atomicTransferToGame(userId, amount, amount.subtract(fee));
@@ -222,6 +229,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(WALLET_TRANSFER_IN)
     public void transferToBalance(Long userId, BigDecimal amount) {
         BigDecimal fee = validateAndCalcFee(amount);
         var r = baseMapper.atomicTransferToBalance(userId, amount, amount.subtract(fee));

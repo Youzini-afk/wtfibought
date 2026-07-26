@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.TradingConfig;
+import com.mawai.wiibsim.ledger.Ledger;
 import com.mawai.wiibsim.mapper.UserMapper;
 import com.mawai.wiibsim.service.MarginAccountService;
 import com.mawai.wiibsim.service.model.MarginRepayResult;
@@ -19,6 +20,9 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.MARGIN_INTEREST_ACCRUE;
+import static com.mawai.wiibcommon.enums.LedgerBizType.MARGIN_LOAN;
 
 @Slf4j
 @Service
@@ -38,6 +42,7 @@ public class MarginAccountServiceImpl implements MarginAccountService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(MARGIN_LOAN)
     public void addLoanPrincipal(Long userId, BigDecimal principalDelta) {
         if (principalDelta == null || principalDelta.compareTo(BigDecimal.ZERO) <= 0) {
             return;
@@ -58,6 +63,9 @@ public class MarginAccountServiceImpl implements MarginAccountService {
         userMapper.ensureMarginInterestLastDate(userId, LocalDate.now());
     }
 
+    // 刻意不标 @Ledger：这是"任何现金流入先还贷再入余额"的公共出口，语义得由调用方给
+    // （现货延迟到账=SPOT_SETTLE、B股瞬时到账=BSTOCK_SETTLE）。标在这里会盖掉调用方的方法级语义，
+    // 因为一次性/方法级都是"内层压栈的赢"，账单上就看不出这笔钱是卖什么进来的了。
     @Override
     @Transactional(rollbackFor = Exception.class)
     public MarginRepayResult applyCashInflow(Long userId, BigDecimal amount, String reason) {
@@ -128,7 +136,10 @@ public class MarginAccountServiceImpl implements MarginAccountService {
         }
     }
 
+    // 标这一层：protected 且经 getAopProxy 走代理调进来（accrueDailyInterest 那个循环），AOP 拦得到。
+    // 计息是逐用户一个事务，标在这里正好一笔一账。
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(MARGIN_INTEREST_ACCRUE)
     protected void accrueUserInterest(Long userId, LocalDate today) {
         User user = userMapper.selectByIdForUpdate(userId);
         if (user == null) {

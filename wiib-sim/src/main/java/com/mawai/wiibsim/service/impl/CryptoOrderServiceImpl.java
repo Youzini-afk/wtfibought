@@ -17,6 +17,8 @@ import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
+import com.mawai.wiibsim.ledger.Ledger;
+import com.mawai.wiibsim.ledger.LedgerCtx;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.service.BuffService;
 import com.mawai.wiibcommon.cache.CacheService;
@@ -46,6 +48,8 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.*;
 
 @Slf4j
 @Service
@@ -95,8 +99,14 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
 
     // ==================== 买入 ====================
 
+    /**
+     * 三条买入分支的资金语义不同（现货 / 杠杆 / 限价冻结），而三个执行方法全是私有 + 同类自调用，
+     * @Ledger 标它们是空操作。所以方法级只在这里标一次当默认（普通市价买入这条最常走），
+     * 另两条分支各自在动钱之前 LedgerCtx.mark 覆盖成精确类型。
+     */
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(SPOT_BUY)
     public CryptoOrderResponse buy(Long userId, CryptoOrderRequest request) {
         validateRequest(request);
         User user = getAndValidateUser(userId);
@@ -196,7 +206,9 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         }
     }
 
+    // 标这一层：protected 且经 getAopProxy 走代理调进来，AOP 拦得到（cancel() 只负责抢锁）
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(SPOT_LIMIT_UNFREEZE)
     protected CryptoOrderResponse doCancelOrder(Long userId, Long orderId) {
         getAndValidateUser(userId);
         CryptoOrder order = baseMapper.selectById(orderId);
@@ -256,6 +268,9 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     private CryptoOrderResponse executeMarketBuyWithLeverage(Long userId, String symbol, BigDecimal quantity,
                                                               BigDecimal price, BigDecimal amount, BigDecimal commission,
                                                               BigDecimal margin, BigDecimal borrowed, int leverage) {
+        // 覆盖 buy() 的方法级默认 SPOT_BUY。紧跟着的 addLoanPrincipal 自带 @Ledger(MARGIN_LOAN)，
+        // 借款那笔不会被这个 mark 带走（mark 已被上一句消费掉）
+        LedgerCtx.mark(SPOT_BUY_LEVERAGE);
         userService.updateBalance(userId, margin.add(commission).negate());
         marginAccountService.addLoanPrincipal(userId, borrowed);
         cryptoPositionService.addPosition(userId, symbol, quantity, price, BigDecimal.ZERO);
@@ -284,6 +299,13 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
 
         if (instant) {
             // 同一笔事务内立即：先还保证金贷+息、余额入账（订单已 FILLED）
+            // applyCashInflow 是公共入账口、刻意不带语义，所以到账这笔的类型在这儿逐笔给。
+            // 【mark 必须跟着"真会发 SQL"的条件走】applyCashInflow 对 amount ≤ 0 是第一句就 return、
+            // 一条 SQL 都不发，那样 mark 没人消费，会活到下一笔 atomic* 上错标到别人头上。
+            // netAmount ≤ 0 是可达的：commission 无下限，尘埃仓全量卖出时 amount 可能舍入成 0.00。
+            if (netAmount.signum() > 0) {
+                LedgerCtx.mark(BSTOCK_SETTLE, "CRYPTO_ORDER", order.getId());
+            }
             marginAccountService.applyCashInflow(userId, netAmount, "BSTOCK_SETTLE");
             log.info("bStock市价卖出 userId={} {} qty={} price={} net={} (瞬时到账)", userId, symbol, quantity, price, netAmount);
         } else {
@@ -296,6 +318,8 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     // ==================== 限价单创建 ====================
 
     private CryptoOrderResponse createLimitBuyOrder(Long userId, CryptoOrderRequest request, BigDecimal freezeAmount) {
+        // 覆盖 buy() 的方法级默认：冻结不是买入。一条 SQL 两个钱包两行账，一次 mark 全覆盖
+        LedgerCtx.mark(SPOT_LIMIT_FREEZE);
         userService.freezeBalance(userId, freezeAmount);
 
         CryptoOrder order = buildOrder(userId, request.getSymbol(), OrderSide.BUY.getCode(), OrderType.LIMIT.getCode(),
@@ -379,18 +403,33 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
                 : baseMapper.casUpdateToFilled(order.getId(), executePrice, amount, commission);
         if (affected == 0) return false;
 
+        // 本方法刻意没有方法级 @Ledger：成交扣冻结、退差额、B股到账三种语义并存，表达不了。
+        // 每笔在动钱之前逐笔 mark，漏标会落 UNKNOWN 并打 WARN——那正是我们要的可见性
         if (OrderSide.BUY.getCode().equals(order.getOrderSide())) {
             BigDecimal frozenAmount = order.getFrozenAmount();
             BigDecimal actualCost = amount.add(commission);
             BigDecimal refund = frozenAmount.subtract(actualCost);
+            LedgerCtx.mark(SPOT_LIMIT_DEDUCT, "CRYPTO_ORDER", order.getId());
             userService.deductFrozenBalance(order.getUserId(), frozenAmount);
-            if (refund.compareTo(BigDecimal.ZERO) > 0) userService.updateBalance(order.getUserId(), refund);
+            if (refund.compareTo(BigDecimal.ZERO) > 0) {
+                LedgerCtx.mark(SPOT_LIMIT_REFUND, "CRYPTO_ORDER", order.getId());
+                userService.updateBalance(order.getUserId(), refund);
+            }
             cryptoPositionService.addPosition(order.getUserId(), order.getSymbol(), order.getQuantity(), executePrice, BigDecimal.ZERO);
         } else {
             cryptoPositionService.deductFrozenPosition(order.getUserId(), order.getSymbol(), order.getQuantity());
             BigDecimal netAmount = amount.subtract(commission);
-            if (instant) marginAccountService.applyCashInflow(order.getUserId(), netAmount, "BSTOCK_SETTLE");  // 同事务立即到账+还贷
-            else addSettlement(order.getUserId(), order.getId(), netAmount);
+            if (instant) {
+                // 同事务立即到账+还贷。mark 跟着"真会发 SQL"的条件走，理由见 executeMarketSell 同一处。
+                // 这里泄漏更危险：本方法在 executeTriggeredOrders 的 for 批处理循环里跑，
+                // 漏掉的 mark 会带着 A 单的 refId 安到 B 单（很可能是另一个用户）的流水上
+                if (netAmount.signum() > 0) {
+                    LedgerCtx.mark(BSTOCK_SETTLE, "CRYPTO_ORDER", order.getId());
+                }
+                marginAccountService.applyCashInflow(order.getUserId(), netAmount, "BSTOCK_SETTLE");
+            } else {
+                addSettlement(order.getUserId(), order.getId(), netAmount);
+            }
         }
         return true;
     }
@@ -558,7 +597,10 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         scheduleFromEarliest();
     }
 
+    // 必须标在这一层：本方法跑在 settleScheduler 的虚拟线程上，不继承下单请求的 ThreadLocal 上下文，
+    // 语义只能它自己给。protected + 经 getAopProxy 走代理调进来，AOP 拦得到
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(SPOT_SETTLE)
     protected void doSettle(Long userId, Long orderId, BigDecimal amount) {
         marginAccountService.applyCashInflow(userId, amount, "CRYPTO_SETTLE");
         baseMapper.casUpdateStatus(orderId, OrderStatus.SETTLING.getCode(), OrderStatus.FILLED.getCode());

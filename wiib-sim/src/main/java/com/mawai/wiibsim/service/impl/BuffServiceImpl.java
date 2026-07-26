@@ -11,6 +11,7 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.BuffDrawUtil;
 import com.mawai.wiibcommon.util.SpringUtils;
+import com.mawai.wiibsim.ledger.Ledger;
 import com.mawai.wiibsim.mapper.UserBuffMapper;
 import com.mawai.wiibsim.service.*;
 import com.mawai.wiibsim.util.RedisLockUtil;
@@ -22,7 +23,10 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.BUFF_REWARD;
 
 @Slf4j
 @Service
@@ -65,7 +69,20 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
                 () -> SpringUtils.getAopProxy(this).doDrawTransactional(userId));
     }
 
+    // 标在这一层而不是 draw()：本方法是 protected + 经 SpringUtils.getAopProxy 真走代理调进来的，
+    // 自定义 @Aspect 的 @annotation 切点没有 public 限制，所以 @Ledger 在这儿是真生效的。
+    // 红包发放这笔钱正好在这个事务里动。
+    //
+    // 注：protected 上的 @Transactional 在本项目也真生效，但那是另一套判定（配置类建的
+    // AnnotationTransactionAttributeSource 传的是 publicMethodsOnly=false，spring-tx 6.1 已如此；
+    // 只有手工 new 的无参实例才是 true），别把两件事当成一个结论。
+    //
+    // 覆盖情况别记混：@Transactional 这半边，本方法在 LedgerProxyRealRunTest 那条反射清单里，被钉住；
+    // @Ledger 这半边真跑打的是同形态的 doSettle，不是本方法——本方法只有 LedgerPlacementTest
+    // 的可见性守卫。想让本方法的派奖语义也有真跑覆盖，得先解决 BuffDrawUtil.drawBuff() 随机
+    // （抽不中 CASH 就不动钱），那是另一件事。
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(BUFF_REWARD)
     protected UserBuffDTO doDrawTransactional(Long userId) {
         LocalDate today = LocalDate.now();
 
@@ -80,13 +97,10 @@ public class BuffServiceImpl extends ServiceImpl<UserBuffMapper, UserBuff> imple
         BuffType buffType = BuffDrawUtil.drawBuff();
 
         String extraData = null;
-        switch (buffType.getCategory()) {
-            case CASH -> {
-                int amount = (int) buffType.getValue();
-                userService.updateBalance(userId, BigDecimal.valueOf(amount));
-                log.info("用户{}抽中红包{}元", userId, amount);
-            }
-            default -> {}
+        if (Objects.requireNonNull(buffType.getCategory()) == BuffType.Category.CASH) {
+            int amount = (int) buffType.getValue();
+            userService.updateBalance(userId, BigDecimal.valueOf(amount));
+            log.info("用户{}抽中红包{}元", userId, amount);
         }
 
         // 保存

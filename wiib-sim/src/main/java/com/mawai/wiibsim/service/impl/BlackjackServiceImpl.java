@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.entity.BlackjackAccount;
 import com.mawai.wiibcommon.entity.BlackjackConvertLog;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibsim.ledger.Ledger;
 import com.mawai.wiibsim.mapper.BlackjackAccountMapper;
 import com.mawai.wiibsim.mapper.BlackjackConvertLogMapper;
 import com.mawai.wiibsim.service.BlackjackService;
@@ -24,6 +25,8 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.BLACKJACK_CONVERT;
 
 /**
  * Blackjack 服务实现。
@@ -512,6 +515,7 @@ public class BlackjackServiceImpl implements BlackjackService {
     }
 
     @Override
+    @Ledger(BLACKJACK_CONVERT)
     public ConvertResultDTO convert(Long userId, long amount) {
         // 全类唯一动 user.game_balance 的地方（筹码在 blackjack_account，不是账本钱包）。
         // 事务由 executeInLockTx 编程式开（加锁→开事务→业务→提交→放锁）：扣筹码、进游戏钱包、
@@ -523,8 +527,10 @@ public class BlackjackServiceImpl implements BlackjackService {
         // 也没有 @Version 兜底：T1 放锁后还没提交，T2 抢到锁读到同一份旧快照，
         // 结果 game_balance 进两份 a、chips 只扣一份 a，todayConverted 同样被覆盖、日限额被绕过。
         // Mines/VP 靠 getSession != null 挡重入，convert 不建 session，那层兜底在这儿没有。
-        // "锁外事务内"是项目既定范式，见 FuturesTradingServiceImpl.addMargin/doAddMargin；
-        // 顺序有 GameLockExecutorTest 兜着。
+        // "锁外事务内"是项目既定范式，见 FuturesTradingServiceImpl.addMargin/doAddMargin。
+        //
+        // 【别指望测试兜这条】GameLockExecutorTest 是 new 执行器 + mock TransactionTemplate，
+        // 守的是 executeInLockTx 内部那层嵌套；本方法叠上 @Transactional 它照样全绿。零测试，注释即防线。
         return gameLock.executeInLockTx(LK, userId, () -> {
             if (amount <= 0) {
                 throw new BizException(ErrorCode.PARAM_ERROR);

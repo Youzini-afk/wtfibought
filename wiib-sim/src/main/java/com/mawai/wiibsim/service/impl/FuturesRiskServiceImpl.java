@@ -11,6 +11,8 @@ import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
+import com.mawai.wiibsim.ledger.Ledger;
+import com.mawai.wiibsim.ledger.LedgerCtx;
 import com.mawai.wiibsim.mapper.FuturesOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -29,6 +31,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 
+import static com.mawai.wiibcommon.enums.LedgerBizType.FUTURES_CLOSE_SETTLE;
+import static com.mawai.wiibcommon.enums.LedgerBizType.FUTURES_LIQUIDATION_RETURN;
 import static com.mawai.wiibsim.service.impl.FuturesHelper.*;
 
 @Slf4j
@@ -167,12 +171,16 @@ public class FuturesRiskServiceImpl implements FuturesRiskService {
         }
     }
 
+    // 强平返还的钱在私有的 forceCloseInCurrentTransaction 里动，而它是同类自调用——AOP 拦不到，
+    // 标它是空操作。所以两个 protected 代理入口（本方法和 doCheckAndLiquidate）各标一次。
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_LIQUIDATION_RETURN)
     protected void doForceClose(Long positionId, BigDecimal price) {
         FuturesPosition position = positionMapper.selectById(positionId);
         if (position == null || !"OPEN".equals(position.getStatus())) {
             return;
         }
+        LedgerCtx.symbol(position.getSymbol());
 
         forceCloseInCurrentTransaction(position, price);
     }
@@ -230,12 +238,15 @@ public class FuturesRiskServiceImpl implements FuturesRiskService {
         }
     }
 
+    // 同 doForceClose：真正动钱的是私有的 forceCloseInCurrentTransaction，标注只能落在这个代理入口上
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_LIQUIDATION_RETURN)
     protected void doCheckAndLiquidate(Long positionId, BigDecimal currentPrice) {
         FuturesPosition position = positionMapper.selectById(positionId);
         if (position == null || !"OPEN".equals(position.getStatus())) {
             return;
         }
+        LedgerCtx.symbol(position.getSymbol());
 
         BigDecimal unrealizedPnl = calculatePnl(position.getSide(), position.getEntryPrice(), currentPrice, position.getQuantity());
         BigDecimal effectiveMargin = position.getMargin().add(unrealizedPnl);
@@ -283,11 +294,17 @@ public class FuturesRiskServiceImpl implements FuturesRiskService {
     /**
      * SL/TP 批量触发平仓的单一流程（曾是两段逐行镜像的 80 行，改平仓逻辑只改一半的事故温床）。
      * isStopLoss 只决定三件事：读哪张保护单列表、部分平仓后剩余列表写回哪个字段、订单状态字面量。
+     * <p>
+     * 账本语义是 FUTURES_CLOSE_SETTLE 而不是强平返还：止盈止损触发是保护单成交平仓
+     * （落库的订单状态就是 STOP_LOSS / TAKE_PROFIT，仓位是 CLOSED），跟 LIQUIDATED 是两件事。
+     * 标成强平会把每一次正常止盈都写成"你被强平了"。
      */
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_CLOSE_SETTLE)
     protected void doBatchTrigger(Long positionId, Collection<String> ids, BigDecimal price, boolean isStopLoss) {
         FuturesPosition position = positionMapper.selectById(positionId);
         if (position == null || !"OPEN".equals(position.getStatus())) return;
+        LedgerCtx.symbol(position.getSymbol());
 
         List<FuturesStopLoss> sls = isStopLoss ? position.getStopLosses() : null;
         List<FuturesTakeProfit> tps = isStopLoss ? null : position.getTakeProfits();

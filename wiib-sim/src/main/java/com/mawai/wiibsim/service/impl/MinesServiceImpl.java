@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.dto.MinesStatusDTO;
 import com.mawai.wiibcommon.entity.MinesGame;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibsim.ledger.Ledger;
 import com.mawai.wiibsim.mapper.MinesGameMapper;
 import com.mawai.wiibsim.service.MinesService;
 import com.mawai.wiibsim.service.UserService;
@@ -20,6 +21,9 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.MINES_BET;
+import static com.mawai.wiibcommon.enums.LedgerBizType.MINES_CASHOUT;
 
 @Slf4j
 @Service
@@ -96,13 +100,17 @@ public class MinesServiceImpl implements MinesService {
     }
 
     @Override
+    @Ledger(MINES_BET)
     public MinesGameStateDTO bet(Long userId, BigDecimal amount) {
         // 事务由 executeInLockTx 编程式开（加锁→开事务→业务→提交→放锁）：扣钱、建局、切面记的账同生共死。
         // 别在这儿叠 @Transactional：注解事务在进锁之前就开，顺序变成"先放锁后提交"，
         // 后一个请求抢到锁时读到的还是旧余额（前一笔还没提交，PG 不脏读但会读到过期值），
         // 前置校验就基于过期值判断了；而且白占着连接干等抢锁（最多 3 秒）。
         // "锁外事务内"是项目既定范式，见 FuturesTradingServiceImpl.addMargin/doAddMargin。
-        // 顺序有 GameLockExecutorTest 兜着，反了会红。
+        //
+        // 【别指望测试兜这条】GameLockExecutorTest 守的是 executeInLockTx 内部那层嵌套顺序：
+        // 它 new 出执行器、mock 掉 TransactionTemplate，看不到本方法有没有 @Transactional。
+        // 真在这儿叠一个，注解事务由代理在更外层开启，那个测试照样全绿。本方法零测试，注释就是唯一防线。
         return gameLock.executeInLockTx(LK, userId, () -> {
             if (amount == null || amount.compareTo(MIN_BET) < 0 || amount.compareTo(MAX_BET) > 0) {
                 throw new BizException(ErrorCode.MINES_INVALID_BET);
@@ -152,10 +160,13 @@ public class MinesServiceImpl implements MinesService {
     }
 
     @Override
+    @Ledger(MINES_CASHOUT)
     public MinesGameStateDTO reveal(Long userId, int cell) {
         // 翻完最后一格会走 doCashout 派彩，所以这里也是资金入口之一。
         // 事务同 bet 由 executeInLockTx 提供，别叠 @Transactional（理由见 bet）。
-        // 要给派彩标账本语义就标在这个方法上——doCashout 是私有的，AOP 拦不到。
+        // @Ledger 标在这个 public 入口上——doCashout 是私有的又是同类自调用，标它是完全的空操作。
+        // 踩雷分支不碰任何 UserMapper.atomic*，切面不触发，所以"这条路没派彩也带着 MINES_CASHOUT 帽子"
+        // 不会多记一行账。
         return gameLock.executeInLockTx(LK, userId, () -> {
             if (cell < 0 || cell >= GRID_SIZE) {
                 throw new BizException(ErrorCode.MINES_INVALID_CELL);
@@ -226,6 +237,7 @@ public class MinesServiceImpl implements MinesService {
     }
 
     @Override
+    @Ledger(MINES_CASHOUT)
     public MinesGameStateDTO cashout(Long userId) {
         // 主动兑现入口，经 doCashout 派彩。事务同 bet，别叠 @Transactional（理由见 bet）。
         // 派彩的账本语义标在这里，不是标在私有的 doCashout 上。

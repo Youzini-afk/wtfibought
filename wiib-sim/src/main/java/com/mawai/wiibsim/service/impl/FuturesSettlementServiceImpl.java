@@ -13,6 +13,8 @@ import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
+import com.mawai.wiibsim.ledger.Ledger;
+import com.mawai.wiibsim.ledger.LedgerCtx;
 import com.mawai.wiibsim.mapper.FuturesOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -35,6 +37,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
 
+import static com.mawai.wiibcommon.enums.LedgerBizType.*;
 import static com.mawai.wiibsim.service.impl.FuturesHelper.*;
 
 @Slf4j
@@ -174,8 +177,17 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         }
     }
 
+    /**
+     * 【账本标注为什么落在这一层】下面四个执行方法（processTriggeredOpenOrder /
+     * fillOpenOrderIntoPosition / processTriggeredCloseOrder / cancelTriggeredOrderAndRefund）
+     * 全是私有 + 同类自调用，@Ledger 标它们是完全的空操作。本方法是 protected 且经 getAopProxy
+     * 真走代理调进来的，AOP 拦得到，所以方法级语义（兜底 + 挂 symbol）只能落在这儿；
+     * 每笔的精确类型由那四个方法内动钱之前的 LedgerCtx.mark 覆盖。
+     */
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_LIMIT_DEDUCT)
     protected void doProcessTriggeredOrder(FuturesOrder order) {
+        LedgerCtx.symbol(order.getSymbol());
         if (!"TRIGGERED".equals(order.getStatus())) return;
 
         // 先抢占订单处理权，再做资金/仓位副作用；否则实时触发和补偿扫描可能重复成交。
@@ -247,13 +259,16 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
         if (isCross) {
             // 全仓：挂单期间只是占用记账，成交只实扣手续费（挂单占用随状态翻转自动消失）
+            LedgerCtx.mark(FUTURES_OPEN_FEE, "FUTURES_ORDER", order.getId());
             userMapper.atomicSettleBalance(order.getUserId(), commission.negate());
         } else {
             BigDecimal frozenAmount = order.getFrozenAmount();
+            LedgerCtx.mark(FUTURES_LIMIT_DEDUCT, "FUTURES_ORDER", order.getId());
             BigDecimal afterFrozen = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
             if (afterFrozen == null) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
             if (actualCost.compareTo(frozenAmount) < 0) {
                 BigDecimal refund = frozenAmount.subtract(actualCost);
+                LedgerCtx.mark(FUTURES_LIMIT_REFUND, "FUTURES_ORDER", order.getId());
                 userMapper.atomicUpdateBalance(order.getUserId(), refund);
             }
         }
@@ -315,12 +330,15 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
         if (position.isCross()) {
             // 全仓：挂单期间只是占用记账，成交只实扣手续费（挂单占用随状态翻转自动消失）
+            LedgerCtx.mark(FUTURES_OPEN_FEE, "FUTURES_ORDER", order.getId());
             userMapper.atomicSettleBalance(order.getUserId(), commission.negate());
         } else {
             BigDecimal frozenAmount = order.getFrozenAmount();
+            LedgerCtx.mark(FUTURES_LIMIT_DEDUCT, "FUTURES_ORDER", order.getId());
             BigDecimal afterFrozen = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
             if (afterFrozen == null) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
             if (actualCost.compareTo(frozenAmount) < 0) {
+                LedgerCtx.mark(FUTURES_LIMIT_REFUND, "FUTURES_ORDER", order.getId());
                 userMapper.atomicUpdateBalance(order.getUserId(), frozenAmount.subtract(actualCost));
             }
         }
@@ -413,6 +431,8 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         if (position.isCross()) {
             crossMarginService.settle(order.getUserId(), pnl.subtract(commission));
         } else {
+            // 覆盖方法级默认 FUTURES_LIMIT_DEDUCT：这笔是平仓结算返还，不是开仓扣款
+            LedgerCtx.mark(FUTURES_CLOSE_SETTLE, "FUTURES_ORDER", order.getId());
             userMapper.atomicUpdateBalance(order.getUserId(), marginPart.add(pnl).subtract(commission).max(BigDecimal.ZERO));
         }
         int filled = orderMapper.casUpdateToFilled(order.getId(), null, executePrice, closeValue, commission, null, pnl);
@@ -435,9 +455,12 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         BigDecimal frozenAmount = order.getFrozenAmount();
         if (!FuturesPosition.CROSS.equals(order.getMarginMode())
                 && frozenAmount != null && frozenAmount.compareTo(BigDecimal.ZERO) > 0) {
+            // 退款是"扣冻结 + 进可用"两笔，语义不同：前者销账、后者才是真退回
+            LedgerCtx.mark(FUTURES_LIMIT_DEDUCT, "FUTURES_ORDER", order.getId());
             BigDecimal afterFrozen = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
             // 异常状态：cancel 前 frozen 必然存在，扣不到说明数据被并发改动，整事务回滚避免余额凭空增加
             if (afterFrozen == null) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
+            LedgerCtx.mark(FUTURES_LIMIT_UNFREEZE, "FUTURES_ORDER", order.getId());
             userMapper.atomicUpdateBalance(order.getUserId(), frozenAmount);
         }
         log.info("futures限价单触发后取消 orderId={} reason={} refund={}",
@@ -577,12 +600,19 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         return result.success();
     }
 
+    /**
+     * 方法级 @Ledger 在这里只干两件事：给本方法内的流水挂上 symbol，以及给将来新增的资金分支一个兜底。
+     * 收/付两笔各自 mark 精确类型，所以方法级这个值实际不会被用到。
+     * （本方法 protected 且经 getAopProxy 走代理调进来，AOP 拦得到。）
+     */
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUNDING_FEE_PAY)
     protected FundingFeeChargeResult doChargeFundingFeeOne(Long positionId, BigDecimal rate) {
         FuturesPosition pos = positionMapper.selectById(positionId);
         if (pos == null || !"OPEN".equals(pos.getStatus())) {
             return new FundingFeeChargeResult(false, false);
         }
+        LedgerCtx.symbol(pos.getSymbol());
 
         // 名义额对齐 Binance：按 mark 价×数量结算；mark 不可得退回开仓价（罕见，别让结算卡死）
         BigDecimal notionalPrice;
@@ -606,6 +636,7 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
         if (transfer.signum() < 0) {
             // 收取方：入余额；funding_fee_total 记负（净口径，排行榜按累计净付扣回时自然冲正）
+            LedgerCtx.mark(FUNDING_FEE_RECV, "POSITION", pos.getId());
             userMapper.atomicUpdateBalance(pos.getUserId(), transfer.negate());
             int added = positionMapper.atomicAddFundingFeeTotal(pos.getId(), transfer);
             if (added == 0) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
@@ -613,7 +644,11 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         }
 
         // 支付方三级兜底：余额 → 保证金 → 保证金扣光并触发强平复核
+        // 注意：这句返 null（余额不够）是正常分支，切面照样把 mark 取走丢掉、不记账，
+        // 不会泄漏到下面扣保证金那条 SQL 上。后两级扣的是仓位保证金（FuturesPositionMapper），
+        // 切面此刻只切 UserMapper，那两笔还没有账本行——连同 markPositionFee 一起在下一个任务落地。
         BigDecimal fee = transfer;
+        LedgerCtx.mark(FUNDING_FEE_PAY, "POSITION", pos.getId());
         BigDecimal afterPay = userMapper.atomicUpdateBalance(pos.getUserId(), fee.negate());
         if (afterPay != null) {
             int added = positionMapper.atomicAddFundingFeeTotal(pos.getId(), fee);

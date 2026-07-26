@@ -15,6 +15,8 @@ import com.mawai.wiibcommon.util.SpringUtils;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
+import com.mawai.wiibsim.ledger.Ledger;
+import com.mawai.wiibsim.ledger.LedgerCtx;
 import com.mawai.wiibsim.mapper.FuturesOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -37,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static com.mawai.wiibcommon.enums.LedgerBizType.*;
 import static com.mawai.wiibsim.service.impl.FuturesHelper.*;
 
 @Slf4j
@@ -87,8 +90,18 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         }
     }
 
+    /**
+     * 【账本标注为什么落在这一层】三条开仓分支（市价并入 / 市价新开 / 限价挂单）的执行方法
+     * executeMarketMerge / executeMarketOpen / createLimitOpenOrder 全是私有 + 同类自调用，
+     * @Ledger 标它们是完全的空操作。本方法是 protected 且经 getAopProxy 真走代理调进来的，
+     * AOP 拦得到，所以方法级语义（兜底 + 挂 symbol）只能落在这儿；每笔的精确类型由三个执行方法内
+     * 动钱之前的 LedgerCtx.mark 覆盖。
+     */
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_OPEN_MARGIN)
     protected FuturesOrderResponse doOpenPosition(Long userId, FuturesOpenRequest request) {
+        // 挂一次，本方法内所有流水都带上币种（symbol 挂在方法级 frame 上）
+        LedgerCtx.symbol(request.getSymbol());
         getAndValidateUser(userId);
 
         int leverage = normalizeLeverage(request.getLeverage(), tradingConfig.getFutures().getMaxLeverage());
@@ -165,11 +178,14 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         BigDecimal commission = tradingConfig.calculateFuturesCommission(addValue, false, true);
         BigDecimal totalCost = addMargin.add(commission);
 
+        // 两条分支各一笔、语义不同：全仓只实扣手续费；逐仓 totalCost = 保证金+手续费 一条 SQL 走
         if (position.isCross()) {
             crossMarginService.assertCanAfford(userId, totalCost);
+            LedgerCtx.mark(FUTURES_OPEN_FEE, "POSITION", position.getId());
             userMapper.atomicSettleBalance(userId, commission.negate());
         } else {
             crossMarginService.assertOutflowAllowed(userId, totalCost);
+            LedgerCtx.mark(FUTURES_OPEN_MARGIN, "POSITION", position.getId());
             BigDecimal after = userMapper.atomicUpdateBalance(userId, totalCost.negate());
             if (after == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
         }
@@ -233,9 +249,11 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         BigDecimal commission = tradingConfig.calculateFuturesCommission(positionValue, false, true);
         BigDecimal totalCost = margin.add(commission);
 
+        // 两条分支各一笔（新开仓的 refId 给不了：仓位这会儿还没 insert，id 要到下面才有）
         if (FuturesPosition.CROSS.equals(marginMode)) {
             // 全仓占用制：钱不动，只校验可用额度（含浮盈亏，浮盈开仓天然成立）；手续费实扣
             crossMarginService.assertCanAfford(userId, totalCost);
+            LedgerCtx.mark(FUTURES_OPEN_FEE);
             userMapper.atomicSettleBalance(userId, commission.negate());
         } else {
             // 逐仓划扣制：把保证金从余额钱包划走；对全仓池而言是资金流出，先过硬底线
@@ -246,6 +264,7 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             if (user.getBalance().add(tolerance).compareTo(totalCost) < 0) {
                 throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
             }
+            LedgerCtx.mark(FUTURES_OPEN_MARGIN);
             BigDecimal after = userMapper.atomicUpdateBalance(userId, totalCost.negate());
             if (after == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
         }
@@ -310,6 +329,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             crossMarginService.assertCanAfford(userId, frozenAmount);
         } else {
             crossMarginService.assertOutflowAllowed(userId, frozenAmount);
+            // 覆盖 doOpenPosition 的方法级默认：挂单冻结不是开仓保证金。一条 SQL 两个钱包两行账，一次 mark 全覆盖
+            LedgerCtx.mark(FUTURES_LIMIT_FREEZE);
             var frozen = userMapper.atomicFreezeBalance(userId, frozenAmount);
             if (frozen == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
         }
@@ -356,9 +377,14 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         }
     }
 
+    // 标这一层不标 executeMarketClose：后者是私有 + 同类自调用，AOP 拦不到。
+    // 本方法唯一的资金动作就是逐仓平仓返还（全仓走 crossMarginService.settle，自带 CROSS_SETTLE），
+    // 一个类型盖得住，不需要逐笔 mark。
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_CLOSE_SETTLE)
     protected FuturesOrderResponse doClosePosition(Long userId, FuturesCloseRequest request) {
         FuturesPosition position = getUserPosition(userId, request.getPositionId());
+        LedgerCtx.symbol(position.getSymbol());
 
         // quantity 空=全平：锁内取实时持仓量，消除"查列表→加锁"窗口期数量变化（如SL/TP部分成交）的误差
         BigDecimal closeQty = request.getQuantity() != null ? request.getQuantity() : position.getQuantity();
@@ -509,11 +535,13 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_LIMIT_UNFREEZE)
     public FuturesOrderResponse cancelOrder(Long userId, Long orderId) {
         FuturesOrder order = orderMapper.selectById(orderId);
         if (order == null || !order.getUserId().equals(userId)) {
             throw new BizException(ErrorCode.ORDER_NOT_FOUND);
         }
+        LedgerCtx.symbol(order.getSymbol());
         if (!"PENDING".equals(order.getStatus())) {
             throw new BizException(ErrorCode.ORDER_CANNOT_CANCEL);
         }
@@ -548,8 +576,10 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_ADD_MARGIN)
     protected void doAddMargin(Long userId, FuturesAddMarginRequest request) {
         FuturesPosition position = getUserPosition(userId, request.getPositionId());
+        LedgerCtx.symbol(position.getSymbol());
         if (position.isCross()) throw new BizException(ErrorCode.FUTURES_CROSS_MARGIN_ADJUST);
 
         BigDecimal amount = request.getAmount();
@@ -588,8 +618,10 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
     }
 
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_REDUCE_MARGIN)
     protected void doReduceMargin(Long userId, FuturesReduceMarginRequest request) {
         FuturesPosition position = getUserPosition(userId, request.getPositionId());
+        LedgerCtx.symbol(position.getSymbol());
         if (position.isCross()) throw new BizException(ErrorCode.FUTURES_CROSS_MARGIN_ADJUST);
 
         BigDecimal amount = request.getAmount();
@@ -669,8 +701,12 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         }
     }
 
+    // 标这一层不标 adjustIsolatedLeverage：后者是私有 + 同类自调用，AOP 拦不到。
+    // 本方法唯一的资金动作就是逐仓调高杠杆释放多余保证金（全仓只改占用数字，钱不动），一个类型盖得住。
     @Transactional(rollbackFor = Exception.class)
+    @Ledger(FUTURES_LEVERAGE_RELEASE)
     protected void doAdjustLeverage(Long userId, FuturesAdjustLeverageRequest request) {
+        LedgerCtx.symbol(request.getSymbol());
         // 锁内重查：拿锁前仓位可能已被平掉/强平
         List<FuturesPosition> positions = positionMapper.selectList(new LambdaQueryWrapper<FuturesPosition>()
                 .eq(FuturesPosition::getUserId, userId)

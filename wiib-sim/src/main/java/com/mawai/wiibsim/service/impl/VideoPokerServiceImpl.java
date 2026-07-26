@@ -5,6 +5,7 @@ import com.mawai.wiibcommon.dto.VideoPokerStatusDTO;
 import com.mawai.wiibcommon.entity.VideoPokerGame;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibsim.ledger.Ledger;
 import com.mawai.wiibsim.mapper.VideoPokerGameMapper;
 import com.mawai.wiibsim.service.UserService;
 import com.mawai.wiibsim.service.VideoPokerService;
@@ -20,6 +21,9 @@ import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.POKER_BET;
+import static com.mawai.wiibcommon.enums.LedgerBizType.POKER_PAYOUT;
 
 @Slf4j
 @Service
@@ -86,12 +90,16 @@ public class VideoPokerServiceImpl implements VideoPokerService {
     }
 
     @Override
+    @Ledger(POKER_BET)
     public VideoPokerGameStateDTO bet(Long userId, BigDecimal amount) {
         // 事务由 executeInLockTx 编程式开（加锁→开事务→业务→提交→放锁）：扣钱、建局、切面记的账同生共死。
         // 别在这儿叠 @Transactional：注解事务在进锁之前就开，顺序变成"先放锁后提交"，
         // 后一个请求抢到锁时读到的还是旧余额（前一笔还没提交，PG 不脏读但会读到过期值）；
         // 而且白占着连接干等抢锁。"锁外事务内"是项目既定范式，
-        // 见 FuturesTradingServiceImpl.addMargin/doAddMargin。顺序有 GameLockExecutorTest 兜着。
+        // 见 FuturesTradingServiceImpl.addMargin/doAddMargin。
+        //
+        // 【别指望测试兜这条】GameLockExecutorTest 是 new 执行器 + mock TransactionTemplate，
+        // 守的是 executeInLockTx 内部那层嵌套；本方法叠上 @Transactional 它照样全绿。零测试，注释即防线。
         return gameLock.executeInLockTx(LK, userId, () -> {
             if (amount == null || amount.compareTo(MIN_BET) < 0 || amount.compareTo(MAX_BET) > 0) {
                 throw new BizException(ErrorCode.VP_INVALID_BET);
@@ -138,6 +146,7 @@ public class VideoPokerServiceImpl implements VideoPokerService {
     }
 
     @Override
+    @Ledger(POKER_PAYOUT)
     public VideoPokerGameStateDTO draw(Long userId, List<Integer> held) {
         List<Integer> heldList = held != null ? held : Collections.emptyList();
         // 派彩点。事务同 bet 由 executeInLockTx 提供，派彩与牌局落库同生共死，不要叠 @Transactional

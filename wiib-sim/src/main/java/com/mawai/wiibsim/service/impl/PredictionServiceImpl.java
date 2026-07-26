@@ -10,6 +10,8 @@ import com.mawai.wiibcommon.entity.PredictionRound;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibsim.ledger.Ledger;
+import com.mawai.wiibsim.ledger.LedgerCtx;
 import com.mawai.wiibsim.mapper.PredictionBetMapper;
 import com.mawai.wiibsim.mapper.PredictionRoundMapper;
 import com.mawai.wiibcommon.cache.CacheService;
@@ -29,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+
+import static com.mawai.wiibcommon.enums.LedgerBizType.*;
 
 @Slf4j
 @Service
@@ -161,6 +165,7 @@ public class PredictionServiceImpl implements PredictionService {
     }
 
     @Override
+    @Ledger(PREDICTION_BUY)
     public PredictionBetResponse buy(Long userId, PredictionBuyRequest req) {
         String side = req.getSide();
         BigDecimal amount = req.getAmount();
@@ -230,6 +235,7 @@ public class PredictionServiceImpl implements PredictionService {
     }
 
     @Override
+    @Ledger(PREDICTION_SELL)
     public PredictionBetResponse sell(Long userId, Long betId, BigDecimal contracts) {
         String lockKey = "prediction:sell:" + betId;
         // 同 buy：锁在外事务在内，改卖单状态+回款+切面记账同生共死，别叠 @Transactional
@@ -528,7 +534,11 @@ public class PredictionServiceImpl implements PredictionService {
                             new LambdaQueryWrapper<PredictionBet>()
                                     .eq(PredictionBet::getRoundId, round.getId())
                                     .eq(PredictionBet::getStatus, "DRAW"));
+                    // mark 必须写在循环体内、每笔之前：它是"消费即清"的一次性标注，
+                    // 提到循环外只有第一个用户拿到 PREDICTION_REFUND，其余全部静默落 UNKNOWN
+                    // （本方法表达不了两种类型，刻意没有方法级 @Ledger 兜底）
                     for (PredictionBet bet : drawBets) {
+                        LedgerCtx.mark(PREDICTION_REFUND, "PREDICTION_BET", bet.getId());
                         userService.updateGameBalance(bet.getUserId(), bet.getCost());
                     }
                 } else {
@@ -540,7 +550,9 @@ public class PredictionServiceImpl implements PredictionService {
                             new LambdaQueryWrapper<PredictionBet>()
                                     .eq(PredictionBet::getRoundId, round.getId())
                                     .eq(PredictionBet::getStatus, "WON"));
+                    // 同上：mark 在循环体内，每笔一次
                     for (PredictionBet bet : wonBets) {
+                        LedgerCtx.mark(PREDICTION_SETTLE, "PREDICTION_BET", bet.getId());
                         userService.updateGameBalance(bet.getUserId(), bet.getContracts());
                     }
                 }
