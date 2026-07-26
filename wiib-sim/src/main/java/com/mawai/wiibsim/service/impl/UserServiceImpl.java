@@ -139,14 +139,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public void updateBalance(Long userId, BigDecimal amount) {
-        int affected = baseMapper.atomicUpdateBalance(userId, amount);
-        if (affected == 0) {
+        BigDecimal after = baseMapper.atomicUpdateBalance(userId, amount);
+        if (after == null) {
             if (baseMapper.selectById(userId) == null) {
                 throw new BizException(ErrorCode.USER_NOT_FOUND);
             }
             throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
         }
-        log.info("用户{}余额更新: {}", userId, amount);
+        log.info("用户{}余额更新: {} 余额: {}", userId, amount, after);
     }
 
     @Override

@@ -66,7 +66,7 @@ class FuturesAdjustLeverageTest {
         when(bracketRegistry.getEffectiveMaxLeverage(anyString(), any())).thenReturn(150);
         when(bracketRegistry.calcMaintenanceMargin(anyString(), any())).thenReturn(new BigDecimal("0.40"));
         when(positionMapper.updateLeverageAndMargin(anyLong(), anyInt(), any())).thenReturn(1);
-        when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(1);
+        when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
 
         service = new FuturesTradingServiceImpl(
                 mock(UserService.class), userMapper, positionMapper, mock(FuturesOrderMapper.class),

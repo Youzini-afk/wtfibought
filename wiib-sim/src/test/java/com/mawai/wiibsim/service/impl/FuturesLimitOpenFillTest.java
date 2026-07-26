@@ -72,7 +72,7 @@ class FuturesLimitOpenFillTest {
         when(orderMapper.casUpdateToFilled(anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(1);
         when(positionMapper.atomicIncreasePosition(anyLong(), any(), any(), any())).thenReturn(1);
         when(userMapper.atomicSettleBalance(anyLong(), any())).thenReturn(1);
-        when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(1);
+        when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
         when(userMapper.atomicDeductFrozenBalance(anyLong(), any())).thenReturn(1);
 
         service = new FuturesSettlementServiceImpl(

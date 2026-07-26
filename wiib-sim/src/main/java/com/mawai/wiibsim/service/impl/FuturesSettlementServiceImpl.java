@@ -614,14 +614,14 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
         // 支付方三级兜底：余额 → 保证金 → 保证金扣光并触发强平复核
         BigDecimal fee = transfer;
-        int affected = userMapper.atomicUpdateBalance(pos.getUserId(), fee.negate());
-        if (affected > 0) {
+        BigDecimal afterPay = userMapper.atomicUpdateBalance(pos.getUserId(), fee.negate());
+        if (afterPay != null) {
             int added = positionMapper.atomicAddFundingFeeTotal(pos.getId(), fee);
             if (added == 0) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
             return new FundingFeeChargeResult(true, false);
         }
 
-        affected = positionMapper.atomicDeductFundingFee(pos.getId(), fee);
+        int affected = positionMapper.atomicDeductFundingFee(pos.getId(), fee);
         if (affected > 0) {
             BigDecimal newMargin = pos.getMargin().subtract(fee);
             BigDecimal liqPrice = positionIndexService.calcStaticLiqPrice(pos.getSymbol(), pos.getSide(), pos.getEntryPrice(),

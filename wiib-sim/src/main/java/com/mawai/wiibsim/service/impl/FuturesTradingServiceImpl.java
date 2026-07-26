@@ -170,8 +170,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             userMapper.atomicSettleBalance(userId, commission.negate());
         } else {
             crossMarginService.assertOutflowAllowed(userId, totalCost);
-            int affected = userMapper.atomicUpdateBalance(userId, totalCost.negate());
-            if (affected == 0) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
+            BigDecimal after = userMapper.atomicUpdateBalance(userId, totalCost.negate());
+            if (after == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
         }
 
         BigDecimal newEntryPrice = position.getEntryPrice().multiply(oldQty)
@@ -246,8 +246,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             if (user.getBalance().add(tolerance).compareTo(totalCost) < 0) {
                 throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
             }
-            int affected = userMapper.atomicUpdateBalance(userId, totalCost.negate());
-            if (affected == 0) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
+            BigDecimal after = userMapper.atomicUpdateBalance(userId, totalCost.negate());
+            if (after == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
         }
 
         FuturesPosition position = new FuturesPosition();
@@ -559,8 +559,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
 
         // 往逐仓仓位里划钱 = 全仓池资金流出
         crossMarginService.assertOutflowAllowed(userId, amount);
-        int affected = userMapper.atomicUpdateBalance(userId, amount.negate());
-        if (affected == 0) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
+        BigDecimal after = userMapper.atomicUpdateBalance(userId, amount.negate());
+        if (after == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
 
         int affected2 = positionMapper.atomicAddMargin(request.getPositionId(), amount);
         if (affected2 == 0) throw new BizException(ErrorCode.FUTURES_POSITION_CLOSED);
@@ -620,8 +620,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
         int affected = positionMapper.atomicReduceMargin(position.getId(), amount);
         if (affected == 0) throw new BizException(ErrorCode.FUTURES_MARGIN_TOO_LOW);
 
-        int credited = userMapper.atomicUpdateBalance(userId, amount);
-        if (credited == 0) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
+        BigDecimal credited = userMapper.atomicUpdateBalance(userId, amount);
+        if (credited == null) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
 
         BigDecimal liqPrice = positionIndexService.calcStaticLiqPrice(position.getSymbol(), position.getSide(),
                 position.getEntryPrice(), newMargin, position.getQuantity());

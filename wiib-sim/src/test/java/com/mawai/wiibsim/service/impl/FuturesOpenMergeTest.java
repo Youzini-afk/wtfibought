@@ -78,7 +78,7 @@ class FuturesOpenMergeTest {
         when(cacheService.getMarkPrice(SYMBOL)).thenReturn(new BigDecimal("110"));
         when(bracketRegistry.getEffectiveMaxLeverage(anyString(), any())).thenReturn(150);
         when(positionMapper.atomicIncreasePosition(anyLong(), any(), any(), any())).thenReturn(1);
-        when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(1);
+        when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
         when(userMapper.atomicSettleBalance(anyLong(), any())).thenReturn(1);
 
         service = new FuturesTradingServiceImpl(
@@ -136,6 +136,28 @@ class FuturesOpenMergeTest {
         assertThat(captor.getValue().getOrderSide()).isEqualTo("OPEN_LONG");
         assertThat(captor.getValue().getPositionId()).isEqualTo(1L);
         assertThat(captor.getValue().getStatus()).isEqualTo("FILLED");
+    }
+
+    /**
+     * 扣款返 null（余额不足）必须拒单——钉死 atomicUpdateBalance 改 RETURNING 后的"null=没扣成"极性。
+     * <p>
+     * 在此之前全仓库没有任何一处 stub 资金方法返失败值的单测：把 {@code if (after == null) throw}
+     * 写反成 {@code != null}，其余 127 个用例照样全绿。Task 4 要批量转约 40 处调用点，全靠人眼，
+     * 这条是那批改动的网——别删。
+     */
+    @Test
+    void 逐仓开仓_扣款返null_按余额不足拒单() {
+        when(positionMapper.selectList(any())).thenReturn(List.of());
+        when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(null);
+
+        assertThatThrownBy(() -> service.doOpenPosition(UID, marketReq("LONG", "ISOLATED", 50, "1")))
+                .isInstanceOf(BizException.class)
+                .extracting("code").isEqualTo(ErrorCode.FUTURES_INSUFFICIENT_BALANCE.getCode());
+
+        // mock 用户余额 10000 远大于本单成本 2.24，扣款前的余额预检不可能先抛；
+        // verify 确认确实走到了扣款这一步，异常来自 null 判定而不是预检——否则这测试是假绿的
+        verify(userMapper).atomicUpdateBalance(eq(UID), any());
+        verify(positionMapper, never()).insert(any(FuturesPosition.class));
     }
 
     @Test
