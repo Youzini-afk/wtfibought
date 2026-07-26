@@ -32,4 +32,7 @@ public interface PredictionService {
     void settlePreviousRound();
 
     void syncOpenPrice();
+
+    /** 卡死巡检：报出永久停在 LOCKED 的回合（只告警，不自动重试） */
+    void sweepStuckRounds();
 }

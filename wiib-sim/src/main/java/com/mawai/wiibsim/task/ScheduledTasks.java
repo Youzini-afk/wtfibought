@@ -6,6 +6,7 @@ import com.mawai.wiibsim.service.FuturesSettlementService;
 import com.mawai.wiibsim.service.RankingService;
 import com.mawai.wiibsim.service.BankruptcyService;
 import com.mawai.wiibsim.service.MarginAccountService;
+import com.mawai.wiibsim.service.PredictionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -29,6 +30,7 @@ public class ScheduledTasks {
     private final MarginAccountService marginAccountService;
     private final BankruptcyService bankruptcyService;
     private final CrossLiquidationService crossLiquidationService;
+    private final PredictionService predictionService;
 
     /** 全仓健康兜底轮询：价格tick是主触发，这里兜住行情静默/进程重启的空窗 */
     @Scheduled(fixedRate = 30 * 1000)
@@ -95,6 +97,22 @@ public class ScheduledTasks {
                 futuresSettlementService.executeTriggeredOrders();
             } catch (Exception e) {
                 log.error("futures小时维护失败", e);
+            }
+        });
+    }
+
+    /**
+     * 预测回合卡死巡检（每5分钟，错开窗口边界30秒）。
+     * 结算靠 Redis Stream 事件单次触发，没有重投也没有补偿：结算事务一失败回合就永久停在 LOCKED，
+     * 用户买入时扣的钱既卖不掉也退不了。这里只负责让它可见，不自动重试（部分派彩的幂等是另一件事）。
+     */
+    @Scheduled(cron = "30 */5 * * * *")
+    public void sweepStuckPredictionRounds() {
+        Thread.startVirtualThread(() -> {
+            try {
+                predictionService.sweepStuckRounds();
+            } catch (Exception e) {
+                log.error("预测回合卡死巡检失败", e);
             }
         });
     }

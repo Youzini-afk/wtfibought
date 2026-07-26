@@ -66,6 +66,8 @@ class FuturesAdjustLeverageTest {
         when(bracketRegistry.getEffectiveMaxLeverage(anyString(), any())).thenReturn(150);
         when(bracketRegistry.calcMaintenanceMargin(anyString(), any())).thenReturn(new BigDecimal("0.40"));
         when(positionMapper.updateLeverageAndMargin(anyLong(), anyInt(), any())).thenReturn(1);
+        // 资金方法返"变动后余额"，非 null 即成功；本类只断是否调用/调用参数，这个 10000 不被消费。
+        // 别看它与场景余额不符就去"修"：记账切面只织在真 Spring 代理上，裸 mock 单测里压根不参与
         when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
 
         service = new FuturesTradingServiceImpl(

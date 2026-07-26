@@ -78,8 +78,9 @@ class FuturesOpenMergeTest {
         when(cacheService.getMarkPrice(SYMBOL)).thenReturn(new BigDecimal("110"));
         when(bracketRegistry.getEffectiveMaxLeverage(anyString(), any())).thenReturn(150);
         when(positionMapper.atomicIncreasePosition(anyLong(), any(), any(), any())).thenReturn(1);
+        // 资金方法返"变动后余额"，非 null 即成功；具体数值本类不断言，给个占位即可。
+        // 这些值也不会流进账本：记账切面只织在真 Spring 代理上，裸 mock 单测里压根不参与
         when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
-        // 资金方法返"变动后余额"，非 null 即成功；具体数值本类不断言，给个占位即可
         when(userMapper.atomicSettleBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
 
         service = new FuturesTradingServiceImpl(

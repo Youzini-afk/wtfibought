@@ -559,6 +559,28 @@ public class PredictionServiceImpl implements PredictionService {
         }
     }
 
+    /**
+     * 卡死巡检。settlePreviousRound 那个事务失败就没人再管这个回合（无重投、无补偿、无兜底调度，
+     * 理由见那边的长注释），而记账切面刚给它加了一个刻意不 catch 的失败源（ledger INSERT 失败必须抛
+     * 才能保证账实一致）。卡住的后果是用户买入时扣的 cost + commission 永久冻结：回合停在 LOCKED，
+     * sell 又要求 OPEN，既卖不掉也退不了。
+     * <p>
+     * 刻意只告警不自动重试：重试得处理"部分派彩已完成"的幂等（回合已 SETTLED、注单已改状态、
+     * 派彩走了一半），那是另一件事。先让问题可见，人工介入。
+     */
+    @Override
+    public void sweepStuckRounds() {
+        // 阈值取上一窗口的起点：prevWs 那个回合正在被结算，合法地停在 LOCKED，必须排除。
+        // 只报比它更老的——那些已经白等了一整个结算周期，不可能还有人来捞。
+        // 查询只捞还带 ACTIVE 注单的（=真有钱被冻着），理由见 selectStuckLocked 的注释。
+        long staleBefore = previousWindowStart();
+        List<PredictionRound> stuck = roundMapper.selectStuckLocked(staleBefore);
+        for (PredictionRound round : stuck) {
+            log.warn("[Prediction] 回合卡在 LOCKED 未结算，用户本金被冻着（卖不掉也退不了），需人工介入: "
+                    + "roundId={} windowStart={}", round.getId(), round.getWindowStart());
+        }
+    }
+
     // ==================== 广播 ====================
 
     private void broadcastRoundUpdate(PredictionRound round) {
