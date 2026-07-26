@@ -310,8 +310,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             crossMarginService.assertCanAfford(userId, frozenAmount);
         } else {
             crossMarginService.assertOutflowAllowed(userId, frozenAmount);
-            int affected = userMapper.atomicFreezeBalance(userId, frozenAmount);
-            if (affected == 0) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
+            var frozen = userMapper.atomicFreezeBalance(userId, frozenAmount);
+            if (frozen == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
         }
 
         FuturesOrder order = new FuturesOrder();

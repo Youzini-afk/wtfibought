@@ -51,8 +51,8 @@ public class MarginAccountServiceImpl implements MarginAccountService {
             throw new BizException(ErrorCode.USER_BANKRUPT);
         }
 
-        int affected = userMapper.atomicAddMarginLoanPrincipal(userId, principalDelta);
-        if (affected == 0) {
+        BigDecimal afterPrincipal = userMapper.atomicAddMarginLoanPrincipal(userId, principalDelta);
+        if (afterPrincipal == null) {
             throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
         }
         userMapper.ensureMarginInterestLastDate(userId, LocalDate.now());
@@ -83,18 +83,25 @@ public class MarginAccountServiceImpl implements MarginAccountService {
 
         BigDecimal creditedToBalance = remaining;
 
-        int affected = userMapper.atomicApplyCashInflow(userId, paidInterest, paidPrincipal, creditedToBalance);
-        if (affected == 0) {
+        var r = userMapper.atomicApplyCashInflow(userId, paidInterest, paidPrincipal, creditedToBalance);
+        if (r == null) {
             throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
         }
         // 本金已还清：清掉计息起算点。留着的话下次借款时 COALESCE 会保留旧值，
-        // 把还清后这段没欠钱的空档天数一并算成利息
+        // 把还清后这段没欠钱的空档天数一并算成利息。
+        //
+        // 别"顺手优化"成 r.marginLoanPrincipal()：上面是 selectByIdForUpdate 持着行锁读的，
+        // 锁内没人能改这行，"读到的本金 − 还掉的本金"与 RETURNING 回来的本金恒等，换了不多对一分。
+        // 但 MarginInterestAnchorTest 的 mock 是参数无关的固定返回值（本金恒为 0），换成 r 会让
+        // 4 条用例全走进"已还清"分支、断言 never() 的那 2 条直接红；要救就得把 mock 改成
+        // thenAnswer 按入参重算——那等于在 mock 里重新实现一遍这条 SQL，日后必跟真 SQL 漂移。
         if (principal.subtract(paidPrincipal).compareTo(BigDecimal.ZERO) <= 0) {
             userMapper.clearMarginInterestLastDate(userId);
         }
 
-        log.info("现金流入自动还款 userId={} amount={} paidInterest={} paidPrincipal={} creditBalance={} reason={}",
-                userId, amount, paidInterest, paidPrincipal, creditedToBalance, reason);
+        log.info("现金流入自动还款 userId={} amount={} paidInterest={} paidPrincipal={} creditBalance={} 余息={} 余本={} 余额={} reason={}",
+                userId, amount, paidInterest, paidPrincipal, creditedToBalance,
+                r.marginInterestAccrued(), r.marginLoanPrincipal(), r.balance(), reason);
 
         return new MarginRepayResult(paidInterest, paidPrincipal, creditedToBalance);
     }
@@ -162,12 +169,12 @@ public class MarginAccountServiceImpl implements MarginAccountService {
             return;
         }
 
-        int affected = userMapper.atomicAccrueInterest(userId, interestDelta, today);
-        if (affected == 0) {
+        BigDecimal afterInterest = userMapper.atomicAccrueInterest(userId, interestDelta, today);
+        if (afterInterest == null) {
             throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
         }
 
-        log.info("杠杆计息 userId={} principal={} days={} rate={} interestDelta={}",
-                userId, principal, days, dailyRate, interestDelta);
+        log.info("杠杆计息 userId={} principal={} days={} rate={} interestDelta={} 累计利息={}",
+                userId, principal, days, dailyRate, interestDelta, afterInterest);
     }
 }

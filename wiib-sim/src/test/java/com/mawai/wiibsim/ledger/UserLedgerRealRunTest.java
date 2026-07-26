@@ -11,6 +11,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -146,5 +147,103 @@ class UserLedgerRealRunTest {
 
         // record 版同样遵守 null=没改成：余额不够时整个 record 返 null，不是返一个装满 null 的 record
         assertThat(probeMapper.atomicFreezeBalanceProbe(uid, new BigDecimal("99999.00"))).isNull();
+    }
+
+    /**
+     * 上面那条用的是探针 mapper，这条打真正在跑的 UserMapper.atomicFreezeBalance。
+     * 同样刻意让两个钱包取不同值（600/400），列序写反两行断言都会红——别把值改成一样的。
+     */
+    @Test
+    void 冻结返回两个钱包新值() {
+        Long uid = newUser("1000.00");
+
+        UserMapper.BalanceFrozen r = userMapper.atomicFreezeBalance(uid, new BigDecimal("400.00"));
+
+        assertThat(r).isNotNull();
+        assertThat(r.balance()).isEqualByComparingTo("600.00");          // 对调则变 400.00
+        assertThat(r.frozenBalance()).isEqualByComparingTo("400.00");    // 对调则变 600.00
+    }
+
+    /**
+     * 划转是唯一"两个钱包加减的金额不一样"的方法（差额=手续费），
+     * 正好用来验 RETURNING balance, game_balance 的列序：900 / 99 差得远，对调必红。
+     */
+    @Test
+    void 划转返回余额与游戏钱包新值() {
+        Long uid = newUser("1000.00");
+
+        // net = amount − 1% 手续费，转出扣 100、到账 99
+        UserMapper.BalanceGame r = userMapper.atomicTransferToGame(
+                uid, new BigDecimal("100.00"), new BigDecimal("99.00"));
+
+        assertThat(r).isNotNull();
+        assertThat(r.balance()).isEqualByComparingTo("900.00");      // 对调则变 99.00
+        assertThat(r.gameBalance()).isEqualByComparingTo("99.00");   // 对调则变 900.00
+    }
+
+    /**
+     * 解冻单独测一遍。它的 RETURNING 列序和冻结那条一模一样，所以上面那条用例保护不到它——
+     * 谁把这条的列序写反，就是"静默错账 + 零测试"。
+     * 先冻 400 垫出冻结余额，再解冻 100，落到 700 / 300，两值不同，对调必红。
+     */
+    @Test
+    void 解冻返回两个钱包新值() {
+        Long uid = newUser("1000.00");
+
+        // 垫场：balance 1000→600，frozen 0→400
+        assertThat(userMapper.atomicFreezeBalance(uid, new BigDecimal("400.00"))).isNotNull();
+
+        UserMapper.BalanceFrozen r = userMapper.atomicUnfreezeBalance(uid, new BigDecimal("100.00"));
+
+        assertThat(r).isNotNull();
+        assertThat(r.balance()).isEqualByComparingTo("700.00");          // 对调则变 300.00
+        assertThat(r.frozenBalance()).isEqualByComparingTo("300.00");    // 对调则变 700.00
+    }
+
+    /**
+     * 反向划转单独测一遍：它的 SET 是"先 game 后 balance"、RETURNING 是"先 balance 后 game"，
+     * 两边顺序天生不一致，最容易被人"顺手对齐"成 RETURNING game_balance, balance——那就静默错账。
+     * 顺带验了 atomicUpdateGameBalance 的返回值。
+     */
+    @Test
+    void 反向划转的列序不跟着SET走() {
+        Long uid = newUser("1000.00");
+
+        assertThat(userMapper.atomicUpdateGameBalance(uid, new BigDecimal("200.00")))
+                .isEqualByComparingTo("200.00");
+
+        // 游戏钱包扣 100、余额到账 99（1% 手续费）
+        UserMapper.BalanceGame r = userMapper.atomicTransferToBalance(
+                uid, new BigDecimal("100.00"), new BigDecimal("99.00"));
+
+        assertThat(r).isNotNull();
+        assertThat(r.balance()).isEqualByComparingTo("1099.00");     // 对调则变 100.00
+        assertThat(r.gameBalance()).isEqualByComparingTo("100.00");  // 对调则变 1099.00
+    }
+
+    /**
+     * CashInflow 是三列 record，列序最容易写反的一个：三个组件全是 BigDecimal，
+     * 对调不报错，就是把利息当本金、把本金当余额记进账。
+     * 所以三个新值刻意互不相同（20 / 400 / 1005），任意两列对调都会红。
+     * 顺带验了 atomicAddMarginLoanPrincipal / atomicAccrueInterest 的返回值。
+     */
+    @Test
+    void 现金流入返回三列新值() {
+        Long uid = newUser("1000.00");
+
+        // 先欠上：本金 500、利息 30（两列 DB 默认 0，用真方法加上去，顺便测它们的返回值）
+        assertThat(userMapper.atomicAddMarginLoanPrincipal(uid, new BigDecimal("500.00")))
+                .isEqualByComparingTo("500.00");
+        assertThat(userMapper.atomicAccrueInterest(uid, new BigDecimal("30.00"), LocalDate.now()))
+                .isEqualByComparingTo("30.00");
+
+        // 还息 10、还本 100，剩 5 入余额
+        UserMapper.CashInflow r = userMapper.atomicApplyCashInflow(uid,
+                new BigDecimal("10.00"), new BigDecimal("100.00"), new BigDecimal("5.00"));
+
+        assertThat(r).isNotNull();
+        assertThat(r.marginInterestAccrued()).isEqualByComparingTo("20.00");
+        assertThat(r.marginLoanPrincipal()).isEqualByComparingTo("400.00");
+        assertThat(r.balance()).isEqualByComparingTo("1005.00");
     }
 }

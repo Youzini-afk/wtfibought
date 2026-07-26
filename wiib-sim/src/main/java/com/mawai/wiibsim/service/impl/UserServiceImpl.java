@@ -151,38 +151,38 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public void freezeBalance(Long userId, BigDecimal amount) {
-        int affected = baseMapper.atomicFreezeBalance(userId, amount);
-        if (affected == 0) {
+        var r = baseMapper.atomicFreezeBalance(userId, amount);
+        if (r == null) {
             if (baseMapper.selectById(userId) == null) {
                 throw new BizException(ErrorCode.USER_NOT_FOUND);
             }
             throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
         }
-        log.info("用户{}冻结余额: {}", userId, amount);
+        log.info("用户{}冻结余额: {} 可用: {} 冻结: {}", userId, amount, r.balance(), r.frozenBalance());
     }
 
     @Override
     public void unfreezeBalance(Long userId, BigDecimal amount) {
-        int affected = baseMapper.atomicUnfreezeBalance(userId, amount);
-        if (affected == 0) {
+        var r = baseMapper.atomicUnfreezeBalance(userId, amount);
+        if (r == null) {
             if (baseMapper.selectById(userId) == null) {
                 throw new BizException(ErrorCode.USER_NOT_FOUND);
             }
             throw new BizException(ErrorCode.FROZEN_BALANCE_NOT_ENOUGH);
         }
-        log.info("用户{}解冻余额: {}", userId, amount);
+        log.info("用户{}解冻余额: {} 可用: {} 冻结: {}", userId, amount, r.balance(), r.frozenBalance());
     }
 
     @Override
     public void deductFrozenBalance(Long userId, BigDecimal amount) {
-        int affected = baseMapper.atomicDeductFrozenBalance(userId, amount);
-        if (affected == 0) {
+        BigDecimal afterFrozen = baseMapper.atomicDeductFrozenBalance(userId, amount);
+        if (afterFrozen == null) {
             if (baseMapper.selectById(userId) == null) {
                 throw new BizException(ErrorCode.USER_NOT_FOUND);
             }
             throw new BizException(ErrorCode.FROZEN_BALANCE_NOT_ENOUGH);
         }
-        log.info("用户{}扣除冻结余额: {}", userId, amount);
+        log.info("用户{}扣除冻结余额: {} 冻结: {}", userId, amount, afterFrozen);
     }
 
     @Override
@@ -194,14 +194,14 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
 
     @Override
     public void updateGameBalance(Long userId, BigDecimal amount) {
-        int affected = baseMapper.atomicUpdateGameBalance(userId, amount);
-        if (affected == 0) {
+        BigDecimal afterGame = baseMapper.atomicUpdateGameBalance(userId, amount);
+        if (afterGame == null) {
             if (baseMapper.selectById(userId) == null) {
                 throw new BizException(ErrorCode.USER_NOT_FOUND);
             }
             throw new BizException(ErrorCode.GAME_BALANCE_NOT_ENOUGH);
         }
-        log.info("用户{}游戏钱包更新: {}", userId, amount);
+        log.info("用户{}游戏钱包更新: {} 游戏钱包: {}", userId, amount, afterGame);
     }
 
     /** 划转手续费率 1%：转出方全额扣，到账 = amount − fee，手续费即销毁（平台无账户） */
@@ -211,24 +211,26 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     @Transactional(rollbackFor = Exception.class)
     public void transferToGame(Long userId, BigDecimal amount) {
         BigDecimal fee = validateAndCalcFee(amount);
-        int affected = baseMapper.atomicTransferToGame(userId, amount, amount.subtract(fee));
-        if (affected == 0) {
+        var r = baseMapper.atomicTransferToGame(userId, amount, amount.subtract(fee));
+        if (r == null) {
             throw new BizException(ErrorCode.BALANCE_NOT_ENOUGH);
         }
         insertTransferLog(userId, WalletTransfer.TO_GAME, amount, fee);
-        log.info("用户{}划转 余额→游戏: {} 手续费: {}", userId, amount, fee);
+        log.info("用户{}划转 余额→游戏: {} 手续费: {} 余额: {} 游戏钱包: {}",
+                userId, amount, fee, r.balance(), r.gameBalance());
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void transferToBalance(Long userId, BigDecimal amount) {
         BigDecimal fee = validateAndCalcFee(amount);
-        int affected = baseMapper.atomicTransferToBalance(userId, amount, amount.subtract(fee));
-        if (affected == 0) {
+        var r = baseMapper.atomicTransferToBalance(userId, amount, amount.subtract(fee));
+        if (r == null) {
             throw new BizException(ErrorCode.GAME_BALANCE_NOT_ENOUGH);
         }
         insertTransferLog(userId, WalletTransfer.TO_BALANCE, amount, fee);
-        log.info("用户{}划转 游戏→余额: {} 手续费: {}", userId, amount, fee);
+        log.info("用户{}划转 游戏→余额: {} 手续费: {} 余额: {} 游戏钱包: {}",
+                userId, amount, fee, r.balance(), r.gameBalance());
     }
 
     private BigDecimal validateAndCalcFee(BigDecimal amount) {

@@ -250,8 +250,8 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
             userMapper.atomicSettleBalance(order.getUserId(), commission.negate());
         } else {
             BigDecimal frozenAmount = order.getFrozenAmount();
-            int deducted = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
-            if (deducted == 0) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
+            BigDecimal afterFrozen = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
+            if (afterFrozen == null) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
             if (actualCost.compareTo(frozenAmount) < 0) {
                 BigDecimal refund = frozenAmount.subtract(actualCost);
                 userMapper.atomicUpdateBalance(order.getUserId(), refund);
@@ -318,8 +318,8 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
             userMapper.atomicSettleBalance(order.getUserId(), commission.negate());
         } else {
             BigDecimal frozenAmount = order.getFrozenAmount();
-            int deducted = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
-            if (deducted == 0) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
+            BigDecimal afterFrozen = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
+            if (afterFrozen == null) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
             if (actualCost.compareTo(frozenAmount) < 0) {
                 userMapper.atomicUpdateBalance(order.getUserId(), frozenAmount.subtract(actualCost));
             }
@@ -435,9 +435,9 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
         BigDecimal frozenAmount = order.getFrozenAmount();
         if (!FuturesPosition.CROSS.equals(order.getMarginMode())
                 && frozenAmount != null && frozenAmount.compareTo(BigDecimal.ZERO) > 0) {
-            int deducted = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
+            BigDecimal afterFrozen = userMapper.atomicDeductFrozenBalance(order.getUserId(), frozenAmount);
             // 异常状态：cancel 前 frozen 必然存在，扣不到说明数据被并发改动，整事务回滚避免余额凭空增加
-            if (deducted == 0) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
+            if (afterFrozen == null) throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED);
             userMapper.atomicUpdateBalance(order.getUserId(), frozenAmount);
         }
         log.info("futures限价单触发后取消 orderId={} reason={} refund={}",

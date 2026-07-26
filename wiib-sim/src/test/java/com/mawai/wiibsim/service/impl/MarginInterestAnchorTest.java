@@ -34,7 +34,12 @@ class MarginInterestAnchorTest {
         user.setMarginInterestAccrued(new BigDecimal(interest));
         user.setMarginLoanPrincipal(new BigDecimal(principal));
         when(userMapper.selectByIdForUpdate(1L)).thenReturn(user);
-        when(userMapper.atomicApplyCashInflow(anyLong(), any(), any(), any())).thenReturn(1);
+        // 返回非 null 即"改成了"；被测分支只看"读到的本金 − 还掉的本金"，不读这三列，所以给固定值就够。
+        // 注意本金这里故意恒为 0，和"还欠 1500"之类的用例设定对不上——是刻意的：
+        // 谁要是把 MarginAccountServiceImpl 那处判断改成读 r.marginLoanPrincipal()，
+        // 4 条用例会全部走进"已还清"分支，断言 never() 的两条立刻红，正好拦住这个改动。
+        when(userMapper.atomicApplyCashInflow(anyLong(), any(), any(), any()))
+                .thenReturn(new UserMapper.CashInflow(BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("10000")));
     }
 
     @Test

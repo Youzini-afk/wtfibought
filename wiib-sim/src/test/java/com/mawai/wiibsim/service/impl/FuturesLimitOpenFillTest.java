@@ -71,9 +71,10 @@ class FuturesLimitOpenFillTest {
         when(orderMapper.casUpdateStatus(anyLong(), anyString(), anyString())).thenReturn(1);
         when(orderMapper.casUpdateToFilled(anyLong(), any(), any(), any(), any(), any(), any())).thenReturn(1);
         when(positionMapper.atomicIncreasePosition(anyLong(), any(), any(), any())).thenReturn(1);
-        when(userMapper.atomicSettleBalance(anyLong(), any())).thenReturn(1);
+        // 资金方法返"变动后余额"，非 null 即成功；具体数值本类不断言，给个占位即可
+        when(userMapper.atomicSettleBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
         when(userMapper.atomicUpdateBalance(anyLong(), any())).thenReturn(new BigDecimal("10000"));
-        when(userMapper.atomicDeductFrozenBalance(anyLong(), any())).thenReturn(1);
+        when(userMapper.atomicDeductFrozenBalance(anyLong(), any())).thenReturn(BigDecimal.ZERO);
 
         service = new FuturesSettlementServiceImpl(
                 userService, userMapper, positionMapper, orderMapper,
