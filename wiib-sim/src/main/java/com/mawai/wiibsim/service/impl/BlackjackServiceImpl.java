@@ -518,19 +518,7 @@ public class BlackjackServiceImpl implements BlackjackService {
     @Ledger(BLACKJACK_CONVERT)
     public ConvertResultDTO convert(Long userId, long amount) {
         // 全类唯一动 user.game_balance 的地方（筹码在 blackjack_account，不是账本钱包）。
-        // 事务由 executeInLockTx 编程式开（加锁→开事务→业务→提交→放锁）：扣筹码、进游戏钱包、
-        // 写兑现日志、切面记的账同生共死。
-        //
-        // 【这里叠 @Transactional 会真造出钱来，比别处严重】注解事务把 begin 提到抢锁之前，
-        // 顺序变成"先放锁后提交"。本方法是读-改-写全行覆写（getOrCreateAccount 读快照 →
-        // 改 chips/todayConverted → updateById 整行写回），而 blackjack_account 既没有 CAS
-        // 也没有 @Version 兜底：T1 放锁后还没提交，T2 抢到锁读到同一份旧快照，
-        // 结果 game_balance 进两份 a、chips 只扣一份 a，todayConverted 同样被覆盖、日限额被绕过。
-        // Mines/VP 靠 getSession != null 挡重入，convert 不建 session，那层兜底在这儿没有。
-        // "锁外事务内"是项目既定范式，见 FuturesTradingServiceImpl.addMargin/doAddMargin。
-        //
-        // 【别指望测试兜这条】GameLockExecutorTest 是 new 执行器 + mock TransactionTemplate，
-        // 守的是 executeInLockTx 内部那层嵌套；本方法叠上 @Transactional 它照样全绿。零测试，注释即防线。
+        // blackjack_account 是读-改-写全行覆写，无 CAS 无 @Version，全靠这把锁串行——重入就能造出钱
         return gameLock.executeInLockTx(LK, userId, () -> {
             if (amount <= 0) {
                 throw new BizException(ErrorCode.PARAM_ERROR);

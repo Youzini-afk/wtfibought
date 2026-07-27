@@ -20,9 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.List;
 
 import static com.mawai.wiibsim.service.impl.FuturesHelper.calculatePnl;
 import static com.mawai.wiibsim.service.impl.FuturesHelper.markPrice;
+import static com.mawai.wiibsim.service.impl.FuturesHelper.removeFromLimitZSet;
 
 @Slf4j
 @Service
@@ -47,7 +49,7 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
 
     @Override
     public void checkUser(Long userId) {
-        // 用户级锁：同一账户的检查/爆仓串行，价格tick与兜底轮询撞车时后到者直接放弃（下轮总会再来）
+        // 用户级锁：同一账户的检查/爆仓串行
         String lockKey = "futures:cross:liq:" + userId;
         String lockValue = redisLockUtil.tryLock(lockKey, 30);
         if (lockValue == null) return;
@@ -123,10 +125,33 @@ public class CrossLiquidationServiceImpl implements CrossLiquidationService {
         }
         if (closed == 0) return;
 
-        log.warn("全仓爆仓 userId={} 平仓数={} 结算={}", userId, closed, settle);
+        int cancelled = cancelCrossOpenOrders(userId);
+
+        log.warn("全仓爆仓 userId={} 平仓数={} 撤单数={} 结算={}", userId, closed, cancelled, settle);
         // 合并成一条：每仓一条会把信封刷满。closed 只统计 CAS 抢到的仓位，并发手动平仓的那些不算进来
         tradeNotificationService.crossLiquidation(userId, closed, settle);
         // 占用制下保证金没离开过余额，结算只记盈亏净额；全平后已无全仓仓位，扣穿由 settle 触发破产
         crossMarginService.settle(userId, settle);
+    }
+
+    /**
+     * 爆仓后撤掉该用户残留的全仓开仓挂单。
+     */
+    private int cancelCrossOpenOrders(Long userId) {
+        List<FuturesOrder> pendings = orderMapper.selectList(new LambdaQueryWrapper<FuturesOrder>()
+                .eq(FuturesOrder::getUserId, userId)
+                .eq(FuturesOrder::getMarginMode, FuturesPosition.CROSS)
+                .in(FuturesOrder::getStatus, "PENDING", "TRIGGERED")
+                .notLikeRight(FuturesOrder::getOrderSide, "CLOSE"));
+
+        int cancelled = 0;
+        for (FuturesOrder order : pendings) {
+            // 逐单CAS不批量UPDATE：TRIGGERED单可能正被doProcessTriggeredOrder抢去转PROCESSING，抢输了就别动
+            if (orderMapper.casUpdateStatus(order.getId(), order.getStatus(), "CANCELLED") == 0) continue;
+            // TRIGGERED单在扫描时已被zRangeByScoreAndRemove摘走，这里ZREM返0无害；PENDING单靠这句摘干净
+            removeFromLimitZSet(order, cacheService);
+            cancelled++;
+        }
+        return cancelled;
     }
 }

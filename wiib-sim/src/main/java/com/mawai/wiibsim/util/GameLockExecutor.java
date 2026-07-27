@@ -13,7 +13,10 @@ import java.util.function.Supplier;
 /**
  * 游戏通用：分布式锁 + 编程式事务 + Redis Session 管理
  * <p>
- * 执行顺序：加锁 → 开事务 → 业务 → 提交事务 → 释放锁
+ * 执行顺序：加锁 → 开事务 → 业务 → 提交事务 → 释放锁（顺序由 GameLockExecutorTest 守）
+ * <p>
+ * <b>调用方别再叠 @Transactional</b>：注解事务的 begin 在抢锁之前，顺序会翻成"先放锁后提交"，
+ * 串行化击穿。那个测试测的是本类内部，拦不住调用方叠注解。
  */
 @Component
 @RequiredArgsConstructor

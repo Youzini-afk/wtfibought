@@ -22,28 +22,13 @@ import java.util.List;
 import static com.mawai.wiibsim.service.impl.FuturesHelper.*;
 
 /**
- * 强平/止损/止盈触发索引的写入侧（Redis ZSet），消费侧是 FuturesLiquidationServiceImpl。
+ * 强平/止损/止盈触发索引的写入侧（Redis ZSet），消费侧 FuturesLiquidationServiceImpl。
  * <p>
- * <b>这里刻意逐条走 cacheService.zAdd/zRemove，不用 pipeline —— 别"优化"回去。</b>
- * 原写法是 {@code stringRedisTemplate.executePipelined} 里 {@code (StringRedisConnection) connection} 强转。
- * Spring Boot 4（spring-data-redis 4.1.0）把 {@code StringRedisTemplate.preProcessConnection} 删了
- * （3.4/3.5 还在）：正是那一层负责把连接包成 {@code DefaultStringRedisConnection}
- * （它 implements {@code StringRedisConnection}），RedisTemplate 按实现类接口生成的 JDK 代理才带得上
- * 这个接口、强转才合法。删掉后基类原样返回 Lettuce 连接，暴露出来的代理<b>不含</b>该接口，强转必抛
- * ClassCastException。
- * <p>
- * 最坑的是 {@code StringRedisConnection} 这个接口本身 4.1.0 里还在，所以<b>编译期一点动静没有</b>，
- * 只在运行期炸：市价开仓 500 + 事务回滚、止损止盈全挂、带仓位的用户爆仓永远完不成、
- * 启动日志"重建futures ZSet索引 成功=0 失败=N"。
- * <p>
- * 为什么不是"保留 pipeline，改用 {@code conn.zAdd(key.getBytes(UTF_8), score, member.getBytes(UTF_8))}"：
- * 那等于把序列化契约手抄一份进业务代码，跟消费侧 StringRedisSerializer 一旦对不上就是静默错 key，
- * 比 ClassCastException 更难查。而 pipeline 在这里本来也没什么可省：单仓位最多 1 条强平 + 4 条 SL
- * + 4 条 TP（SL/TP 条数由 FUTURES_SPLIT_LIMIT 卡死 4），init() 还是逐个仓位调的，攒不出批量。
- * 用一个编译器看不见的坑去换个位数的 round trip，不值。
- * <p>
- * 现在写入侧和消费侧、以及限价单索引（FuturesHelper.addToLimitZSet）统一都走 cacheService，
- * key/member 序列化只有一份来源。
+ * <b>逐条 zAdd/zRemove 是刻意的，别改回 pipeline。</b>Spring Boot 4（spring-data-redis 4.1.0）删了
+ * {@code StringRedisTemplate.preProcessConnection}，{@code executePipelined} 里那句
+ * {@code (StringRedisConnection) connection} 必抛 CCE——接口还在，编译期毫无动静，只运行期炸。
+ * 保 pipeline 改手写 {@code getBytes} 更糟：序列化契约分叉两份，跟消费侧对不上就是静默错 key。
+ * 何况单仓位最多 1 强平 + 4 SL + 4 TP，pipeline 本就省不出什么。
  */
 @Slf4j
 @Service
@@ -123,7 +108,6 @@ public class FuturesPositionIndexServiceImpl implements FuturesPositionIndexServ
         if (stopLosses == null || stopLosses.isEmpty()) return;
         String key = slKey(symbol, side);
         for (FuturesStopLoss sl : stopLosses) {
-            // cacheService.zAdd 参数序是 (key, member, score)，跟 RedisConnection.zAdd(key, score, member) 正好相反，别抄反
             cacheService.zAdd(key, member(positionId, sl.getId()), sl.getPrice().doubleValue());
         }
     }
@@ -155,7 +139,7 @@ public class FuturesPositionIndexServiceImpl implements FuturesPositionIndexServ
         }
     }
 
-    // ==================== key/member 拼装：写入侧与消费侧(FuturesLiquidationServiceImpl)必须一致 ====================
+    // key/member 拼装：必须与消费侧 FuturesLiquidationServiceImpl 一致
 
     private static String liqKey(String symbol, String side) {
         return "LONG".equals(side) ? LIQ_LONG_PREFIX + symbol : LIQ_SHORT_PREFIX + symbol;

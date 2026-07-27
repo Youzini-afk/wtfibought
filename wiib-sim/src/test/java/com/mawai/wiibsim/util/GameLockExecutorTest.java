@@ -28,24 +28,10 @@ import static org.mockito.Mockito.when;
 /**
  * 锁死 {@link GameLockExecutor#executeInLockTx} 的四段顺序：<b>加锁 → 开事务 → 业务 → 提交/回滚 → 放锁</b>。
  * <p>
- * <b>这个顺序为什么不能反：锁必须活过事务。</b>四个游戏 service（Mines/VideoPoker/Blackjack 的
- * 下注派彩兑现、以及同款写法的 Prediction 买卖结算）全靠这个执行器把"扣钱 + 建局 + 切面记的账"
- * 圈进一个事务。锁的职责是把同一用户的请求串成一条队；一旦放锁跑到提交前面，
- * 后一个请求就能在前一笔还没提交时抢到锁、读到<b>旧的已提交余额</b>做前置校验
- * （PG 是 READ COMMITTED，不会脏读，读到的是过期值），串行化保证就此击穿。
- * 余额本身还有 {@code UPDATE ... WHERE balance + delta >= 0} 的行锁兜底不会真扣穿，
- * 但 {@code blackjack_account} 那种"读-改-写全行覆写、无 CAS 无 @Version"的表没有这层兜底
- * —— 兑现能真造出钱来（两笔各读到同一份旧 chips 快照，game_balance 进两份、chips 只扣一份，
- * todayConverted 同样被覆盖、日限额被绕过）。
+ * 锁必须活过事务：放锁跑到提交前面，后一个请求就能在前一笔未提交时抢到锁、读到过期余额做前置校验，
+ * 串行化被击穿。失败路径单独守——顺序写反平时看不出来，只在回滚时才暴露。
  * <p>
- * <b>最容易踩的破坏方式：给入口方法叠一个 {@code @Transactional}。</b>注解事务的 begin 由代理在
- * 进入方法时就完成，顺序会变成"开事务 → 加锁 → 放锁 → 提交"，正好把锁序反过来，
- * 而且让事务干等着抢锁（这里最多等 3 秒）白占连接池。项目里"锁外事务内"是既定范式，
- * 见 {@code FuturesTradingServiceImpl#addMargin}/{@code doAddMargin}（先抢锁，再
- * {@code SpringUtils.getAopProxy(this).doAddMargin(...)} 进事务）。
- * <p>
- * 用真的 {@link RedisLockUtil} + mock 掉 Redis 与事务模板，断言的是生产代码的嵌套关系，
- * 不是本测试自己 stub 出来的顺序。
+ * 用真的 {@link RedisLockUtil} + mock 掉 Redis 与事务模板，断的是生产代码的嵌套关系，不是自己 stub 的顺序。
  */
 class GameLockExecutorTest {
 

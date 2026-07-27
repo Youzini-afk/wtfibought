@@ -190,8 +190,6 @@ public class PredictionServiceImpl implements PredictionService {
         long ws = currentWindowStart();
         String lockKey = "prediction:buy:" + ws + ":" + userId;
 
-        // 事务用编程式而不是 @Transactional：锁在外事务在内（加锁→开事务→提交→放锁），
-        // 注解事务会把 begin 提到抢锁之前，变成"先放锁后提交"，还白占着连接等锁。
         // 广播刻意留在事务外——发出去就撤不回，事务回滚了广播已经出去就是假消息
         return redisLockUtil.executeWithLock(lockKey, 10, 3000, () -> {
             PredictionBetResponse response = transactionTemplate.execute(tx -> {
@@ -238,7 +236,6 @@ public class PredictionServiceImpl implements PredictionService {
     @Ledger(PREDICTION_SELL)
     public PredictionBetResponse sell(Long userId, Long betId, BigDecimal contracts) {
         String lockKey = "prediction:sell:" + betId;
-        // 同 buy：锁在外事务在内，改卖单状态+回款+切面记账同生共死，别叠 @Transactional
         return redisLockUtil.executeWithLock(lockKey, 10, 3000, () -> {
             PredictionBetResponse response = transactionTemplate.execute(tx -> {
                 PredictionBet bet = betMapper.selectById(betId);
