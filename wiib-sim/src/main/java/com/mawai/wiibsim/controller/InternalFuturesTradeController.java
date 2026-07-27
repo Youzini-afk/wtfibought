@@ -13,7 +13,6 @@ import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
 import com.mawai.wiibsim.service.UserService;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -34,7 +33,6 @@ import java.util.Map;
  * 鉴权走 {@code InternalApiFilter} 的 X-Internal-Token（/internal/** 已在 SaToken 放行）。
  * 量化账户与真人用户同表同账本、资金独立，全部风控/费率/资金费规则一视同仁。</p>
  */
-@Slf4j
 @RestController
 @RequestMapping("/internal/futures")
 @RequiredArgsConstructor

@@ -50,8 +50,9 @@ class LedgerAspectTest {
         positionTarget = mock(FuturesPositionMapper.class);
         ledgerMapper = mock(UserLedgerMapper.class);
 
-        // 同一个切面实例织到两个 mapper 上：两个 pointcut 共用 LedgerCtx 那个静态 ThreadLocal，
-        // 标注在两者之间怎么流转（尤其"漏到下一笔"）只有同时在场才测得出来
+        // 必要的是两个 mapper 的代理同时在场：标注在两个 pointcut 之间怎么流转
+        // （尤其"漏到下一笔"）只有两边都能打得着才测得出来。
+        // 复用同一个切面实例只是顺手——LedgerCtx 是静态 ThreadLocal，织两个实例行为完全一样。
         LedgerAspect aspect = new LedgerAspect(ledgerMapper);
 
         AspectJProxyFactory factory = new AspectJProxyFactory(target);
@@ -186,7 +187,8 @@ class LedgerAspectTest {
         proxy.atomicUpdateBalance(2L, MINUS_TWENTY);
 
         UserLedger entry = captureEntry();
-        assertThat(entry.getUserId()).isEqualTo(2L);                        // 泄漏则为 7
+        // userId 取自 args[0]，标注泄漏了也还是 2——这行只是确认打的是第二枪，不是泄漏的探针
+        assertThat(entry.getUserId()).isEqualTo(2L);
         assertThat(entry.getWallet()).isEqualTo(LedgerWallet.BALANCE);
         assertThat(entry.getBizType()).isEqualTo(LedgerBizType.UNKNOWN);    // 泄漏则为 FUNDING_FEE_FROM_MARGIN
         assertThat(entry.getRefId()).isNull();                              // 泄漏则为 9

@@ -1,12 +1,18 @@
 package com.mawai.wiibsim.ledger;
 
+import com.mawai.wiibcommon.dto.FuturesAddMarginRequest;
+import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.entity.UserLedger;
 import com.mawai.wiibcommon.enums.LedgerBizType;
 import com.mawai.wiibcommon.enums.LedgerWallet;
+import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.ReturningRecordProbeMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
+import com.mawai.wiibsim.service.FuturesTradingService;
+import com.mawai.wiibsim.service.MarginAccountService;
+import com.mawai.wiibsim.service.UserService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
@@ -19,6 +25,8 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,6 +34,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 账本真跑验收（非单测）：起完整 Spring 上下文、真连本地 PG。
  * 单测把 mapper mock 掉了，绿了不代表 UPDATE ... RETURNING 在
  * PG JDBC + MyBatis 这条链路上真能拿到值——该空白由本类补。
+ * <p>
+ * 末尾两条是整套账本的<b>总验收</b>：混合业务跑一轮后五个钱包账实相符、并发打同一行后余额链不断。
+ * 累加式对账的适用范围（存量用户为什么不参与）写在 {@link #assertInvariant} 的注释里，别跳过。
  * <p>
  * 跑法（项目根）：
  * <pre>
@@ -49,7 +60,20 @@ class UserLedgerRealRunTest {
     @Autowired
     private UserLedgerMapper ledgerMapper;
 
+    @Autowired
+    private UserService userService;
+
+    @Autowired
+    private MarginAccountService marginAccountService;
+
+    @Autowired
+    private FuturesTradingService futuresTradingService;
+
+    @Autowired
+    private FuturesPositionMapper positionMapper;
+
     private final List<Long> createdUserIds = new ArrayList<>();
+    private final List<Long> createdPositionIds = new ArrayList<>();
 
     /** 建个一次性用户，避免污染真实账号 */
     private Long newUser(String balance) {
@@ -69,6 +93,21 @@ class UserLedgerRealRunTest {
     }
 
     /**
+     * 建号形态的测试用户：INSERT 落 balance + 补一条 INITIAL_GRANT，起点就满足不变量。
+     * 生产的三个建号入口（OAuth 首登、邀请码注册、量化建号）就是这个形态——建号走 INSERT，
+     * 切面看不见，靠 recordInitialGrant 把期初余额记成账本第一行。
+     * <p>
+     * 别改成"建号余额给 0，再 atomicUpdateBalance 补 10000"：recordInitialGrant 本身就落一行
+     * +10000，再补一枪切面又落一行 +10000，账本累加变 20000 而余额只有 10000，
+     * 不变量当场破——那是测试自己造的假账，不是被测代码的问题。
+     */
+    private Long newUserWithGrant(String balance) {
+        Long uid = newUser(balance);
+        userService.recordInitialGrant(uid, new BigDecimal(balance));
+        return uid;
+    }
+
+    /**
      * 连的是所有者的真实开发库，不是一次性容器：RankingService 那边 userService.list() 全量无过滤，
      * 留下的测试用户会直接爬进排行榜。所以每个用例跑完按 id 删干净。
      * <p>
@@ -78,11 +117,17 @@ class UserLedgerRealRunTest {
      */
     @AfterEach
     void 清掉本次建的测试用户() {
-        // 切面上线后每次资金调用都往 user_ledger 落行，user_ledger 没建 FK，
-        // 只删用户会留下一堆孤儿流水，所以两张表一起清
+        // 三张表都没建 FK，删 user 不会带走它们，得逐张点名：
+        // user_ledger（切面每笔都落行）、futures_position（混合业务用例造的逐仓仓位）。
+        // 加新用例前先想清楚它会往哪张表落行——这个项目已经因为漏删留过孤儿数据。
+        createdPositionIds.forEach(positionMapper::deleteById);
+        createdPositionIds.clear();
         createdUserIds.forEach(ledgerMapper::deleteByUserId);
         createdUserIds.forEach(userMapper::deleteById);
         createdUserIds.clear();
+        // 混合业务用例用 LedgerCtx.mark 补语义，中途断言失败会把标注留在线程上，
+        // 串到下一个用例第一笔资金变动的头上。自己造的就自己兜干净。
+        LedgerCtx.takeMark();
     }
 
     @Test
@@ -366,5 +411,231 @@ class UserLedgerRealRunTest {
         assertThat(latest.getBalanceAfter())
                 .as("钱包 %s 最后一行的 balance_after", wallet)
                 .isEqualByComparingTo(expected);
+    }
+
+    // ==================== 总验收：混合业务账实相符 + 并发一致性 ====================
+
+    /**
+     * 总验收一：跑一轮混合业务，五个钱包逐个对账实相符。
+     * <p>
+     * 上面那些用例都是单机制单打（RETURNING 拿得到值 / 列序没写反 / 一级缓存没吞 SQL / 切面拦得住），
+     * 缺的就是一句"混着跑一轮，账还是平的"。本用例补这一句。
+     * <p>
+     * 每组跑完立刻对一次不变量、且末尾把五列的绝对值也钉死：不变量比的是"账本 vs user 表"，
+     * 某一步整个没生效的话两边可能一起不动、照样自洽——绝对值那几行才咬得住"这一轮真跑了什么"。
+     * <p>
+     * 打的是各业务真实用的那个资金入口（现货买入=updateBalance、限价单=freeze/unfreeze/
+     * deductFrozen、游戏=updateGameBalance、合约=真走 addMargin 那条 public 入口）；
+     * 生产里语义由调用方的 @Ledger/mark 给，跨包调不到那些 protected 入口，所以这里用
+     * LedgerCtx.mark 补成生产里的同一个值——<b>标注本身生效不生效由 LedgerProxyRealRunTest 验，
+     * 本用例只验账平</b>。
+     * <p>
+     * <b>刻意不在本轮里的</b>：建号 / 爆仓 / 破产恢复 / 资金费吃仓位保证金。那四条是切面射程外的
+     * 显式补记，各自的不变量断言已经在 LedgerProxyRealRunTest（那个类放在 service.impl 包
+     * 就是为了够得着这几个 protected 入口）。在这儿照抄两行 SQL 假装"资金费也覆盖了"没有意义。
+     */
+    @Test
+    void 混合业务跑一轮后五个钱包账实相符() {
+        Long uid = newUserWithGrant("10000.00");
+        LocalDate today = LocalDate.now();
+
+        // ===== 现货：市价买入 + 限价单冻结 / 部分撤单 / 成交扣冻结（末尾刻意留 100 冻结未成交）=====
+        LedgerCtx.mark(LedgerBizType.SPOT_BUY);
+        userService.updateBalance(uid, new BigDecimal("-1200.00"));         // 买入扣款含手续费
+        LedgerCtx.mark(LedgerBizType.SPOT_LIMIT_FREEZE);
+        userService.freezeBalance(uid, new BigDecimal("500.00"));           // 挂限价买单冻结
+        LedgerCtx.mark(LedgerBizType.SPOT_LIMIT_UNFREEZE);
+        userService.unfreezeBalance(uid, new BigDecimal("200.00"));         // 撤掉一部分
+        LedgerCtx.mark(LedgerBizType.SPOT_LIMIT_DEDUCT);
+        userService.deductFrozenBalance(uid, new BigDecimal("200.00"));     // 成交扣冻结，还剩 100 挂着
+        assertInvariant(uid, "现货组");
+
+        // ===== 杠杆：借款 → 计息 → 卖出到账自动还息还本、余下入余额 → 再借再计息 =====
+        marginAccountService.addLoanPrincipal(uid, new BigDecimal("2000.00"));
+        // 计息真入口是 protected 的 accrueUserInterest（跨包调不到，另一条 accrueDailyInterest 扫全库
+        // 会把所有者的真实账号一起计息，绝不能调），这里直打它内部那条 SQL
+        LedgerCtx.mark(LedgerBizType.MARGIN_INTEREST_ACCRUE);
+        userMapper.atomicAccrueInterest(uid, new BigDecimal("20.00"), today);
+        // 一条 SQL 动三列 → 三行：还息 20、还本 2000、余下 480 入余额
+        LedgerCtx.mark(LedgerBizType.SPOT_SETTLE);
+        marginAccountService.applyCashInflow(uid, new BigDecimal("2500.00"), "现货卖出到账");
+        marginAccountService.addLoanPrincipal(uid, new BigDecimal("600.00"));   // 再借一笔，让本金收尾非 0
+        LedgerCtx.mark(LedgerBizType.MARGIN_INTEREST_ACCRUE);
+        userMapper.atomicAccrueInterest(uid, new BigDecimal("9.00"), today);    // 利息收尾也非 0
+        assertInvariant(uid, "杠杆组");
+
+        // ===== 游戏：划转进去（1% 手续费销毁）→ 下注 → 派彩 → 划回 =====
+        userService.transferToGame(uid, new BigDecimal("1000.00"));         // 扣 1000、到账 990
+        LedgerCtx.mark(LedgerBizType.MINES_BET);
+        userService.updateGameBalance(uid, new BigDecimal("-150.00"));
+        LedgerCtx.mark(LedgerBizType.MINES_CASHOUT);
+        userService.updateGameBalance(uid, new BigDecimal("380.00"));
+        userService.transferToBalance(uid, new BigDecimal("200.00"));       // 扣 200、到账 198
+        assertInvariant(uid, "游戏组");
+
+        // ===== 合约：追加保证金（真 public 入口，余额→仓位保证金搬家）=====
+        Long posId = newIsolatedPosition(uid, "BTCUSDT", new BigDecimal("200.00"));
+        FuturesAddMarginRequest req = new FuturesAddMarginRequest();
+        req.setPositionId(posId);
+        req.setAmount(new BigDecimal("100.00"));
+        futuresTradingService.addMargin(uid, req);
+        assertInvariant(uid, "合约组");
+
+        // ===== 收尾：五列绝对值逐个钉死 =====
+        User u = userMapper.selectById(uid);
+        // 10000 −1200 −500(冻) +200(解) +480(到账) −1000(划出) +198(划回) −100(保证金)
+        assertThat(u.getBalance()).isEqualByComparingTo("8078.00");
+        assertThat(u.getFrozenBalance()).isEqualByComparingTo("100.00");     // 500 −200 −200
+        assertThat(u.getGameBalance()).isEqualByComparingTo("1020.00");      // 990 −150 +380 −200
+        assertThat(u.getMarginLoanPrincipal()).isEqualByComparingTo("600.00");
+        assertThat(u.getMarginInterestAccrued()).isEqualByComparingTo("9.00");
+
+        // 行数是"不漏也不多记"的另一面：求和对得上但少了一行加一行凑数的情况，这里会红。
+        // 1 建号 +1 买入 +2 冻结 +2 解冻 +1 扣冻结 +1 借款 +1 计息 +3 现金流入
+        // +1 再借 +1 再计息 +2 划出 +1 下注 +1 派彩 +2 划回 +1 追加保证金 = 21
+        List<UserLedger> rows = ledgerMapper.selectByCursor(uid, null, null, 500);
+        assertThat(rows).hasSize(21);
+        // 全程每一步都有语义（mark 或 @Ledger），一条 UNKNOWN 都不该有：
+        // 出现 UNKNOWN 说明有标注被上一笔提前吃掉了，或者哪一步的资金入口换了
+        assertThat(rows).noneMatch(r -> r.getBizType() == LedgerBizType.UNKNOWN);
+
+        // POSITION_MARGIN 排除在不变量之外的现场证据：追加保证金把仓位保证金从 200 顶到 300，
+        // 而这个钱包一行流水都没有——那 100 已经在 BALANCE 侧记过，再记一遍就是重复。
+        // 谁把 POSITION_MARGIN 加进 assertInvariant，这两行就是反例。
+        assertThat(positionMapper.selectById(posId).getMargin()).isEqualByComparingTo("300.00");
+        assertThat(ledgerMapper.sumDeltaByWallet(uid, LedgerWallet.POSITION_MARGIN.name()))
+                .as("保证金搬家不该在 POSITION_MARGIN 留行")
+                .isEqualByComparingTo("0");
+    }
+
+    /** 并发验收的任务数：一半扣余额、一半冻结 */
+    private static final int CONCURRENT_TASKS = 20;
+
+    /**
+     * 总验收二：并发打同一个用户，最终余额 / 账本累加 / balance_after 链三者必须自洽。
+     * <p>
+     * 这条直接回答改造之初那个关切——"原来一条 SQL 更新余额，现在多了一条账本 INSERT，
+     * 会不会引入并发问题"。答案的机制是：同一用户的所有资金 SQL 都 UPDATE user 表同一行，
+     * PG 行锁天然把它们排成串行；只要账本 INSERT 与余额 UPDATE 在同一事务内，
+     * 锁在 COMMIT 才放，账本 id 的先后就等于真实变动的先后。
+     * <p>
+     * <b>所以每个任务必须裹在 tx.execute 里，这不是装饰</b>：updateBalance/freezeBalance 自己
+     * 没有 @Transactional（生产里的事务边界在调用方那 27 个 @Transactional 业务方法上）。
+     * 不裹的话 UPDATE 自动提交后行锁就放了，账本 INSERT 落在锁外，
+     * A 的 INSERT 可能排到 B 之后 —— 余额和求和照样对，但 balance_after 链会断
+     * （实测过：摘掉 tx.execute，最终余额 700 和五个钱包的求和全绿，
+     * 链上出现 "balanceAfter=790 而上一条 balanceAfter=1000" 直接红）。
+     * 换句话说：这条用例裹事务是在<b>复刻生产形态</b>，不是为了让断言好看。
+     * <p>
+     * 刻意混两种资金 SQL（扣余额 / 冻结）而不是同一句打 20 遍：要验的是不同语句抢同一行时
+     * 账本顺序仍然自洽，只打一句测不出来。冻结那半边顺带把 FROZEN 的链也验了。
+     */
+    @Test
+    void 并发资金变动后账实相符且余额链连续() throws Exception {
+        Long uid = newUserWithGrant("1000.00");
+
+        List<Future<?>> futures = new ArrayList<>();
+        try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < CONCURRENT_TASKS; i++) {
+                boolean freeze = i % 2 == 0;
+                futures.add(pool.submit(() -> tx.execute(status -> {
+                    if (freeze) {
+                        userService.freezeBalance(uid, new BigDecimal("20.00"));
+                    } else {
+                        userService.updateBalance(uid, new BigDecimal("-10.00"));
+                    }
+                    return null;
+                })));
+            }
+        }   // close() 会等全部跑完
+        // submit 会把异常吞进 Future：不逐个 get，20 个线程全炸了本用例也可能"绿"
+        for (Future<?> f : futures) {
+            f.get();
+        }
+
+        User u = userMapper.selectById(uid);
+        assertThat(u.getBalance()).isEqualByComparingTo("700.00");     // 1000 − 10×20(冻结) − 10×10(扣款)
+        assertThat(u.getFrozenBalance()).isEqualByComparingTo("200.00");
+        assertInvariant(uid, "并发后");
+        // 1 建号 + 10×2（冻结一条 SQL 动两个钱包）+ 10 扣款 = 31
+        assertThat(ledgerMapper.selectByCursor(uid, null, null, 500)).hasSize(31);
+
+        assertBalanceChain(uid, LedgerWallet.BALANCE);
+        assertBalanceChain(uid, LedgerWallet.FROZEN);
+    }
+
+    /**
+     * 【不变量的口径 —— 改断言、或者拿真库对账之前必读】
+     * <p>
+     * 账本只记<b>上线之后</b>的资金变动。收口时库里已有 7 个存量用户余额非 0 而 user_ledger 为 0 行，
+     * 项目所有者决定<b>不回填期初余额</b>。所以"某钱包流水累加 == user 表当前该列值"这个累加式对账：
+     * <ul>
+     *   <li>对<b>账本上线后建号</b>的用户成立——建号那一刻补的 INITIAL_GRANT 就是期初基准。
+     *       本类一律用 {@link #newUserWithGrant} 新建用户来断言，就是为了拿到这个基准；</li>
+     *   <li>对<b>存量用户不成立</b>，且没法修：期初基准既没记录也不回填，累加出来必然少一整个期初余额。
+     *       所以<b>不许拿真库既有 userId 跑这个断言</b>；将来谁在真库上跑一句
+     *       {@code SELECT user_id, wallet, SUM(delta) FROM user_ledger GROUP BY 1,2} 去比余额，
+     *       发现那几个用户全对不上，那是<b>刻意的口径而不是漏账</b>，别当 bug 追。</li>
+     * </ul>
+     * POSITION_MARGIN 永远不参与：它只装"资金费吃仓位保证金"那两笔，保证金的其余变动
+     * （余额↔保证金搬家）已在 BALANCE 侧记过，再算一遍就是重复。理由见 LedgerWallet 注释，
+     * 现场反例见 {@link #混合业务跑一轮后五个钱包账实相符()} 末尾那两行断言。
+     */
+    private void assertInvariant(Long uid, String stage) {
+        User u = userMapper.selectById(uid);
+        assertWalletInvariant(uid, LedgerWallet.BALANCE, u.getBalance(), stage);
+        assertWalletInvariant(uid, LedgerWallet.FROZEN, u.getFrozenBalance(), stage);
+        assertWalletInvariant(uid, LedgerWallet.GAME, u.getGameBalance(), stage);
+        assertWalletInvariant(uid, LedgerWallet.LOAN_PRINCIPAL, u.getMarginLoanPrincipal(), stage);
+        assertWalletInvariant(uid, LedgerWallet.LOAN_INTEREST, u.getMarginInterestAccrued(), stage);
+    }
+
+    private void assertWalletInvariant(Long uid, LedgerWallet wallet, BigDecimal actual, String stage) {
+        assertThat(ledgerMapper.sumDeltaByWallet(uid, wallet.name()))
+                .as("[%s] 钱包 %s 账实不符：账本累加 ≠ user 表当列值（映射表漏记或多记，回 LedgerRowMapping 查）",
+                        stage, wallet)
+                .isEqualByComparingTo(actual == null ? BigDecimal.ZERO : actual);
+    }
+
+    /**
+     * 某钱包的流水必须是一条连续的链：每条的 {@code balanceAfter − delta} 等于上一条的 {@code balanceAfter}。
+     * <p>
+     * 求和对得上还不够：两笔并发变动若基于同一个旧值各算各的，求和照样对，但链上会出现跳变。
+     * 这条才是"并发没把一致性打破"的硬证据。
+     */
+    private void assertBalanceChain(Long uid, LedgerWallet wallet) {
+        // selectByCursor 是 id 倒序，reversed() 转成 id 升序 —— 同事务内 INSERT 的 id 顺序即真实变动顺序
+        List<UserLedger> rows = ledgerMapper.selectByCursor(uid, null, null, 500).reversed()
+                .stream().filter(r -> r.getWallet() == wallet).toList();
+        assertThat(rows).as("钱包 %s 一条流水都没有，本断言什么都没验到", wallet).isNotEmpty();
+
+        BigDecimal prev = null;
+        for (UserLedger r : rows) {
+            if (prev != null) {
+                assertThat(r.getBalanceAfter().subtract(r.getDelta()))
+                        .as("钱包 %s 余额链在第 %d 条断裂：balanceAfter=%s delta=%s，上一条 balanceAfter=%s",
+                                wallet, r.getId(), r.getBalanceAfter(), r.getDelta(), prev)
+                        .isEqualByComparingTo(prev);
+            }
+            prev = r.getBalanceAfter();
+        }
+    }
+
+    /** 造一张逐仓 OPEN 仓位，字段只填 NOT NULL 的那些 */
+    private Long newIsolatedPosition(Long userId, String symbol, BigDecimal margin) {
+        FuturesPosition p = new FuturesPosition();
+        p.setUserId(userId);
+        p.setSymbol(symbol);
+        p.setSide("LONG");
+        p.setMarginMode(FuturesPosition.ISOLATED);
+        p.setLeverage(10);
+        p.setQuantity(new BigDecimal("0.00100000"));
+        p.setEntryPrice(new BigDecimal("20000.00"));
+        p.setMargin(margin);
+        p.setFundingFeeTotal(BigDecimal.ZERO);
+        p.setStatus("OPEN");
+        positionMapper.insert(p);
+        createdPositionIds.add(p.getId());
+        return p.getId();
     }
 }

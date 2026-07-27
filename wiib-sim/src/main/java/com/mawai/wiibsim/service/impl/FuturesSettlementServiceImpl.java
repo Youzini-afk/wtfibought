@@ -657,8 +657,8 @@ public class FuturesSettlementServiceImpl implements FuturesSettlementService {
 
         // 后两级扣的是仓位保证金，不穿过 user 表。那条 SQL 的参数里只有 positionId，
         // 切面既拿不到 userId 也拿不到扣款额，两者都得在这儿标进去。
-        // 注意 fee 是未舍入值而 margin 是 numeric(18,2)：极端情况（fee 第三位小数恰为 5）
-        // 账本 delta 与 balanceAfter 的差会比 1 分多/少一点，不影响不变量（POSITION_MARGIN 不参与对账）
+        // fee 已在 fundingTransfer 里 setScale(2)，与 futures_position.margin 的 numeric(18,2) 对齐，
+        // 所以账本的 delta 与 balanceAfter 严格自洽，没有舍入偏差
         LedgerCtx.markPositionFee(pos.getUserId(), pos.getId(), fee);
         BigDecimal marginAfter = positionMapper.atomicDeductFundingFee(pos.getId(), fee);
         if (marginAfter != null) {
