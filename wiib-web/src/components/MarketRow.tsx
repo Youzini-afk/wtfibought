@@ -94,9 +94,14 @@ export function CoinMarketRow({ cfg }: { cfg: CoinCfg }) {
   );
 }
 
-/** bStock 行：list 的日涨跌 + 1h K线走势 */
+/**
+ * bStock 行：实时流价 + 1h×25 根K线（首根收盘=24h涨跌基准，整条作走势线），与币种行同口径。
+ * bStock 的价并在 Spot 流里（BinanceProperties.getAllSpotSymbols = crypto ∪ stock），
+ * 订阅方式与现货币种没有区别，不需要再走 /bstock/list 轮询要价。
+ */
 export function BStockMarketRow({ stock }: { stock: BStock }) {
   const navigate = useNavigate();
+  const tick = useCryptoStream(stock.symbol, 'spot');
   const [closes, setCloses] = useState<number[]>([]);
 
   useEffect(() => {
@@ -107,6 +112,13 @@ export function BStockMarketRow({ stock }: { stock: BStock }) {
     return () => { cancelled = true; };
   }, [stock.symbol]);
 
+  // 流价优先；首帧还没推来时退回 list 带的快照价，避免闪一下空白
+  const livePrice = tick?.price ?? stock.price ?? null;
+  const spark = livePrice != null && closes.length ? [...closes.slice(0, -1), livePrice] : closes;
+  const price = livePrice ?? (closes.length ? closes[closes.length - 1] : null);
+  const base = closes.length ? closes[0] : null;
+  const pct = price != null && base ? ((price - base) / base) * 100 : (stock.changePct ?? null);
+
   return (
     <MarketRow
       icon={(
@@ -116,9 +128,9 @@ export function BStockMarketRow({ stock }: { stock: BStock }) {
       )}
       name={stock.name}
       sub={`${stock.ticker} · 美股`}
-      price={stock.price == null ? null : `$${Number(stock.price).toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
-      pct={stock.changePct ?? null}
-      spark={closes}
+      price={price == null ? null : `$${Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+      pct={pct}
+      spark={spark}
       onClick={() => navigate(`/bstock/${stock.symbol}`)}
     />
   );

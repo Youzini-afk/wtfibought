@@ -36,14 +36,12 @@ function CategoryHeader({ icon: Icon, title, subtitle, iconColor, to }: {
 export function HomeMarketSection() {
   const [topStocks, setTopStocks] = useState<BStock[]>([]);
 
-  // 市值前 2 作代表；8s 静默刷新与 /bstock 列表页同频
+  // 市值前 2 作代表。只拉一次：这里要的是"哪两只 + 名称"这类静态元数据，
+  // 价格和涨跌由 BStockMarketRow 自己走 Spot 流实时刷，不需要轮询
   useEffect(() => {
-    const load = () => bstockApi.list()
+    bstockApi.list()
       .then(list => setTopStocks([...list].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 2)))
       .catch(() => {});
-    load();
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
   }, []);
 
   const cryptoReps = [COIN_MAP.BTCUSDT, COIN_MAP.ETHUSDT];

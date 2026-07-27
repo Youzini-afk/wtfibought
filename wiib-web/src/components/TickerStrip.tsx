@@ -36,6 +36,36 @@ function useCoinQuote(symbol: string): Quote {
   return { key: symbol, name: cfg.name, price, pct, to: `/coin/${symbol}`, live: true };
 }
 
+/**
+ * 美股报价：bStock 的价并在 Spot 流里（getAllSpotSymbols = crypto ∪ stock），
+ * 订阅方式与币种一致；24h 基准同样取 1h×25 首根收盘，与上面的币种口径对齐。
+ * stock 为 undefined（列表还没回来）时 useCryptoStream 收 undefined 自动空转。
+ */
+function useStockQuote(stock: BStock | undefined): Quote {
+  const symbol = stock?.symbol;
+  const tick = useCryptoStream(symbol, 'spot');
+  const [base, setBase] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    bstockApi.klines(symbol, '1h', 25)
+      .then(rows => { if (!cancelled && rows?.length) setBase(Number(rows[0][4])); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [symbol]);
+
+  const price = tick?.price ?? stock?.price ?? null;
+  const pct = price != null && base ? ((price - base) / base) * 100 : (stock?.changePct ?? null);
+  return {
+    key: symbol ?? '',
+    name: stock?.ticker ?? stock?.name ?? '',
+    price, pct,
+    to: `/bstock/${symbol}`,
+    live: true,
+  };
+}
+
 function TickerCell({ q, onGo }: { q: Quote; onGo: (to: string) => void }) {
   const up = (q.pct ?? 0) >= 0;
   return (
@@ -66,7 +96,7 @@ function TickerCell({ q, onGo }: { q: Quote; onGo: (to: string) => void }) {
 
 /**
  * 行情副条：顶栏下 26px 报价条，横向缓慢无缝滚动（悬停暂停），点击直达交易页。
- * 盘面 = 主流三币 + 黄金（实时流）+ 美股市值 Top 4（8s REST 刷新）。仅桌面显示。
+ * 盘面 = 主流三币 + 黄金 + 美股市值 Top 4，八格全走实时流。仅桌面显示。
  */
 export function TickerStrip() {
   const navigate = useNavigate();
@@ -76,27 +106,22 @@ export function TickerStrip() {
   const sol = useCoinQuote('SOLUSDT');
   const xau = useCoinQuote('XAUUSDT');
 
+  // 只拉一次：要的是"哪四只 + 显示名"这类静态元数据，价格交给下面的 Spot 流
   const [stocks, setStocks] = useState<BStock[]>([]);
   useEffect(() => {
-    const load = () => bstockApi.list()
+    bstockApi.list()
       .then(list => setStocks([...list].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 4)))
       .catch(() => {});
-    load();
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
   }, []);
 
-  const quotes: Quote[] = [
-    btc, eth, sol, xau,
-    ...stocks.map(s => ({
-      key: s.symbol,
-      name: s.ticker ?? s.name,
-      price: s.price ?? null,
-      pct: s.changePct ?? null,
-      to: `/bstock/${s.symbol}`,
-      live: false,
-    })),
-  ];
+  // 同样受"hooks 不能循环调用"约束：四个固定槽位，列表到位前空转，填上后自动接流
+  const stock0 = useStockQuote(stocks[0]);
+  const stock1 = useStockQuote(stocks[1]);
+  const stock2 = useStockQuote(stocks[2]);
+  const stock3 = useStockQuote(stocks[3]);
+
+  // key 为空 = 该槽位还没数据，滤掉免得渲染出空格子
+  const quotes: Quote[] = [btc, eth, sol, xau, stock0, stock1, stock2, stock3].filter(q => q.key);
 
   // 两份相同内容首尾相接：数据/订阅只有一份，DOM 渲染两遍
   const half = (hidden: boolean): ReactNode => (
