@@ -22,16 +22,10 @@ import {
 import type { BuffStatus, AssetSnapshot, QuantSnapshotView } from '../types';
 import { useUserStore } from '../stores/userStore';
 import { cn, fmtMoney } from '../lib/utils';
+import { orderSideView } from '../lib/orderSide';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
 function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
-
-const FUTURES_SIDE_MAP: Record<string, { label: string; tone: 'buy' | 'sell' }> = {
-  OPEN_LONG: { label: '开多', tone: 'buy' },
-  OPEN_SHORT: { label: '开空', tone: 'sell' },
-  CLOSE_LONG: { label: '平多', tone: 'sell' },
-  CLOSE_SHORT: { label: '平空', tone: 'buy' },
-};
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -90,7 +84,7 @@ export function Home() {
     Promise.all([cryptoOrderApi.live().catch(() => []), futuresApi.live().catch(() => [])])
       .then(([co, fo]) => {
         const ci: TradeItem[] = co.map(o => ({ id: `c-${o.orderId}`, orderSide: o.orderSide, sideTone: o.orderSide === 'BUY' ? 'buy' as const : 'sell' as const, name: o.symbol.replace('USDT', ''), quantity: o.quantity, unit: o.symbol.replace('USDT', ''), filledAmount: o.filledAmount, createdAt: o.createdAt }));
-        const fi: TradeItem[] = fo.map(o => { const s = FUTURES_SIDE_MAP[o.orderSide] ?? { label: o.orderSide, tone: 'buy' as const }; const b = o.symbol.replace('USDT', ''); return { id: `f-${o.orderId}`, orderSide: o.orderSide, sideLabel: s.label, sideTone: s.tone, name: `${b} 合约`, quantity: o.quantity, unit: b, filledAmount: o.filledAmount, createdAt: o.createdAt, isAi: o.isAiTrader === true }; });
+        const fi: TradeItem[] = fo.map(o => { const s = orderSideView(o.orderSide); const b = o.symbol.replace('USDT', ''); return { id: `f-${o.orderId}`, orderSide: o.orderSide, sideLabel: s.label, sideTone: s.tone, name: `${b} 合约`, quantity: o.quantity, unit: b, filledAmount: o.filledAmount, createdAt: o.createdAt, isAi: o.isAiTrader === true }; });
         setLatestTrades([...ci, ...fi].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 20));
       }).finally(() => setTradesLoadedNonce(refreshNonce));
   }, [refreshNonce]);

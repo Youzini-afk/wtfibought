@@ -67,11 +67,12 @@ export function Workbench() {
   }, [symbol, hours, load]);
 
   // 时间窗内的研判点才画标记；详情卡默认展示最新一条
+  // 起点按"数据末端 - 窗口"算：series 首点是后端为右移多垫的 24h 历史点，拿它当窗口起点会多放进 24h 研判
   const windowAnalyses = useMemo(() => {
     if (!series.length) return analyses;
-    const from = series[0].closeTime;
+    const from = series[series.length - 1].closeTime - hours * 3_600_000;
     return analyses.filter(a => a.closeTime >= from);
-  }, [analyses, series]);
+  }, [analyses, series, hours]);
   const displayed = selected ?? analyses[0] ?? null;
 
   return (
@@ -87,13 +88,14 @@ export function Workbench() {
                 {FRAGILITY_CN[snapshot.fragilityLevel] || snapshot.fragilityLevel} {snapshot.fragilityScore}
               </span>
             )}
+            {/* 手机把点按区撑到 ~32px 高再收回 PC 紧凑值：拇指点得中，PC 不虚胖 */}
             <div className="ml-auto flex items-center gap-1">
               {SYMBOLS.map(s => (
                 <button
                   key={s}
                   onClick={() => setSymbol(s)}
                   className={cn(
-                    'text-[11px] font-bold px-2 py-1 rounded-lg transition-all',
+                    'text-[11px] font-bold px-2.5 py-1.5 sm:px-2 sm:py-1 rounded-lg transition-all',
                     symbol === s ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -106,7 +108,7 @@ export function Workbench() {
                   key={w.hours}
                   onClick={() => setHours(w.hours)}
                   className={cn(
-                    'text-[11px] font-bold px-2 py-1 rounded-lg transition-all',
+                    'text-[11px] font-bold px-2.5 py-1.5 sm:px-2 sm:py-1 rounded-lg transition-all',
                     hours === w.hours ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground',
                   )}
                 >
@@ -115,7 +117,7 @@ export function Workbench() {
               ))}
               <button
                 onClick={() => void load(symbol, hours)}
-                className="border border-border hover:bg-surface-hover w-7 h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
+                className="border border-border hover:bg-surface-hover w-8 h-8 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary"
                 aria-label="刷新"
               >
                 <RefreshCcw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />
@@ -128,20 +130,29 @@ export function Workbench() {
               暂无快照数据 · 5m K 线收盘后自动落库
             </div>
           ) : (
-            <VolTimeline points={series} analyses={windowAnalyses} onSelectAnalysis={setSelected} height={420} />
+            <VolTimeline points={series} analyses={windowAnalyses} windowHours={hours} onSelectAnalysis={setSelected} />
           )}
 
           {snapshot?.fragilityHeadline && (
             <p className="text-xs text-muted-foreground leading-relaxed">{snapshot.fragilityHeadline}</p>
           )}
 
-          {/* 指标说明：图上四个系列各是什么、怎么读 */}
+          {/* 时间轴口径：右移画法反直觉，先一句话交代清楚，再逐系列解释 */}
+          <p className="text-[11px] leading-relaxed text-muted-foreground border-l-2 border-border pl-2.5">
+            <span className="font-bold text-foreground">怎么看：</span>
+            每条预测线都画在它<span className="font-bold text-foreground">覆盖时段的终点</span>上 —— 竖虚线"现在"的左边，每个预测点都已经有同色实际点给它判过分；
+            右边灰底那片是还没到期、无从判分的未来，腿越长探得越远，于是形成 6h/12h/24h 三级阶梯。想知道 AI 怎么看后市，就看灰底区里三条线的高度。
+          </p>
+
+          {/* 指标说明：图上各系列是什么、怎么读 */}
           <div className="grid sm:grid-cols-2 gap-2">
             {[
-              { color: '#F97316', name: 'H6 预测（橙线）', desc: '系统每 5 分钟给出的"未来 6 小时波动幅度"预测，单位 bps（1bps=0.01%）。线越高，预期市场波动越大。' },
-              { color: '#3b82f6', name: '实际波幅（蓝点）', desc: '6 小时到期后实际发生的波动，用来对照预测——蓝点贴近橙线说明预测靠谱，持续高于橙线说明波动被低估。' },
+              { color: '#F97316', name: 'H6 预测（橙实线）', desc: '每 5 分钟给一次的"未来 6 小时波动幅度"预测，单位 bps（1bps=0.01%）。线越高，预期波动越大。' },
+              { color: '#EF4444', name: 'H12 预测（红虚线）', desc: '同一时刻对未来 12 小时的预测。窗口更长，量级天然比 H6 高一层。' },
+              { color: '#A855F7', name: 'H24 预测（紫点线）', desc: '对未来 24 小时的预测，右端探得最远——它的未验证区也最宽，要满一天才能判分。' },
+              { color: '#94a3b8', name: '实际波幅（同色空心点）', desc: '该腿到期后真实走出来的波动，和同色线竖着比：点贴线=预测靠谱，点持续在线上方=波动被低估。' },
               { color: '#ec4899', name: '深研判（粉色标记）', desc: 'AI 深度研判（多空辩论+裁决）发生的时刻，点击标记可在下方查看该次研判详情。' },
-              { color: '#f59e0b', name: '脆弱度（下方黄色面积）', desc: '0-100 的市场结构脆弱评分：清算密集、盘口变薄等因素越多分越高，越高越容易被单边行情打穿。' },
+              { color: '#f59e0b', name: '脆弱度（下方黄色面积）', desc: '0-100 的市场结构脆弱评分：清算密集、盘口变薄等越多分越高，越高越容易被单边行情打穿。它是当下状态不是预测，所以不右移，线止于"现在"。' },
             ].map(it => (
               <div key={it.name} className="rounded-md border border-border bg-card px-3 py-2 text-[11px] leading-relaxed">
                 <span className="font-bold" style={{ color: it.color }}>{it.name}</span>

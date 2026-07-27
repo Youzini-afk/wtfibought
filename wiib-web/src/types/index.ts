@@ -289,7 +289,7 @@ export interface FuturesCrossAccount {
   positionCount: number;
 }
 
-/** 划转预检（GET /wallet/transfer/preview）：restricted=有全仓敞口，转出会动净值 */
+/** 划转预检（GET /wallet/transfer/preview）：restricted=可转额度被全仓占用压低（含未成交的全仓挂单） */
 export interface WalletTransferPreviewPosition {
   positionId: number;
   symbol: string;
@@ -549,8 +549,10 @@ export interface QuantSnapshotSeriesPoint {
   volState: string | null;
   fragilityScore: number | null;
   fragilityLevel: string | null;
-  /** H6 已验证实际波幅 |return| bps；到期验证才有，曲线尾部 6h 天然缺 */
-  realizedAbsBps: number | null;
+  /** 各腿已验证实际波幅 |return| bps；到期才有，故尾部按各自腿长天然缺（H24 缺最多） */
+  realizedH6AbsBps: number | null;
+  realizedH12AbsBps: number | null;
+  realizedH24AbsBps: number | null;
 }
 
 /** 深研判（quant_deep_analysis 实体透传） */
@@ -733,4 +735,172 @@ export interface NotificationItem {
   price: number | null;
   /** 已实现盈亏；type=6 时是净结算额 */
   pnl: number | null;
+}
+
+// ==================== 资金账单 ====================
+
+/** 账本钱包维度。前五个对应 user 表的资金列；POSITION_MARGIN 记的是仓位保证金 */
+export type LedgerWallet =
+  | 'BALANCE' | 'FROZEN' | 'GAME' | 'LOAN_PRINCIPAL' | 'LOAN_INTEREST' | 'POSITION_MARGIN';
+
+export interface LedgerEntry {
+  id: number;
+  userId: number;
+  wallet: LedgerWallet;
+  /** 枚举名，筛选参数传的就是它 */
+  bizType: string;
+  /** 中文说法，后端平铺下来的，前端不再维护一份映射 */
+  bizTypeLabel: string;
+  /** 变动额，有符号，正入负出 */
+  delta: number;
+  /** 该钱包变动后余额 */
+  balanceAfter: number;
+  /** delta 中含的手续费；仅费与本金同条 SQL 时才有 */
+  fee: number | null;
+  refType: string | null;
+  refId: number | null;
+  symbol: string | null;
+  remark: string | null;
+  createdAt: string;
+}
+
+/** 筛选下拉选项，取自后端枚举，避免前端硬编码一份中文映射 */
+export interface LedgerBizTypeOption {
+  name: string;
+  label: string;
+  group: string;
+}
+
+// ==================== 排行榜用户详情 ====================
+
+/** 详情页的一条持仓。现货与合约共用一个形状，合约专属字段在现货行上为 null */
+export interface ProfilePosition {
+  symbol: string;
+  quantity: number;
+  /** 现货=持仓均价，合约=开仓均价 */
+  entryPrice: number;
+  /** 现货=现价，合约=标记价；取不到价时为 null */
+  currentPrice: number | null;
+  /** 现货=市值，合约=保证金+未实现盈亏；缺价时为 null */
+  value: number | null;
+  /** 现货=浮动盈亏，合约=未实现盈亏；缺价时为 null */
+  profit: number | null;
+  side: 'LONG' | 'SHORT' | null;
+  leverage: number | null;
+  marginMode: 'CROSS' | 'ISOLATED' | null;
+}
+
+export interface UserProfile {
+  /** 榜单行原样复用，口径与排行榜完全一致 */
+  summary: RankingItem;
+  spotPositions: ProfilePosition[];
+  futuresPositions: ProfilePosition[];
+}
+
+// ==================== 全站成交记录（匿名） ====================
+
+export interface PublicTrade {
+  /** SPOT=现货/bStock（共用现货引擎），FUTURES=永续合约 */
+  kind: 'SPOT' | 'FUTURES';
+  tradeId: number;
+  /** 稳定假名，如 "a3f2c1"。同一用户恒定，但反推不回是谁 */
+  alias: string;
+  /** 策略账户（quant-*）下的单，是机器人不是人 */
+  isAi: boolean;
+  symbol: string;
+  /** 现货 BUY/SELL；合约 OPEN_LONG/OPEN_SHORT/CLOSE_LONG/CLOSE_SHORT */
+  orderSide: string;
+  quantity: number;
+  filledPrice: number;
+  filledAmount: number;
+  createdAt: string;
+}
+
+// ==================== 可视化回测页 ====================
+
+export interface BacktestStrategyMeta {
+  id: string;
+  name: string;
+  desc: string;
+  symbols: string[];
+  /** 附加提示（如 LIQFADE 依赖研究性回填数据）；无则 null */
+  note: string | null;
+}
+
+export interface BacktestTaskStatus {
+  taskId: string;
+  state: 'RUNNING' | 'DONE' | 'FAILED';
+  strategyId: string;
+  symbol: string;
+  barsDone: number;
+  totalBars: number;
+  warmupBars: number;
+  error: string | null;
+}
+
+/** 工作记录事件：seq=任务内游标（=事件表下标），type 见后端 BacktestListener 常量 */
+export interface BacktestEvent {
+  seq: number;
+  barTimeMs: number;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export interface BacktestEventsPage {
+  events: BacktestEvent[];
+  nextAfter: number;
+  state: string;
+}
+
+/** K线分段：rows = [openTime, open, high, low, close, volume]（含预热段） */
+export interface BacktestKlinesPage {
+  total: number;
+  offset: number;
+  rows: number[][];
+}
+
+export interface BacktestSummary {
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  profitFactor: number;
+  netProfit: number;
+  totalFees: number;
+  sharpeRatio: number;
+  maxDrawdownPct: number;
+  avgHoldBars: number;
+  avgR: number;
+  returnPct: number;
+  finalEquity: number;
+}
+
+export interface BacktestTrade {
+  /** 对应 klines 下标（含预热段偏移），图表 marker 直接定位 */
+  openBarIndex: number;
+  closeBarIndex: number;
+  openTime: number;
+  closeTime: number;
+  side: 'LONG' | 'SHORT';
+  entryPrice: number;
+  exitPrice: number;
+  quantity: number;
+  leverage: number;
+  pnl: number;
+  fee: number;
+  rMultiple: number | null;
+  exitReason: string;
+  maxFavorableR: number | null;
+  maxAdverseR: number | null;
+}
+
+export interface BacktestResultPayload {
+  taskId: string;
+  strategyId: string;
+  symbol: string;
+  warmupBars: number;
+  summary: BacktestSummary;
+  trades: BacktestTrade[];
+  /** 降采样权益曲线：[closeTimeMs, equity] */
+  equity: [number, number][];
 }

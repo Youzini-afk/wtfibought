@@ -184,7 +184,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             LedgerCtx.mark(FUTURES_OPEN_FEE, "POSITION", position.getId());
             userMapper.atomicSettleBalance(userId, commission.negate());
         } else {
-            crossMarginService.assertOutflowAllowed(userId, totalCost);
+            // 逐仓加仓要真划钱：先过全仓可用额度（占用的钱不能拿来开逐仓），再由条件更新兜住现金够不够
+            crossMarginService.assertCanAfford(userId, totalCost);
             LedgerCtx.mark(FUTURES_OPEN_MARGIN, "POSITION", position.getId());
             BigDecimal after = userMapper.atomicUpdateBalance(userId, totalCost.negate());
             if (after == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
@@ -256,8 +257,9 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             LedgerCtx.mark(FUTURES_OPEN_FEE);
             userMapper.atomicSettleBalance(userId, commission.negate());
         } else {
-            // 逐仓划扣制：把保证金从余额钱包划走；对全仓池而言是资金流出，先过硬底线
-            crossMarginService.assertOutflowAllowed(userId, totalCost);
+            // 逐仓划扣制：把保证金从余额钱包划走。两道闸语义不同，都得过——
+            // available 管"这钱是不是被全仓占着"，balance 管"钱包里有没有这么多现金"（浮盈进得了前者进不了后者）
+            crossMarginService.assertCanAfford(userId, totalCost);
             User user = userService.getById(userId);
             // 允许0.05 USDT的价格滑点容差，避免前后端价格时间差导致误报余额不足
             BigDecimal tolerance = tradingConfig.getFutures().getBalanceTolerance();
@@ -328,7 +330,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             // 全仓挂单不物理冻结：frozenAmount 只作"挂单占用"记账，入库后自动进可用余额扣减项
             crossMarginService.assertCanAfford(userId, frozenAmount);
         } else {
-            crossMarginService.assertOutflowAllowed(userId, frozenAmount);
+            // 逐仓挂单是物理冻结（钱真从余额划到冻结），同样先过全仓可用额度
+            crossMarginService.assertCanAfford(userId, frozenAmount);
             // 覆盖 doOpenPosition 的方法级默认：挂单冻结不是开仓保证金。一条 SQL 两个钱包两行账，一次 mark 全覆盖
             LedgerCtx.mark(FUTURES_LIMIT_FREEZE);
             var frozen = userMapper.atomicFreezeBalance(userId, frozenAmount);
@@ -587,8 +590,8 @@ public class FuturesTradingServiceImpl implements FuturesTradingService {
             throw new BizException(ErrorCode.PARAM_ERROR);
         }
 
-        // 往逐仓仓位里划钱 = 全仓池资金流出
-        crossMarginService.assertOutflowAllowed(userId, amount);
+        // 往逐仓仓位里划钱 = 吃余额钱包额度，全仓占用的部分不能拿来给逐仓补血
+        crossMarginService.assertCanAfford(userId, amount);
         BigDecimal after = userMapper.atomicUpdateBalance(userId, amount.negate());
         if (after == null) throw new BizException(ErrorCode.FUTURES_INSUFFICIENT_BALANCE);
 

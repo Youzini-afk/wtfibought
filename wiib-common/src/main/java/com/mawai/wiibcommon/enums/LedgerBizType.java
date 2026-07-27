@@ -74,4 +74,22 @@ public enum LedgerBizType {
     UNKNOWN("未分类");
 
     private final String label;
+
+    /**
+     * 账单页筛选下拉的分组名。按常量名前缀归组，跟上面那几行分节注释是同一套划分。
+     * <p>
+     * 没做成每个常量一个构造参数，是不想为一个纯展示用的分组去动这 45 行——
+     * 前缀本来就是分节的实际依据。代价：加新类型时若用了没见过的前缀，这里不报错，
+     * 只是落进"其它"，下拉里位置怪一点，不影响筛选本身。用了新前缀就来补一行。
+     */
+    public String getGroup() {
+        String n = name();
+        if (n.startsWith("FUTURES_") || n.startsWith("FUNDING_") || n.startsWith("CROSS_")) return "合约";
+        if (n.startsWith("SPOT_") || n.startsWith("BSTOCK_")) return "现货";
+        if (n.startsWith("MINES_") || n.startsWith("POKER_")
+                || n.startsWith("PREDICTION_") || n.startsWith("BLACKJACK_")) return "游戏";
+        if (n.startsWith("WALLET_TRANSFER_")) return "划转";
+        if (n.startsWith("MARGIN_") || n.startsWith("CASH_")) return "杠杆";
+        return "其它";
+    }
 }

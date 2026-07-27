@@ -1,4 +1,5 @@
-import { Activity, Bot } from 'lucide-react';
+import { Activity, Bot, ChevronRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Skeleton } from './ui/skeleton';
 import { fmtDateTime, fmtMoney } from '../lib/utils';
@@ -25,12 +26,22 @@ export function LatestTradesCard({ trades, loading }: Props) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-sm">
-          <div className="p-1 rounded-md bg-primary/10">
-            <Activity className="w-3.5 h-3.5 text-primary" />
-          </div>
-          最新成交
-        </CardTitle>
+        <div className="flex items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <div className="p-1 rounded-md bg-primary/10">
+              <Activity className="w-3.5 h-3.5 text-primary" />
+            </div>
+            最新成交
+          </CardTitle>
+          {/* 这里只给最新 20 条，全量分页在 /trades（交易者匿名） */}
+          <Link
+            to="/trades"
+            className="inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
+          >
+            更多
+            <ChevronRight className="w-3.5 h-3.5" />
+          </Link>
+        </div>
       </CardHeader>
       <CardContent className="p-0">
         {loading ? (

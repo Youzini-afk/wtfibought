@@ -1,7 +1,12 @@
 package com.mawai.wiibsim.service.impl;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.mawai.wiibcommon.entity.FuturesOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.junit.jupiter.api.BeforeAll;
 import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradingConfig;
 import com.mawai.wiibsim.mapper.FuturesOrderMapper;
@@ -44,6 +49,17 @@ class TradeNotificationAnchorTest {
     private CacheService cacheService;
     private FuturesRiskServiceImpl riskService;
     private CrossLiquidationServiceImpl crossLiquidation;
+
+    /**
+     * 裸 mock 单测没有 Spring/MyBatis 上下文，MyBatis-Plus 的 TableInfo 缓存是空的。
+     * LambdaQueryWrapper 的 .eq() 靠 lambda 反射就能拿到字段名，缺缓存照样过；
+     * .in()/.notLikeRight() 要查 ColumnCache，缺了直接抛 "can not find lambda cache"。
+     * 爆仓撤单 cancelCrossOpenOrders 用的正是 .in()，所以这里把 FuturesOrder 的表信息补上。
+     */
+    @BeforeAll
+    static void initTableInfoCache() {
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), ""), FuturesOrder.class);
+    }
 
     @BeforeEach
     void setUp() {

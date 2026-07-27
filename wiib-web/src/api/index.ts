@@ -1,5 +1,7 @@
 import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
+import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
+import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile } from '../types';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
@@ -71,6 +73,10 @@ export const userApi = {
   // 重置账户：清空交易与游戏数据回到初始资金，每周一次，需逐字输入用户名确认
   resetAccount: (confirmUsername: string) =>
     api.post<unknown, void>('/user/reset', { confirmUsername }),
+  /** 详情页公开开关（默认开）。关掉只挡别人看你的持仓与交易历史，仍照常上排行榜 */
+  getProfilePublic: () => api.get<unknown, boolean>('/user/profile-public'),
+  setProfilePublic: (profilePublic: boolean) =>
+    api.post<unknown, void>('/user/profile-public', { profilePublic }),
 };
 
 // ========== 钱包划转（余额钱包 ⇌ 游戏钱包） ==========
@@ -84,8 +90,17 @@ export const walletApi = {
 
 // ========== 排行榜接口 ==========
 export const rankingApi = {
-  // 获取排行榜
-  list: () => api.get<unknown, RankingItem[]>('/ranking'),
+  /**
+   * 排行榜分页。只含有过成交的用户——从没交易过的人挂着初始资金进榜，
+   * 排出来是一串一模一样的 10000，把真在交易的人挤到后面。
+   */
+  list: (pageNum = 1, pageSize = 20) =>
+    api.get<unknown, PageResult<RankingItem>>('/ranking', { params: { pageNum, pageSize } }),
+  /** 用户详情：榜单行 + 当前持仓。对方关了公开开关时 403（本人除外） */
+  userProfile: (userId: number) => api.get<unknown, UserProfile>(`/ranking/users/${userId}`),
+  /** 该用户的成交历史分页，同样过隐私门控 */
+  userTrades: (userId: number, pageNum = 1, pageSize = 20) =>
+    api.get<unknown, PageResult<PublicTrade>>(`/ranking/users/${userId}/trades`, { params: { pageNum, pageSize } }),
 };
 
 // ========== 留言板 ==========
@@ -111,6 +126,29 @@ export const commentApi = {
   /** 管理员禁言，days=-1 为永久 */
   mute: (userId: number, days: number) =>
     api.post<unknown, void>('/comments/mute', { userId, days }),
+};
+
+// ========== 全站成交记录（匿名） ==========
+export const publicTradeApi = {
+  /**
+   * 全站成交分页。交易者只给稳定假名，接口刻意不收 userId——
+   * 收了就能枚举反查假名，匿名白做（后端有反射守卫钉着这条）。
+   */
+  list: (params: { symbol?: string; kind?: 'SPOT' | 'FUTURES'; pageNum?: number; pageSize?: number } = {}) =>
+    api.get<unknown, PageResult<PublicTrade>>('/trades/public', { params }),
+};
+
+// ========== 资金账单 ==========
+export const ledgerApi = {
+  /**
+   * 资金流水（游标翻页，id 倒序）。下一页把本页最后一条的 id 传回 beforeId。
+   * 到底的判据是**返回空数组**——不能用"条数 < limit"，服务端把 limit 封顶到 100，
+   * 传 500 时第一页就会被误判成到底。
+   */
+  list: (params: { bizType?: string; beforeId?: number; limit?: number } = {}) =>
+    api.get<unknown, LedgerEntry[]>('/ledger', { params }),
+  /** 筛选下拉选项（中文名+分组都在后端枚举里，前端不硬编码） */
+  bizTypes: () => api.get<unknown, LedgerBizTypeOption[]>('/ledger/biz-types'),
 };
 
 // ========== 评论通知 ==========
@@ -431,5 +469,22 @@ export const testnetApi = {
     api.post<unknown, TnOrderResult>('/testnet/manual/close', null, { params: { symbol } }),
   manualCancelAll: (symbol: string) =>
     api.post<unknown, TnAck>('/testnet/manual/cancel-all', null, { params: { symbol } }),
+};
+
+// ========== 可视化回测页 ==========
+export const backtestApi = {
+  strategies: () => api.get<unknown, BacktestStrategyMeta[]>('/ai/backtest/strategies'),
+  /** 提交回测（异步；同一时刻仅一个任务，冲突时后端 fail）。fromMs 含、toMs 不含 */
+  run: (req: { strategyId: string; symbol: string; fromMs: number; toMs: number; initialBalance?: number; leverage?: number }) =>
+    api.post<unknown, { taskId: string }>('/ai/backtest/run', req),
+  status: (taskId: string) =>
+    api.get<unknown, BacktestTaskStatus>(`/ai/backtest/tasks/${taskId}/status`),
+  /** 工作记录增量拉取：带上次 nextAfter 续拉，不重不漏（断线/刷新恢复同一套） */
+  events: (taskId: string, after: number, limit = 500) =>
+    api.get<unknown, BacktestEventsPage>(`/ai/backtest/tasks/${taskId}/events`, { params: { after, limit } }),
+  klines: (taskId: string, offset: number, limit = 20000) =>
+    api.get<unknown, BacktestKlinesPage>(`/ai/backtest/tasks/${taskId}/klines`, { params: { offset, limit } }),
+  result: (taskId: string) =>
+    api.get<unknown, BacktestResultPayload>(`/ai/backtest/tasks/${taskId}/result`),
 };
 

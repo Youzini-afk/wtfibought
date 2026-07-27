@@ -37,9 +37,6 @@ public class CrossMarginServiceImpl implements CrossMarginService {
     static final String CROSS_SYM_PREFIX = "futures:cross:sym:";
     static final String CROSS_USER_SYMS_PREFIX = "futures:cross:user:";
 
-    /** 最大可流出的贴线缓冲：不许转到正好压在强平线上 */
-    private static final BigDecimal OUTFLOW_BUFFER = new BigDecimal("0.01");
-
     private final UserMapper userMapper;
     private final FuturesPositionMapper positionMapper;
     private final FuturesOrderMapper orderMapper;
@@ -105,29 +102,6 @@ public class CrossMarginServiceImpl implements CrossMarginService {
             throw new BizException(ErrorCode.FUTURES_CROSS_AVAILABLE_NOT_ENOUGH);
         }
         return account;
-    }
-
-    @Override
-    public void assertOutflowAllowed(Long userId, BigDecimal amount) {
-        if (!hasCrossPositions(userId)) return;
-        CrossAccount account = snapshot(userId);
-        if (account.positions().isEmpty()) {
-            refreshUserIndex(userId); // 索引残留，顺手自愈
-            return;
-        }
-        // 流出后净值必须仍高于维持保证金，否则下一个tick就是强平——这不是提醒能解决的，直接拒
-        if (account.equity().subtract(amount).compareTo(account.maintenanceMargin()) <= 0) {
-            throw new BizException(ErrorCode.CROSS_OUTFLOW_BLOCKED);
-        }
-    }
-
-    @Override
-    public BigDecimal maxOutflow(Long userId) {
-        if (!hasCrossPositions(userId)) return null;
-        CrossAccount account = snapshot(userId);
-        if (account.positions().isEmpty()) return null;
-        return account.equity().subtract(account.maintenanceMargin()).subtract(OUTFLOW_BUFFER)
-                .max(BigDecimal.ZERO);
     }
 
     @Override

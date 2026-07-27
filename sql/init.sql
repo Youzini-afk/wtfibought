@@ -785,6 +785,10 @@ CREATE INDEX IF NOT EXISTS idx_notif_unread ON notification(user_id, is_read, cr
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS muted_until TIMESTAMP;
 COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=未禁言；永久禁言存2099年。到期自动解禁，无需定时任务';
 
+-- 排行榜用户详情页的公开开关。DEFAULT TRUE 让存量用户和新用户都是开着的（需求：默认开启）
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS profile_public BOOLEAN NOT NULL DEFAULT TRUE;
+COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持仓与交易历史。关掉只挡详情页，仍照常上排行榜（榜上只有总资产/收益率）';
+
 --新版本删掉这两列(待执行不进入commit)
 ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;
 ALTER TABLE futures_order DROP COLUMN IF EXISTS expire_at;

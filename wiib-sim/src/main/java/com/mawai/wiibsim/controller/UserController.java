@@ -72,4 +72,36 @@ public class UserController {
     public Result<CategoryAveragesDTO> getCategoryAverages(@CurrentUserId Long userId, @RequestParam(defaultValue = "30") int days) {
         return Result.ok(assetSnapshotService.getCategoryAverages(userId, days));
     }
+
+    @Data
+    public static class ProfilePublicRequest {
+        /** true=允许别人看自己的持仓与交易历史 */
+        private Boolean profilePublic;
+    }
+
+    @GetMapping("/profile-public")
+    @Operation(summary = "查询自己的详情页公开开关")
+    public Result<Boolean> getProfilePublic(@CurrentUserId Long userId) {
+        User user = userService.getById(userId);
+        if (user == null) {
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
+        // 列是 NOT NULL DEFAULT TRUE，读到 null 只可能是实体没映上；开关的语义默认是开
+        return Result.ok(!Boolean.FALSE.equals(user.getProfilePublic()));
+    }
+
+    @PostMapping("/profile-public")
+    @Operation(summary = "设置自己的详情页公开开关（关掉后别人点不进你的持仓与交易历史，仍照常上排行榜）")
+    public Result<Void> setProfilePublic(@CurrentUserId Long userId, @RequestBody ProfilePublicRequest request) {
+        if (request.getProfilePublic() == null) {
+            throw new BizException(ErrorCode.PARAM_ERROR);
+        }
+        // 不能用 updateById 整行写回：User 的资金字段是 updateStrategy=NEVER，
+        // 但 muted_until 这类非资金列会被读取时刻的旧值覆盖掉。只更这一列
+        userService.lambdaUpdate()
+                .eq(User::getId, userId)
+                .set(User::getProfilePublic, request.getProfilePublic())
+                .update();
+        return Result.ok(null);
+    }
 }

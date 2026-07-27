@@ -14,6 +14,7 @@ import { WalletTransferModal } from '../components/WalletTransferModal';
 import { FuturesPositionsCard } from '../components/coin/FuturesPositionsCard';
 import { ProfitChart } from '../components/ProfitChart';
 import { RadarChart } from '../components/RadarChart';
+import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
 import type { WalletAsset } from '../components/PortfolioWallet';
 import { cn, fmtNum } from '../lib/utils';
 import { EmptyState } from '../components/EmptyState';
@@ -31,6 +32,7 @@ import {
   Target,
   Landmark,
   RotateCcw,
+  Receipt,
 } from 'lucide-react';
 import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSnapshot, CategoryAverages, BStock } from '../types';
 import { formatCoinPrice, getCoin } from '../lib/coinConfig';
@@ -539,8 +541,12 @@ export function Portfolio() {
         />
       )}
 
-      {/* 刷新 */}
-      <div className="flex items-center justify-end">
+      {/* 资金账单入口 + 刷新。账单没进顶栏导航（已经十项了），桌面端从这儿进 */}
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="outline" size="sm" onClick={() => navigate('/ledger')}>
+          <Receipt className="w-4 h-4" />
+          资金账单
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -803,8 +809,10 @@ export function Portfolio() {
         )}
       </div>
 
-      {/* 危险操作：重置账户。只在 PC 出现——手机端底栏有「我的」页，同一个入口不重复摆两处 */}
-      <div className="hidden md:block">
+      {/* 隐私开关 + 重置账户。只在 PC 出现——手机端底栏有「我的」页，同一个入口不重复摆两处 */}
+      <div className="hidden md:block space-y-4">
+        <ProfilePublicToggle />
+
         <Card className="border-destructive/20">
           <CardContent className="p-4 flex items-center justify-between gap-6">
             <div className="space-y-1.5 min-w-0">

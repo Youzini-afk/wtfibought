@@ -22,16 +22,16 @@ function LinuxDoLogo({ className }: { className?: string }) {
   );
 }
 
-const LINUXDO_CONFIG = {
-  clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
-  authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
-  redirectUri: 'https://wtfibought.com/login',
-};
 // const LINUXDO_CONFIG = {
-//   clientId: 'NIrMpQ09Jgzjb7r1ZgU3QYnuejk8Z3qS',
+//   clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
 //   authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
-//   redirectUri: 'http://localhost:3000/login',
+//   redirectUri: 'https://wtfibought.com/login',
 // };
+const LINUXDO_CONFIG = {
+  clientId: 'NIrMpQ09Jgzjb7r1ZgU3QYnuejk8Z3qS',
+  authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
+  redirectUri: 'http://localhost:3000/login',
+};
 
 /** 登录前的实时报价角标：匿名 STOMP 流（后端不拒游客），进门先看见"活"的行情 */
 function LiveQuote({ symbol, name }: { symbol: string; name: string }) {

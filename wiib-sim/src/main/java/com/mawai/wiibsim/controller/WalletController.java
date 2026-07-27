@@ -34,8 +34,8 @@ public class WalletController {
         if (Boolean.TRUE.equals(user.getIsBankrupt())) throw new BizException(ErrorCode.USER_BANKRUPT);
 
         if (WalletTransferRequest.TO_GAME.equals(request.getDirection())) {
-            // 转出=全仓池流出：转到踩维持保证金线的直接拒（转出后下个tick就爆仓，提醒解决不了）
-            crossMarginService.assertOutflowAllowed(userId, request.getAmount());
+            // 转出=全仓池流出：只能转走可用额度，被全仓仓位占着的保证金转不走
+            crossMarginService.assertCanAfford(userId, request.getAmount());
             userService.transferToGame(userId, request.getAmount());
         } else if (WalletTransferRequest.TO_BALANCE.equals(request.getDirection())) {
             userService.transferToBalance(userId, request.getAmount());
@@ -50,24 +50,30 @@ public class WalletController {
     }
 
     /**
-     * 划转影响预览。无全仓仓位或转入方向：restricted=false 随便转；
-     * 有全仓仓位的转出：给出转出后净值/各仓位新预估强平价/最大可转金额，踩线则 allowed=false。
+     * 划转影响预览。转入方向或额度没被全仓占用：restricted=false 随便转；
+     * 受限的转出：给出转出后净值/各仓位新预估强平价/最大可转金额，超额则 allowed=false。
      */
     @GetMapping("/transfer/preview")
     public Result<Map<String, Object>> preview(@CurrentUserId Long userId,
                                                @RequestParam String direction,
                                                @RequestParam BigDecimal amount) {
         Map<String, Object> resp = new HashMap<>();
-        boolean outflow = WalletTransferRequest.TO_GAME.equals(direction);
-        if (!outflow || !crossMarginService.hasCrossPositions(userId)) {
+        if (!WalletTransferRequest.TO_GAME.equals(direction)) {
             resp.put("restricted", false);
             resp.put("allowed", true);
             return Result.ok(resp);
         }
 
+        // 受限与否按"可转 < 余额"判，不按有没有持仓：全仓限价单只占额度不建仓位，
+        // 光看 hasCrossPositions 会说不受限，用户点下去才被 assertCanAfford 拒
         CrossMarginService.CrossAccount account = crossMarginService.snapshot(userId);
+        BigDecimal maxTransferable = account.maxOutflow();
+        if (maxTransferable.compareTo(account.balance()) >= 0) {
+            resp.put("restricted", false);
+            resp.put("allowed", true);
+            return Result.ok(resp);
+        }
         BigDecimal equityAfter = account.equity().subtract(amount);
-        boolean allowed = equityAfter.compareTo(account.maintenanceMargin()) > 0;
 
         // 划转后的账户视角：余额少了 amount，其余不变；各仓位强平价按此重估
         CrossMarginService.CrossAccount after = new CrossMarginService.CrossAccount(
@@ -82,8 +88,8 @@ public class WalletController {
                 .toList();
 
         resp.put("restricted", true);
-        resp.put("allowed", allowed);
-        resp.put("maxTransferable", crossMarginService.maxOutflow(userId));
+        resp.put("allowed", amount.compareTo(maxTransferable) <= 0);
+        resp.put("maxTransferable", maxTransferable);
         resp.put("equityAfter", equityAfter);
         resp.put("maintenanceMargin", account.maintenanceMargin());
         resp.put("positions", positions);

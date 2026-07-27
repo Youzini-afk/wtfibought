@@ -12,7 +12,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** 全仓占用制核心口径：equity/available/强平线/估值分叉/模式归一 */
+/** 全仓占用制核心口径：equity/available/maxOutflow/强平线/估值分叉/模式归一 */
 class CrossMarginModeTest {
 
     private static FuturesPosition pos(String mode, BigDecimal margin) {
@@ -43,6 +43,38 @@ class CrossMarginModeTest {
                 List.of(pos(FuturesPosition.CROSS, new BigDecimal("2000"))));
 
         assertThat(acc.available()).isEqualByComparingTo("6500");
+    }
+
+    @Test
+    void 最大可流出_浮盈只抬开仓额度_抬不了现金() {
+        // 钱包1000、全仓占用100、浮盈500 → 可用1400，但钱包里的现金只有1000
+        CrossAccount acc = new CrossAccount(new BigDecimal("1000"), new BigDecimal("500"),
+                new BigDecimal("100"), BigDecimal.ZERO, new BigDecimal("10"),
+                List.of(pos(FuturesPosition.CROSS, new BigDecimal("100"))));
+
+        assertThat(acc.available()).isEqualByComparingTo("1400");
+        assertThat(acc.maxOutflow()).isEqualByComparingTo("1000"); // 浮盈得平仓兑现才划得走
+    }
+
+    @Test
+    void 最大可流出_有占用时卡在可用额度() {
+        // 钱包1000、全仓占用100、无浮盈。旧口径按维持保证金判能划走990，
+        // 占用制承诺给全仓仓位兜底的那100形同虚设——这就是逐仓能开走全部钱的根因
+        CrossAccount acc = new CrossAccount(new BigDecimal("1000"), BigDecimal.ZERO,
+                new BigDecimal("100"), BigDecimal.ZERO, new BigDecimal("10"),
+                List.of(pos(FuturesPosition.CROSS, new BigDecimal("100"))));
+
+        assertThat(acc.maxOutflow()).isEqualByComparingTo("900");
+    }
+
+    @Test
+    void 最大可流出_浮亏吃穿可用_归零不返负() {
+        CrossAccount acc = new CrossAccount(new BigDecimal("1000"), new BigDecimal("-950"),
+                new BigDecimal("100"), BigDecimal.ZERO, new BigDecimal("10"),
+                List.of(pos(FuturesPosition.CROSS, new BigDecimal("100"))));
+
+        assertThat(acc.available()).isEqualByComparingTo("-50");
+        assertThat(acc.maxOutflow()).isEqualByComparingTo("0");
     }
 
     @Test

@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -52,4 +53,25 @@ public class LedgerController {
         int safeLimit = Math.min(Math.max(limit, 1), MAX_LIMIT);
         return Result.ok(ledgerMapper.selectByCursor(userId, bizTypeName, beforeId, safeLimit));
     }
+
+    /**
+     * 筛选下拉的选项。开这个接口而不是让前端硬编码一份，是接着 {@link LedgerBizType} 上
+     * "前端不再维护一份映射"那句话——中文说法只在枚举里改一处。
+     * <p>
+     * 不登录也能拿（纯静态元数据，没有任何用户数据），但仍挂在 /api/ledger 下走同一套鉴权，
+     * 省得为一个下拉去动全局放行名单。
+     */
+    @GetMapping("/biz-types")
+    @Operation(summary = "全部流水类型（筛选下拉用；name 是筛选参数，label 中文名，group 分组）")
+    public Result<List<BizTypeOption>> bizTypes() {
+        return Result.ok(Arrays.stream(LedgerBizType.values())
+                .map(t -> new BizTypeOption(t.name(), t.getLabel(), t.getGroup()))
+                .toList());
+    }
+
+    /**
+     * 下拉选项。必须平铺成这个形状——枚举默认序列化成裸字符串 "FUTURES_OPEN_MARGIN"，
+     * 直接返 values() 的话 label 和 group 一个都到不了前端。
+     */
+    public record BizTypeOption(String name, String label, String group) {}
 }

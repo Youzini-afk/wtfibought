@@ -5,6 +5,9 @@ import { Home } from './pages/Home';
 import { BStockList } from './pages/BStockList';
 import { BStockRoute } from './pages/BStockDetail';
 import { Portfolio } from './pages/Portfolio';
+import { Ledger } from './pages/Ledger';
+import { Trades } from './pages/Trades';
+import { UserProfile } from './pages/UserProfile';
 import { CoinRoute } from './pages/Coin';
 import { CoinSelect } from './pages/CoinSelect';
 import { CommoditySelect } from './pages/CommoditySelect';
@@ -23,6 +26,7 @@ import { Prediction } from './pages/Prediction';
 import { AiAgent } from './pages/AiAgent';
 import { Scorecard } from './pages/Scorecard';
 import { Strategies } from './pages/Strategies';
+import { Backtest } from './pages/Backtest';
 import { TestnetMonitor } from './pages/TestnetMonitor';
 import { ForceOrders } from './pages/ForceOrders';
 import { useUserStore } from './stores/userStore';
@@ -64,11 +68,14 @@ function App() {
                   <Route path="/bstock" element={<BStockList />} />
                   <Route path="/bstock/:symbol" element={<BStockRoute />} />
                   <Route path="/portfolio" element={<Portfolio />} />
+                  <Route path="/ledger" element={<Ledger />} />
+                  <Route path="/trades" element={<Trades />} />
                   <Route path="/coin" element={<CoinSelect />} />
                   <Route path="/coin/:symbol" element={<CoinRoute />} />
                   <Route path="/commodity" element={<CommoditySelect />} />
                   <Route path="/tradfi" element={<TradFiSelect />} />
                   <Route path="/ranking" element={<Ranking />} />
+                  <Route path="/user/:id" element={<UserProfile />} />
                   <Route path="/comments" element={<Comments />} />
                   <Route path="/admin" element={<Admin />} />
                   <Route path="/games" element={<Games />} />
@@ -80,6 +87,7 @@ function App() {
                   <Route path="/ai" element={<AiAgent />} />
                   <Route path="/scorecard" element={<Scorecard />} />
                   <Route path="/strategies" element={<Strategies />} />
+                  <Route path="/backtest" element={<Backtest />} />
                   <Route path="/testnet" element={<TestnetMonitor />} />
                   <Route path="/force-orders" element={<ForceOrders />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

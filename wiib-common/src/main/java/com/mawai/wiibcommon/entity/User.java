@@ -74,6 +74,12 @@ public class User {
     /** 禁言到期时间，NULL 或已过期=未禁言。到期自动解禁；重置账户刻意不清它 */
     private LocalDateTime mutedUntil;
 
+    /**
+     * 是否允许别人查看自己的持仓与交易历史（排行榜点进来的详情页）。默认开启。
+     * 关掉只挡详情页，仍照常上排行榜——榜上只有总资产和收益率，那是排名本身的含义。
+     */
+    private Boolean profilePublic;
+
     /** 创建时间 */
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;

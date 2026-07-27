@@ -44,7 +44,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
   const fee = Math.round(amt * FEE_RATE * 100) / 100;
   const receiveAmt = Math.round(amt * (1 - FEE_RATE) * 100) / 100;
 
-  // 余额→游戏 才要预检：有全仓敞口时转出会动净值/强平价，防抖 400ms 问后端
+  // 余额→游戏 才要预检：可转额度被全仓占用压低时给出上限和强平价影响，防抖 400ms 问后端
   useEffect(() => {
     if (!open || !toGame || amt <= 0) { setPreview(null); return; }
     let stale = false;
@@ -144,7 +144,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
             </div>
           )}
 
-          {/* 全仓敞口预检：restricted=false 时什么都不显示 */}
+          {/* 全仓占用预检：restricted=false（可转=全部余额）时什么都不显示 */}
           {toGame && preview?.restricted && (
             preview.allowed ? (
               <div className="rounded-md border border-border bg-card-2 p-3 space-y-1.5 text-xs">
@@ -175,7 +175,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
               </div>
             ) : (
               <div className="rounded-md border border-border bg-card-2 p-3 text-xs text-loss">
-                转出后将触发全仓强平，最多可转{' '}
+                超出可用额度，余额已被全仓仓位占用，最多可转{' '}
                 <button
                   type="button"
                   className="font-mono tabular-nums text-primary hover:underline underline-offset-2"

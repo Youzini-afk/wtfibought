@@ -16,9 +16,14 @@ import java.util.Set;
  * <p>三条核心公式（只看全仓仓位，逐仓/游戏钱包不参与）：
  * <pre>
  * equity    = 余额 + Σ浮盈亏                    （账户净值，强平判定用）
- * available = equity − Σ占用保证金 − Σ挂单占用    （开新仓/挂单额度）
+ * available = equity − Σ占用保证金 − Σ挂单占用    （唯一额度口径，对齐 Binance availableBalance）
  * 强平条件   = equity ≤ Σ维持保证金 → 全组爆
  * </pre></p>
+ *
+ * <p>available 是余额钱包所有去向的统一闸门：全仓开仓、逐仓开仓/加仓/挂单/追加保证金、
+ * 现货买入、划转游戏钱包，一律走 {@link #assertCanAfford}。占用制承诺的"这 2000 是给全仓仓位兜底的"
+ * 只有堵死全部出口才成立——放行任一出口按"维持保证金"这种宽口径，全仓仓位就会被抽到只剩
+ * 维持保证金（20x 下差一个数量级），下一个 tick 就爆。</p>
  */
 public interface CrossMarginService {
 
@@ -26,17 +31,13 @@ public interface CrossMarginService {
     CrossAccount snapshot(Long userId);
 
     /**
-     * 开仓/挂单额度校验：available ≥ cost，不足抛 FUTURES_CROSS_AVAILABLE_NOT_ENOUGH。
+     * 余额钱包动钱的唯一额度闸：available ≥ cost，不足抛 FUTURES_CROSS_AVAILABLE_NOT_ENOUGH。
      * 返回快照供调用方复用（省一次重算）。
+     *
+     * <p>它只管一件事：这笔钱是不是已经被全仓仓位占着。真要划走现金的场景（逐仓开仓、现货买入、
+     * 划转游戏钱包）还得各自过 balance ≥ cost——浮盈算得进 available，但浮盈不是钱包里的现金。</p>
      */
     CrossAccount assertCanAfford(Long userId, BigDecimal cost);
-
-    /**
-     * 余额钱包流出硬底线：流出后 equity 必须仍高于维持保证金，否则抛 CROSS_OUTFLOW_BLOCKED。
-     * 覆盖：划转到游戏钱包、现货/B股买入、逐仓开仓/加仓/追加保证金。
-     * 无全仓仓位的用户走 Redis 集合 O(1) 直接放行，零开销。
-     */
-    void assertOutflowAllowed(Long userId, BigDecimal amount);
 
     /**
      * 全仓资金结算（平仓盈亏/手续费/资金费）：直接加减余额，允许为负；
@@ -44,9 +45,6 @@ public interface CrossMarginService {
      * 仍有仓位的负余额留给强平巡检——浮盈可能救回来，不在这里武断处决。
      */
     void settle(Long userId, BigDecimal delta);
-
-    /** 最大可流出金额 = max(0, equity − 维持保证金 − 0.01缓冲)；无全仓仓位返回 null 表示不受限 */
-    BigDecimal maxOutflow(Long userId);
 
     /**
      * 全仓仓位的预估强平价（展示用）。
@@ -83,6 +81,11 @@ public interface CrossMarginService {
 
         public BigDecimal available() {
             return equity().subtract(usedMargin).subtract(pendingReserved);
+        }
+
+        /** 最大可流出现金 = min(可用额度, 余额钱包)：浮盈顶得了开仓额度，但顶不了现金流出 */
+        public BigDecimal maxOutflow() {
+            return available().min(balance).max(BigDecimal.ZERO);
         }
 
         /** 强平线：净值 ≤ 维持保证金（与逐仓判定符号一致，等于也爆） */

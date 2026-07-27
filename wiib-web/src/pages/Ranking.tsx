@@ -1,11 +1,15 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { rankingApi } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
 import { cn, fmtNum } from '../lib/utils';
-import { Trophy, TrendingUp, TrendingDown, Clock } from 'lucide-react';
+import { Trophy, TrendingUp, TrendingDown, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 import type { RankingItem } from '../types';
+
+const PAGE_SIZE = 20;
 
 type Numeric = number | null | undefined;
 
@@ -107,7 +111,7 @@ function RankAvatar({ username, avatar, size = 'md', accent }: {
 }
 
 /* ── Podium card for top 3 ── */
-function PodiumCard({ item, place }: { item: RankingItem; place: 1 | 2 | 3 }) {
+function PodiumCard({ item, place, onOpen }: { item: RankingItem; place: 1 | 2 | 3; onOpen: () => void }) {
   const cfg = {
     1: { order: 'order-2', height: 'h-32', bg: 'from-amber-500/20 to-amber-500/5', ring: 'ring-amber-500/40', accent: 'ring-amber-400/60', label: '🥇' },
     2: { order: 'order-1', height: 'h-28', bg: 'from-slate-400/20 to-slate-400/5', ring: 'ring-slate-400/40', accent: 'ring-slate-400/50', label: '🥈' },
@@ -115,7 +119,12 @@ function PodiumCard({ item, place }: { item: RankingItem; place: 1 | 2 | 3 }) {
   }[place];
 
   return (
-    <div className={cn("flex-1 flex flex-col items-center gap-2.5", cfg.order)}>
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`查看 ${item.username} 的持仓与交易历史`}
+      className={cn("flex-1 flex flex-col items-center gap-2.5 cursor-pointer group focus-visible:outline-none", cfg.order)}
+    >
       {/* avatar + medal badge */}
       <div className="relative">
         <RankAvatar username={item.username} avatar={item.avatar} size={place === 1 ? 'lg' : 'md'} accent={cfg.accent} />
@@ -124,7 +133,7 @@ function PodiumCard({ item, place }: { item: RankingItem; place: 1 | 2 | 3 }) {
 
       {/* name + rank label */}
       <div className="flex flex-col items-center gap-0.5 min-w-0 max-w-full w-full">
-        <span className={cn("font-semibold truncate max-w-full text-center", place === 1 ? "text-sm" : "text-xs")}>
+        <span className={cn("font-semibold truncate max-w-full text-center group-hover:text-primary transition-colors", place === 1 ? "text-sm" : "text-xs")}>
           {item.username}
         </span>
         <span className="text-[10px] text-muted-foreground tracking-wide">
@@ -146,14 +155,19 @@ function PodiumCard({ item, place }: { item: RankingItem; place: 1 | 2 | 3 }) {
         <ProfitBadge pct={item.profitPct} />
         <HardcoreLine hardcore={item.hardcoreProfit} buff={item.buffProfit} compact />
       </div>
-    </div>
+    </button>
   );
 }
 
 /* ── Row for rank 4+ ── */
-function RankingRow({ item }: { item: RankingItem }) {
+function RankingRow({ item, onOpen }: { item: RankingItem; onOpen: () => void }) {
   return (
-    <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors">
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`查看 ${item.username} 的持仓与交易历史`}
+      className="w-full text-left flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       {/* rank number */}
       <span className="w-7 text-center text-sm font-bold tabular-nums text-muted-foreground shrink-0">
         {item.rank}
@@ -164,7 +178,7 @@ function RankingRow({ item }: { item: RankingItem }) {
 
       {/* name + sub label */}
       <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold truncate">{item.username}</div>
+        <div className="text-sm font-semibold truncate group-hover:text-primary transition-colors">{item.username}</div>
         <div className="text-[11px] text-muted-foreground leading-tight">NO.{item.rank} · 模拟账户</div>
       </div>
 
@@ -175,17 +189,37 @@ function RankingRow({ item }: { item: RankingItem }) {
         <ProfitBadge pct={item.profitPct} />
         <HardcoreLine hardcore={item.hardcoreProfit} buff={item.buffProfit} />
       </div>
-    </div>
+      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors shrink-0" />
+    </button>
   );
 }
 
 export function Ranking() {
+  const navigate = useNavigate();
   const [ranking, setRanking] = useState<RankingItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(0);
+  const [total, setTotal] = useState(0);
+  // loading 由"已加载页码是否追上当前页码"派生：在 effect 里同步 setLoading(true)
+  // 会触发级联渲染，eslint 的 react-hooks/set-state-in-effect 直接判错（同 ForceOrders）
+  const [loadedPage, setLoadedPage] = useState<number | null>(null);
+  const loading = loadedPage !== page;
 
   useEffect(() => {
-    rankingApi.list().then(setRanking).catch(() => setRanking([])).finally(() => setLoading(false));
-  }, []);
+    let cancelled = false;
+    rankingApi.list(page, PAGE_SIZE)
+      .then(res => {
+        if (cancelled) return;
+        setRanking(res.records);
+        setPages(res.pages);
+        setTotal(res.total);
+      })
+      .catch(() => { if (!cancelled) setRanking([]); })
+      .finally(() => { if (!cancelled) setLoadedPage(page); });
+    return () => { cancelled = true; };
+  }, [page]);
+
+  const openUser = (userId: number) => navigate(`/user/${userId}`);
 
   if (loading) {
     return (
@@ -197,8 +231,10 @@ export function Ranking() {
     );
   }
 
-  const top3 = ranking.slice(0, 3);
-  const rest = ranking.slice(3);
+  // 奖台只在第 1 页出现：第 2 页往后的「前三名」是这一页的前三个，不是全榜前三
+  const showPodium = page === 1;
+  const top3 = showPodium ? ranking.slice(0, 3) : [];
+  const rest = showPodium ? ranking.slice(3) : ranking;
 
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-4">
@@ -215,6 +251,8 @@ export function Ranking() {
               <Clock className="w-3 h-3" />
               交易时段每10分钟更新
             </span>
+            <span>仅统计有过成交的用户 · 共 {total} 人</span>
+            <span>点头像或用户名可查看其持仓与交易历史</span>
           </div>
         </CardHeader>
 
@@ -226,9 +264,9 @@ export function Ranking() {
               {/* ── Podium ── */}
               {top3.length > 0 && (
                 <div className="flex items-end gap-2 sm:gap-3 px-1 sm:px-2 pt-4 pb-0">
-                  {top3.length > 1 && <PodiumCard item={top3[1]} place={2} />}
-                  <PodiumCard item={top3[0]} place={1} />
-                  {top3.length > 2 && <PodiumCard item={top3[2]} place={3} />}
+                  {top3.length > 1 && <PodiumCard item={top3[1]} place={2} onOpen={() => openUser(top3[1].userId)} />}
+                  <PodiumCard item={top3[0]} place={1} onOpen={() => openUser(top3[0].userId)} />
+                  {top3.length > 2 && <PodiumCard item={top3[2]} place={3} onOpen={() => openUser(top3[2].userId)} />}
                 </div>
               )}
 
@@ -237,8 +275,32 @@ export function Ranking() {
 
               {/* ── Rest of the list ── */}
               <div className="space-y-1">
-                {rest.map((item) => <RankingRow key={item.userId} item={item} />)}
+                {rest.map((item) => (
+                  <RankingRow key={item.userId} item={item} onOpen={() => openUser(item.userId)} />
+                ))}
               </div>
+
+              {pages > 1 && (
+                <div className="flex items-center justify-between pt-2 border-t border-border/40">
+                  <span className="text-xs text-muted-foreground">第 {page} / {pages} 页</span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost" size="sm" className="h-8 w-8 p-0"
+                      disabled={page <= 1}
+                      onClick={() => setPage(p => p - 1)}
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="ghost" size="sm" className="h-8 w-8 p-0"
+                      disabled={page >= pages}
+                      onClick={() => setPage(p => p + 1)}
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
             </>
           )}
         </CardContent>

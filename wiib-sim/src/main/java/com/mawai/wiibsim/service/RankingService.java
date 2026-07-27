@@ -2,12 +2,14 @@ package com.mawai.wiibsim.service;
 import com.mawai.wiibcommon.cache.CacheService;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.mawai.wiibcommon.dto.RankingDTO;
 import com.mawai.wiibcommon.entity.*;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesOrderMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.PredictionBetMapper;
+import com.mawai.wiibsim.mapper.PublicTradeMapper;
 import com.mawai.wiibsim.service.impl.AssetValuationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -19,8 +21,10 @@ import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -37,9 +41,17 @@ public class RankingService {
     private final FuturesOrderMapper futuresOrderMapper;
     private final PredictionBetMapper predictionBetMapper;
     private final AssetValuationService assetValuationService;
+    private final PublicTradeMapper publicTradeMapper;
 
     private static final String RANKING_KEY = "ranking:top";
-    private static final int TOP_N = 50;
+    /**
+     * 入榜人数上限。原来是 50——榜要分页翻，卡 50 等于第 3 页往后永远空着。
+     * 留个 500 是防缓存对象无限膨胀（整榜是一个 Redis value），不是业务上限。
+     */
+    private static final int MAX_RANKED = 500;
+
+    /** 单页封顶，同 force-orders / 全站成交那条口径 */
+    private static final int MAX_PAGE_SIZE = 100;
 
     @Value("${trading.initial-balance:10000}")
     private BigDecimal initialBalance;
@@ -57,7 +69,12 @@ public class RankingService {
         long start = System.currentTimeMillis();
 
         // ────── 1. 用户与持仓快照 ──────
-        List<User> users = userService.list();
+        // 只算交易过的人（有过 FILLED 现货或合约单）。没交易过的挂着初始资金进榜，
+        // 排出来是一串一模一样的 10000，把真在交易的人挤到后面去
+        Set<Long> tradedUserIds = new HashSet<>(publicTradeMapper.selectTradedUserIds());
+        List<User> users = userService.list().stream()
+                .filter(u -> tradedUserIds.contains(u.getId()))
+                .toList();
         Map<Long, List<CryptoPosition>> cryptoPositionMap = cryptoPositionService.list().stream()
                 .collect(Collectors.groupingBy(CryptoPosition::getUserId));
         List<FuturesPosition> allFuturesPositions = futuresPositionMapper.selectList(
@@ -122,18 +139,52 @@ public class RankingService {
             rankings.add(getRankingDTO(user, totalAssets, hardcoreProfit, buffProfit));
         }
 
-        // ────── 6. 排序 / 取 TopN / 缓存 ──────
+        // ────── 6. 排序 / 截断 / 缓存 ──────
         rankings.sort(Comparator.comparing(RankingDTO::getTotalAssets).reversed());
-        List<RankingDTO> topN = new ArrayList<>();
-        for (int i = 0; i < Math.min(TOP_N, rankings.size()); i++) {
+        List<RankingDTO> ranked = new ArrayList<>();
+        for (int i = 0; i < Math.min(MAX_RANKED, rankings.size()); i++) {
             RankingDTO dto = rankings.get(i);
             dto.setRank(i + 1);
-            topN.add(dto);
+            ranked.add(dto);
         }
-        cacheService.setObject(RANKING_KEY, topN, 15, TimeUnit.MINUTES);
+        cacheService.setObject(RANKING_KEY, ranked, 15, TimeUnit.MINUTES);
 
-        log.info("排行榜刷新完成，共{}人，耗时{}ms", topN.size(), System.currentTimeMillis() - start);
-        return topN;
+        log.info("排行榜刷新完成，交易过的用户{}人，入榜{}人，耗时{}ms",
+                users.size(), ranked.size(), System.currentTimeMillis() - start);
+        return ranked;
+    }
+
+    /**
+     * 整榜内存切片分页。排名是全局的，必须先算完整榜才有名次，所以不做 SQL 分页。
+     */
+    public Page<RankingDTO> getRankingPage(int pageNum, int pageSize) {
+        int safeNum = Math.max(pageNum, 1);
+        int safeSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
+        List<RankingDTO> all = getRanking();
+        int from = Math.min((safeNum - 1) * safeSize, all.size());
+        int to = Math.min(from + safeSize, all.size());
+
+        Page<RankingDTO> page = new Page<>(safeNum, safeSize, all.size());
+        page.setRecords(all.subList(from, to));
+        return page;
+    }
+
+    /**
+     * 单个用户的榜单行；从没成交过的人返回 null。
+     * <p>
+     * 缓存最长 15 分钟，刚下完第一单的人还没进榜，直接返 null 会让他点自己的详情页扑空。
+     * 所以缓存里没有时再刷一次——但<b>先用一条 count 确认这人真交易过才刷</b>：
+     * 不设这道，拿不存在的 userId 循环打详情接口，每次请求都会触发一次全量刷榜。
+     */
+    public RankingDTO findRanking(Long userId) {
+        RankingDTO hit = lookup(getRanking(), userId);
+        if (hit != null) return hit;
+        if (publicTradeMapper.countByUser(userId) == 0) return null;
+        return lookup(refreshRanking(), userId);
+    }
+
+    private static RankingDTO lookup(List<RankingDTO> list, Long userId) {
+        return list.stream().filter(d -> userId.equals(d.getUserId())).findFirst().orElse(null);
     }
 
     private RankingDTO getRankingDTO(User user, BigDecimal totalAssets, BigDecimal hardcoreProfit, BigDecimal buffProfit) {

@@ -162,6 +162,23 @@ class FuturesOpenMergeTest {
         verify(positionMapper, never()).insert(any(FuturesPosition.class));
     }
 
+    /**
+     * 逐仓开仓吃的是全仓可用额度，不是整个钱包。
+     * <p>
+     * 历史 bug：这里曾走 assertOutflowAllowed（流出后 equity 还高于维持保证金就放行），
+     * 而维持保证金比起始保证金小一个数量级（20x 下 0.5% vs 5%），等于全仓占用拦不住逐仓——
+     * 钱包 1000 开一笔占用 100 的全仓后，逐仓还能开走 989。金额口径见 CrossOccupancyGuardTest。
+     */
+    @Test
+    void 逐仓开仓_保证金加手续费全额过可用额度闸() {
+        when(positionMapper.selectList(any())).thenReturn(List.of());
+
+        service.doOpenPosition(UID, marketReq("LONG", "ISOLATED", 50, "1"));
+
+        // @110 开1个币 50x：保证金 110/50=2.20 + 手续费 0.04，手续费也占额度，别只报保证金
+        verify(crossMarginService).assertCanAfford(eq(UID), argThat(c -> c.compareTo(new BigDecimal("2.24")) == 0));
+    }
+
     @Test
     void 杠杆与现有仓位不一致_拒绝() {
         FuturesPosition lp = pos(1L, "LONG", FuturesPosition.CROSS, 100, "100", "1", "1.00");

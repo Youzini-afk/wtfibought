@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { RefreshCw, Loader2, Plus } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { RefreshCw, Loader2, Plus, ChevronRight } from 'lucide-react';
 import { futuresApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
 import { useCryptoStream } from '../../hooks/useCryptoStream';
@@ -182,6 +183,7 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
 
   const { toast } = useToast();
   const user = useUserStore(s => s.user);
+  const navigate = useNavigate();
 
   // WS 实时价：mp 驱动盈亏，fp（最新价）用于限价单提示与 SLTP 编辑；断流时退回后端快照值
   const tick = useCryptoStream(pos.symbol, 'futures');
@@ -218,8 +220,12 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
     setCloseQty(type === 'close' ? String(pos.quantity) : ''); setCloseLimitPrice(''); setCloseOrderType('MARKET');
     setMarginAmt('');
     setNewLeverage(null);
-    setSlRows(pos.stopLosses?.map(s => ({ price: String(s.price), quantity: String(s.quantity) })) ?? [{ price: '', quantity: '' }]);
-    setTpRows(pos.takeProfits?.map(t => ({ price: String(t.price), quantity: String(t.quantity) })) ?? [{ price: '', quantity: '' }]);
+    // 没设过档位时预填满仓(100%)：设止损/盈最常见的就是整仓保护，让想分批的人往下调，
+    // 而不是每个人都从 0% 拖起。判 length 而不是 ?? —— 后端返的是空数组不是 null，
+    // 用 ?? 兜不住，编辑器会一行都不渲染只剩个"添加"
+    const fullRow = { price: '', quantity: String(pos.quantity) };
+    setSlRows(pos.stopLosses?.length ? pos.stopLosses.map(s => ({ price: String(s.price), quantity: String(s.quantity) })) : [fullRow]);
+    setTpRows(pos.takeProfits?.length ? pos.takeProfits.map(t => ({ price: String(t.price), quantity: String(t.quantity) })) : [fullRow]);
   };
 
   // 通用提交包装：成功关面板并向父上报
@@ -296,7 +302,21 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       {/* 全信息竖排常驻：头部徽标 → 盈亏主角 → 全量指标 → SL/TP 胶囊 → 操作按钮 */}
       <div className="pl-3 space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[13px] font-black">{cfg.name}</span>
+        {/* Portfolio 汇总卡里币名可点直达该币交易页（对齐现货持仓行的交互）；
+            Coin 页那张卡(wide)点了是跳自己，不给入口。整卡不能做成可点——卡里全是操作按钮 */}
+        {wide ? (
+          <span className="text-[13px] font-black">{cfg.name}</span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => navigate(`/coin/${pos.symbol}`)}
+            title={`前往 ${cfg.name} 交易页`}
+            className="group inline-flex items-center gap-0.5 text-[13px] font-black hover:text-primary transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded"
+          >
+            {cfg.name}
+            <ChevronRight className="w-3 h-3 text-muted-foreground/50 group-hover:text-primary transition-colors" />
+          </button>
+        )}
         <Badge variant={isLong ? 'success' : 'destructive'} className="text-[10px] px-2 py-0.5">{isLong ? '做多' : '做空'}</Badge>
         <Badge variant="outline" className="text-[10px] px-2 py-0.5">{isCrossPos ? '全仓' : '逐仓'} {pos.leverage}x</Badge>
       </div>

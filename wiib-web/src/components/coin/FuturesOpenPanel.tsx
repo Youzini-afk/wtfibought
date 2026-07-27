@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Wallet, Scale, Flame } from 'lucide-react';
 import { futuresApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
@@ -18,7 +18,7 @@ import { TradeModeSwitch } from './TradeModeSwitch';
 import { SLTPEditor } from './SLTPEditor';
 import { useQuantityAnimation } from './useQuantityAnimation';
 import {
-  POSITION_PCTS, FUTURES_LEVERAGE_OPTIONS, formatRate, getStepPrecision, floorToStep,
+  POSITION_PCTS, FUTURES_LEVERAGE_OPTIONS, formatRate, getStepPrecision, floorToStep, qtyByPct,
   calcFuturesOpenEstimate, calcMaxAffordableMarginQty, estimateFuturesLiqPrice,
   type SLTPRow,
 } from './futuresMath';
@@ -120,6 +120,29 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
   const marginQty = marginUnit === 'USDT'
     ? (priceForCalc > 0 ? inputNum / priceForCalc : 0)
     : inputNum;
+  // 实际下单币量 = 保证金数量×杠杆，按步长向下对齐。SL/TP 的 100% 必须拿它算：
+  // 用未对齐的 marginQty×杠杆 会多出一截尾数，提交时正好被"止损总量超过开仓数量"挡下
+  const orderQty = floorToStep(marginQty * effLeverage, MIN_QTY);
+
+  /** 默认档位行：数量预填满仓(100%)。开仓量还没输入时留空，免得显示成 "0" */
+  const fullSltpRow = (): SLTPRow => ({ price: '', quantity: orderQty > 0 ? String(orderQty) : '' });
+
+  // 开仓量随数量/单位/杠杆变，已设档位按各自百分比跟着重算——用户表达的是"平多少比例"，
+  // 改开仓量不该把比例冲掉。数量还空着的行（含刚打开开关那条）补满 100%
+  const prevOrderQty = useRef(orderQty);
+  useEffect(() => {
+    const prev = prevOrderQty.current;
+    prevOrderQty.current = orderQty;
+    if (prev === orderQty) return;
+    const rescale = (rows: SLTPRow[]) => rows.map(r => {
+      if (orderQty <= 0) return { ...r, quantity: '' };
+      const q = parseFloat(r.quantity) || 0;
+      const pct = q > 0 && prev > 0 ? Math.round((q / prev) * 100) : 100;
+      return { ...r, quantity: qtyByPct(orderQty, pct, MIN_QTY) };
+    });
+    setSlRows(rescale);
+    setTpRows(rescale);
+  }, [orderQty, MIN_QTY]);
 
   const switchMarginUnit = (next: 'COIN' | 'USDT') => {
     if (next === marginUnit) return;
@@ -143,8 +166,7 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
       const lp = parseFloat(limitPrice);
       if (!lp || lp <= 0) { toast('请输入有效限价', 'error'); return; }
     }
-    // 实际下单币量按步长向下对齐（USDT模式÷价、×杠杆都会产生任意小数，后端按Binance规则硬校验）
-    const orderQty = floorToStep(marginQty * effLeverage, filter.stepSize);
+    // orderQty 已在上方按步长对齐（USDT模式÷价、×杠杆都会产生任意小数，后端按Binance规则硬校验）
     if (orderQty < filter.minQty) { toast(`最小下单数量 ${filter.minQty} ${cfg.name}`, 'error'); return; }
     if (priceForCalc > 0 && orderQty * priceForCalc < filter.minNotional) {
       toast(`最小下单金额 ${filter.minNotional} USDT`, 'error'); return;
@@ -179,9 +201,9 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
       setQuantity(marginUnit === 'USDT' ? '' : String(MIN_QTY));
       setLimitPrice('');
       setSlEnabled(false);
-      setSlRows([{ price: '', quantity: '' }]);
+      setSlRows([fullSltpRow()]);
       setTpEnabled(false);
-      setTpRows([{ price: '', quantity: '' }]);
+      setTpRows([fullSltpRow()]);
       setAcctTick(t => t + 1);
       onTraded();
     } catch (e: unknown) {
@@ -220,8 +242,12 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
     : null;
   // 负强平价=永不强平：显示 — 且不传给止损编辑器
   const openLiqPrice = openLiq && openLiq.price > 0 ? openLiq.price : undefined;
-  // 下注预算基数：全仓=账户可用 available（余额扣掉已占用+挂单预留），逐仓=余额钱包
-  const budgetBalance = isCross ? (crossAcct?.available ?? 0) : (user?.balance ?? 0);
+  // 下注预算基数：全仓=账户可用 available（余额扣掉已占用+挂单预留）；
+  // 逐仓要真划钱，卡两道取小——available 管"钱是不是被全仓占着"，balance 管"钱包里有没有现金"
+  // （全仓浮盈进得了 available 进不了 balance）。快照没回来就退回余额，别把可用显示成 0
+  const budgetBalance = isCross
+    ? (crossAcct?.available ?? 0)
+    : Math.min(crossAcct?.available ?? Infinity, user?.balance ?? 0);
 
   return (
     <>
@@ -423,13 +449,13 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">止损 <HelpTip text="标记价格触及止损价时自动平仓对应数量，可设多档分批止损" /></label>
-              <button type="button" onClick={() => { setSlEnabled(!slEnabled); setSlRows([{ price: '', quantity: '' }]); }}
+              <button type="button" onClick={() => { setSlEnabled(!slEnabled); setSlRows([fullSltpRow()]); }}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${slEnabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${slEnabled ? 'translate-x-4.5' : 'translate-x-0.75'}`} />
               </button>
             </div>
             {slEnabled && (
-              <SLTPEditor rows={slRows} onChange={setSlRows} label="止损" posQty={qtyNum * effLeverage} minQty={MIN_QTY}
+              <SLTPEditor rows={slRows} onChange={setSlRows} label="止损" posQty={orderQty} minQty={MIN_QTY}
                 entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side}
                 minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
             )}
@@ -437,13 +463,13 @@ export function FuturesOpenPanel({ symbol, currentPrice, brackets, positionsKey,
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
               <label className="text-xs font-bold text-muted-foreground flex items-center gap-1">止盈 <HelpTip text="现价触及止盈价时自动平仓对应数量，可设多档分批止盈" /></label>
-              <button type="button" onClick={() => { setTpEnabled(!tpEnabled); setTpRows([{ price: '', quantity: '' }]); }}
+              <button type="button" onClick={() => { setTpEnabled(!tpEnabled); setTpRows([fullSltpRow()]); }}
                 className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${tpEnabled ? 'bg-primary' : 'bg-muted-foreground/30'}`}>
                 <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background transition-transform shadow-sm ${tpEnabled ? 'translate-x-4.5' : 'translate-x-0.75'}`} />
               </button>
             </div>
             {tpEnabled && (
-              <SLTPEditor rows={tpRows} onChange={setTpRows} label="止盈" posQty={qtyNum * effLeverage} minQty={MIN_QTY}
+              <SLTPEditor rows={tpRows} onChange={setTpRows} label="止盈" posQty={orderQty} minQty={MIN_QTY}
                 entryPrice={priceForCalc || currentPrice} margin={openEstimate?.margin ?? 0} side={side}
                 minPriceStep={PRICE_STEP} priceFormatter={fmtPrice} />
             )}

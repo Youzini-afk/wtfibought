@@ -90,7 +90,8 @@ public enum ErrorCode {
     FUTURES_SYMBOL_NOT_CONFIGURED(1759, "永续合约该币种未配置档位"),
     FUTURES_MARGIN_TOO_LOW(1760, "减少后保证金不足"),
     FUTURES_CROSS_MARGIN_ADJUST(1761, "全仓仓位不支持调整保证金"),
-    FUTURES_CROSS_AVAILABLE_NOT_ENOUGH(1762, "全仓可用余额不足"),
+    // 逐仓开仓/现货买入/钱包划转不够也抛它——全仓占用的钱谁都不能动，文案别只说"全仓"
+    FUTURES_CROSS_AVAILABLE_NOT_ENOUGH(1762, "可用余额不足，全仓仓位占用中"),
     FUTURES_LEVERAGE_ONLY_UP(1763, "逐仓持仓杠杆只能调高，补保证金请用追加保证金"),
     FUTURES_LEVERAGE_MISMATCH(1764, "杠杆与该币现有仓位不一致，请先调整杠杆"),
     FUTURES_MARGIN_MODE_CONFLICT(1765, "保证金模式与该币现有仓位不一致"),
@@ -112,7 +113,6 @@ public enum ErrorCode {
     // 钱包错误码 1950+
     GAME_BALANCE_NOT_ENOUGH(1950, "游戏钱包余额不足"),
     WALLET_TRANSFER_INVALID(1951, "划转金额无效"),
-    CROSS_OUTFLOW_BLOCKED(1952, "资金转出后全仓仓位将触发强平，已拒绝"),
 
     // 账户重置错误码 2000+（1200/1600 段已被杠杆与 Crypto 占用）
     RESET_TOO_FREQUENT(2001, "每周只能重置一次账户"),

@@ -8,9 +8,10 @@ import { Input } from '../components/ui/input';
 import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components/ui/dialog';
 import { useToast } from '../components/ui/use-toast';
 import { NotificationList } from '../components/NotificationList';
+import { ProfilePublicToggle } from '../components/ProfilePublicToggle';
 import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
-import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell } from 'lucide-react';
+import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function Me() {
@@ -58,6 +59,8 @@ export function Me() {
   };
 
   const items = [
+    // 账单没进顶栏/底栏（导航已经满了），手机端只有这一个入口，放第一位
+    { icon: Receipt, label: '资金账单', to: '/ledger', color: 'text-primary' },
     // 移动端底栏只有5槽，策略/模拟盘与排行/游戏一样从这里进（桌面走头部导航）
     { icon: LineChart, label: '策略', to: '/strategies', color: 'text-violet-400' },
     { icon: Monitor, label: '模拟盘', to: '/testnet', color: 'text-sky-400' },
@@ -139,6 +142,9 @@ export function Me() {
           ))}
         </CardContent>
       </Card>
+
+      {/* 隐私：详情页公开开关。关掉只挡详情页，仍照常上排行榜 */}
+      <ProfilePublicToggle />
 
       {/* 主题切换 */}
       <Card>
