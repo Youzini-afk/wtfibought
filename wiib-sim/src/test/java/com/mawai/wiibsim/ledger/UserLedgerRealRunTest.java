@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.entity.UserLedger;
 import com.mawai.wiibcommon.enums.LedgerBizType;
 import com.mawai.wiibcommon.enums.LedgerWallet;
+import com.mawai.wiibsim.controller.LedgerController;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.ReturningRecordProbeMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
@@ -24,6 +25,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -37,6 +39,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>
  * 末尾两条是整套账本的<b>总验收</b>：混合业务跑一轮后五个钱包账实相符、并发打同一行后余额链不断。
  * 累加式对账的适用范围（存量用户为什么不参与）写在 {@link #assertInvariant} 的注释里，别跳过。
+ * <p>
+ * 最后一组验的是<b>账单查询接口的读路径</b>（只能查自己的 / 游标翻页 / 类型筛选 / limit 封顶）——
+ * 这四件事全在 SQL 里，mock 掉 mapper 一条都验不到。放本类是为了复用这里的建号 helper 与
+ * {@link #清掉本次建的测试用户()} 清理，不再另造一套。
  * <p>
  * 跑法（项目根）：
  * <pre>
@@ -71,6 +77,9 @@ class UserLedgerRealRunTest {
 
     @Autowired
     private FuturesPositionMapper positionMapper;
+
+    @Autowired
+    private LedgerController ledgerController;
 
     private final List<Long> createdUserIds = new ArrayList<>();
     private final List<Long> createdPositionIds = new ArrayList<>();
@@ -658,5 +667,132 @@ class UserLedgerRealRunTest {
         positionMapper.insert(p);
         createdPositionIds.add(p.getId());
         return p.getId();
+    }
+
+    // ==================== 账单查询接口（读路径）====================
+
+    /**
+     * 直接插一行流水当查询夹具，不走真业务。
+     * <p>
+     * 查询接口不关心行是怎么来的，走真业务造 100 多行既慢、又把用例搅成"业务 + 查询"混合体，
+     * 断言红了分不清是哪边坏的。写路径（切面落账、balance_after 取自 RETURNING）由本类前面那些
+     * 用例负责，这里只喂读路径。balance_after 随便填 0 也是这个道理——读路径不看它。
+     */
+    private Long insertRow(Long uid, LedgerBizType type) {
+        UserLedger e = new UserLedger();
+        e.setUserId(uid);
+        e.setWallet(LedgerWallet.BALANCE);
+        e.setBizType(type);
+        e.setDelta(new BigDecimal("-1.00"));
+        e.setBalanceAfter(BigDecimal.ZERO);
+        ledgerMapper.insert(e);
+        return e.getId();
+    }
+
+    /** 走真 controller 而不是直接打 mapper：limit 封顶在 controller 里，跳过它就验不到 */
+    private List<UserLedger> query(Long uid, LedgerBizType bizType, Long beforeId, int limit) {
+        return ledgerController.list(uid, bizType, beforeId, limit).getData();
+    }
+
+    private static List<Long> ids(List<UserLedger> rows) {
+        return rows.stream().map(UserLedger::getId).toList();
+    }
+
+    /**
+     * 【最要紧的一条】只能查自己的。
+     * <p>
+     * 两个用户各有流水，各自查各自的，谁都不许看见对方一行。
+     * SQL 里那句 {@code WHERE user_id = #{userId}} 一丢，两边的 doesNotContain 会<b>同时</b>红。
+     * 刻意双向都查一遍：只查一边的话，"把 userId 当死值筛"这种错（永远只返回第一个用户的行）
+     * 有一半概率蒙对。
+     */
+    @Test
+    void 账单只返回自己的流水() {
+        Long me = newUserWithGrant("1000.00");
+        Long other = newUserWithGrant("1000.00");
+        Long myRow = insertRow(me, LedgerBizType.SPOT_BUY);
+        Long otherRow = insertRow(other, LedgerBizType.SPOT_BUY);
+
+        List<UserLedger> mine = query(me, null, null, 30);
+        assertThat(mine).hasSize(2);          // 建号那条 + 刚插的那条
+        assertThat(mine).allSatisfy(r -> assertThat(r.getUserId()).isEqualTo(me));
+        assertThat(ids(mine)).contains(myRow).doesNotContain(otherRow);
+
+        List<UserLedger> theirs = query(other, null, null, 30);
+        assertThat(theirs).hasSize(2);
+        assertThat(theirs).allSatisfy(r -> assertThat(r.getUserId()).isEqualTo(other));
+        assertThat(ids(theirs)).contains(otherRow).doesNotContain(myRow);
+    }
+
+    /**
+     * 游标翻页真的往前翻：第二页不含第一页任何一条、整页 id 都比第一页最小的还小，翻到底返空。
+     * <p>
+     * 把 SQL 里的 {@code id &lt; #{beforeId}} 写成 {@code &gt;} 或者漏掉，第二页会重复第一页
+     * （doesNotContainAnyElementsOf 红）；把 {@code ORDER BY id DESC} 写成 ASC，倒序断言红。
+     */
+    @Test
+    void 游标翻页往前翻不重不漏() {
+        Long uid = newUserWithGrant("1000.00");       // 建号 1 行
+        for (int i = 0; i < 6; i++) {
+            insertRow(uid, LedgerBizType.SPOT_BUY);   // 共 7 行
+        }
+
+        List<UserLedger> p1 = query(uid, null, null, 3);
+        assertThat(p1).hasSize(3);
+        assertThat(ids(p1)).isSortedAccordingTo(Comparator.reverseOrder());
+
+        List<UserLedger> p2 = query(uid, null, p1.getLast().getId(), 3);
+        assertThat(p2).hasSize(3);
+        assertThat(ids(p2)).isSortedAccordingTo(Comparator.reverseOrder());
+        assertThat(ids(p2)).doesNotContainAnyElementsOf(ids(p1));
+        assertThat(p2.getFirst().getId()).isLessThan(p1.getLast().getId());
+
+        // 第三页只剩建号那条，再翻一页空——"返回空数组即到底"这个前端契约
+        List<UserLedger> p3 = query(uid, null, p2.getLast().getId(), 3);
+        assertThat(p3).hasSize(1);
+        assertThat(p3.getFirst().getBizType()).isEqualTo(LedgerBizType.INITIAL_GRANT);
+        assertThat(query(uid, null, p3.getLast().getId(), 3)).isEmpty();
+
+        // 三页并起来正好是全部 7 行、无重复：翻页既没漏也没重
+        assertThat(ids(p1)).doesNotContainAnyElementsOf(ids(p3));
+        assertThat(ids(p2)).doesNotContainAnyElementsOf(ids(p3));
+    }
+
+    /** bizType 筛选真的生效——末尾那句"不筛时 4 行"是防"本来就只有 2 行"的假绿 */
+    @Test
+    void bizType筛选只返回该类型() {
+        Long uid = newUserWithGrant("1000.00");       // INITIAL_GRANT 1 行
+        Long buy1 = insertRow(uid, LedgerBizType.SPOT_BUY);
+        insertRow(uid, LedgerBizType.MINES_BET);
+        Long buy2 = insertRow(uid, LedgerBizType.SPOT_BUY);
+
+        List<UserLedger> rows = query(uid, LedgerBizType.SPOT_BUY, null, 30);
+        assertThat(rows).hasSize(2);
+        assertThat(rows).allSatisfy(r -> assertThat(r.getBizType()).isEqualTo(LedgerBizType.SPOT_BUY));
+        assertThat(ids(rows)).containsExactly(buy2, buy1);   // 筛完仍是 id 倒序
+
+        assertThat(query(uid, null, null, 30)).hasSize(4);
+    }
+
+    /**
+     * limit 上限真的卡住：库里有 106 行，传 Integer.MAX_VALUE 也只回 100。
+     * <p>
+     * 末尾那句直打 mapper 拿 106 是<b>防假绿的关键</b>：不确认库里真有超过封顶的行数，
+     * "只回 100 条"可能只是因为本来就没那么多。
+     */
+    @Test
+    void limit上限卡住不让一把拉全表() {
+        Long uid = newUserWithGrant("1000.00");        // 建号 1 行
+        for (int i = 0; i < 105; i++) {
+            insertRow(uid, LedgerBizType.SPOT_BUY);    // 共 106 行
+        }
+
+        assertThat(query(uid, null, null, Integer.MAX_VALUE)).hasSize(100);
+        assertThat(query(uid, null, null, 1000)).hasSize(100);
+        // 负数不兜到 1 的话 PG 直接报 "LIMIT must not be negative"，一个手搓请求就是 500
+        assertThat(query(uid, null, null, -1)).hasSize(1);
+
+        // 封顶之外的行确实存在，上面三条才不是"本来就没那么多"
+        assertThat(ledgerMapper.selectByCursor(uid, null, null, 1000)).hasSize(106);
     }
 }

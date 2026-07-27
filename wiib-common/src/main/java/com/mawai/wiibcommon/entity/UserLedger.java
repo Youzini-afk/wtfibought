@@ -42,4 +42,22 @@ public class UserLedger {
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
+
+    /**
+     * 账单页直接显示的中文，取自 {@link LedgerBizType#getLabel()}。
+     * <p>
+     * 补这个 getter 是因为 Jackson 默认把枚举序列化成 name()：不补，前端拿到的就是
+     * FUTURES_OPEN_MARGIN 而不是"合约开仓保证金"，枚举上那句"前端不再维护一份映射"就是空话。
+     * <p>
+     * 刻意平铺成一个兄弟字段，而不是给枚举挂 @JsonFormat(shape=OBJECT)。后者实测出来是
+     * {@code "bizType":{"label":"合约开仓保证金"}} —— <b>连枚举名都没了</b>：Jackson 按 bean 序列化枚举，
+     * 只认 getLabel() 这个 getter，name() 不带 get 前缀不算属性。而枚举名是稳定标识，
+     * 查询接口的类型筛选参数吃的就是它，前端筛选、日志、排查全指着它，不能弄丢也不能包进对象里。
+     * <p>
+     * 没有对应字段，MyBatis-Plus 的表信息只按字段建（同 {@link User#getTotalBalance()}），
+     * 不会凭空多出一列。wallet 那个枚举没有 label 也不需要，别顺手照抄一份。
+     */
+    public String getBizTypeLabel() {
+        return bizType == null ? null : bizType.getLabel();
+    }
 }
