@@ -37,7 +37,10 @@ public class LedgerController {
     private final UserLedgerMapper ledgerMapper;
 
     @GetMapping
-    @Operation(summary = "资金流水（游标翻页，id 倒序；beforeId 不传取最新一页）")
+    // summary 里必须带上 30/100：前端作者读的是 /doc.html 而不是这个 javadoc，
+    // 不知道有封顶就会按"返回条数 < limit 即到底"实现，传个 limit=500 时第一页就被误判成到底
+    @Operation(summary = "资金流水（游标翻页，id 倒序；beforeId 不传取最新一页；"
+            + "limit 默认 30、服务端封顶 100，返回空数组即到底）")
     public Result<List<UserLedger>> list(@CurrentUserId Long userId,
                                         @RequestParam(required = false) LedgerBizType bizType,
                                         @RequestParam(required = false) Long beforeId,

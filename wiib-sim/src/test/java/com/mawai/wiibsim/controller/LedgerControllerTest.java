@@ -1,7 +1,5 @@
 package com.mawai.wiibsim.controller;
 
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.entity.UserLedger;
 import com.mawai.wiibcommon.enums.LedgerBizType;
@@ -11,10 +9,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.core.annotation.AnnotatedElementUtils;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
@@ -150,11 +146,18 @@ class LedgerControllerTest {
      * ②有人给 LedgerBizType 挂 @JsonFormat(shape=OBJECT)——实测那会序列化成
      * {@code "bizType":{"label":"合约开仓保证金"}}，<b>枚举名整个消失</b>（Jackson 按 bean 序列化枚举，
      * name() 不带 get 前缀不算属性），前端连筛选参数该传什么都拿不到了。
+     * <p>
+     * 【这个 mapper 的口径】用 tools.jackson（Jackson 3）是为了跟生产同 major——Boot 4.1 的
+     * spring-boot-starter-jackson 拉的是 tools.jackson.core:jackson-databind:3.1.4，
+     * 而 com.fasterxml（Jackson 2）在 classpath 上只是 Sa-Token 那条链传递来的。
+     * 但这仍是<b>手搓的 mapper，只验 bean 属性形态，不代表 web 层的实际配置</b>：
+     * 谁给 web 层加 mapper 定制（改日期格式、挂 NamingStrategy、加 Mixin），本用例照样绿。
+     * 要连 web 层配置一起验就得起上下文取那个真 mapper，为这三条断言不值当。
      */
     @Test
-    void 中文label平铺进JSON而bizType仍是枚举名() throws Exception {
-        // 与 Spring Boot 默认的 web ObjectMapper 同形态（JavaTimeModule 由 starter-json 注册）
-        JsonMapper json = JsonMapper.builder().addModule(new JavaTimeModule()).build();
+    void 中文label平铺进JSON而bizType仍是枚举名() {
+        // Jackson 3 的 JavaTime 支持是内建的，不用再挂 module
+        JsonMapper json = JsonMapper.builder().build();
 
         UserLedger row = new UserLedger();
         row.setId(1L);
@@ -167,6 +170,8 @@ class LedgerControllerTest {
 
         String s = json.writeValueAsString(row);
 
+        // 全用 contains 而不是比整串：Jackson 3 默认按属性名字母序输出（Jackson 2 是声明序），
+        // 钉整串等于把一个跟本用例无关的 mapper 默认值也钉死
         assertThat(s).contains("\"bizType\":\"FUTURES_OPEN_MARGIN\"");
         assertThat(s).contains("\"bizTypeLabel\":\"合约开仓保证金\"");
         // wallet 没有 label 也不需要一份：前端只认枚举名
@@ -181,11 +186,22 @@ class LedgerControllerTest {
     }
 
     /**
-     * 【只能查自己的】请求侧绑定的形参只准是这三个，userId 一个字都不许出现。
+     * 【只能查自己的】handler 上除了 {@code @CurrentUserId} 那个，形参只准是这三个。
      * <p>
-     * 守的是"哪天有人图省事加个 @RequestParam Long userId 方便调试/做后台"——那等于任何登录用户
-     * 都能翻别人的账单。用白名单而不是"名字里不许含 userid"：后者一个 uid/targetId 就绕过去了；
-     * 白名单是加任何请求参数都得来这儿显式改一次，顺手加不进去。
+     * 守的是"哪天有人图省事加个 userId 参数方便调试/做后台"——那等于任何登录用户都能翻别人的账单。
+     * <p>
+     * 【为什么收集的是"除 @CurrentUserId 之外的全部形参"，而不是"挂了
+     * @RequestParam/@PathVariable/@RequestBody 的形参"】因为按注解收根本拦不住：Spring 的兜底解析器
+     * 会把<b>不带任何注解的简单类型形参</b>（Long/String 这些过 BeanUtils.isSimpleProperty 的）
+     * 当查询参数绑定，非简单类型则落到 ServletModelAttributeMethodProcessor 按 bean 从查询参数
+     * data-bind。所以一个裸的 {@code Long targetId}、或一个带 userId 字段的参数对象，
+     * 按注解收<b>一个都收不到</b>，白名单照绿。收全部形参才对得上"加任何参数都得来这儿改一次"这句话。
+     * <p>
+     * 用白名单而不是"名字里不许含 userid"：后者一个 uid/targetId 就绕过去了。名字那条检查留着，
+     * 是因为它对最危险的那种写法能给一句更准的失败信息。
+     * <p>
+     * 拦得住"加参数"，<b>拦不住"改语义"</b>——有人把 beforeId 的含义偷偷改成"要查谁的"，
+     * 名字没变、白名单不动，这条全绿。那种只能靠审查。
      * <p>
      * 参数名靠 class 文件的 MethodParameters（spring-boot-starter-parent 默认开 -parameters）。
      */
@@ -203,20 +219,18 @@ class LedgerControllerTest {
         Set<String> fromRequest = new TreeSet<>();
         for (Method m : handlers) {
             for (Parameter p : m.getParameters()) {
-                if (p.isAnnotationPresent(RequestParam.class)
-                        || p.isAnnotationPresent(PathVariable.class)
-                        || p.isAnnotationPresent(RequestBody.class)) {
-                    fromRequest.add(p.getName());
-                }
-                if (p.getName().toLowerCase().contains("userid")) {
-                    assertThat(p.isAnnotationPresent(CurrentUserId.class))
-                            .as("%s 的形参 %s 必须挂 @CurrentUserId 从登录态取", m.getName(), p.getName())
-                            .isTrue();
+                boolean fromLogin = p.isAnnotationPresent(CurrentUserId.class);
+                assertThat(!p.getName().toLowerCase().contains("userid") || fromLogin)
+                        .as("%s 的形参 %s 必须挂 @CurrentUserId 从登录态取，"
+                                + "否则它会被当请求参数绑定，等于开放翻别人的账单", m.getName(), p.getName())
+                        .isTrue();
+                if (!fromLogin) {
+                    fromRequest.add(p.getName());   // 登录态注入的那个之外，一律算请求侧
                 }
             }
         }
         assertThat(fromRequest)
-                .as("请求侧参数变了：新增的参数确认过不能顶替 userId 之后，再把它加进白名单")
+                .as("handler 的形参变了：新增的参数确认过不能顶替 userId 之后，再把它加进白名单")
                 .isEqualTo(allowed);
     }
 }
