@@ -1,23 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { rankingApi } from '../api';
-import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Badge } from '../components/ui/badge';
+import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
+import { EmptyState } from '../components/EmptyState';
 import { cn, fmtNum } from '../lib/utils';
-import { Trophy, TrendingUp, TrendingDown, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
-import type { RankingItem } from '../types';
+import { ChevronLeft, ChevronRight, Clock, Trophy } from 'lucide-react';
+import type { RankingItem, RankingSort } from '../types';
 
 const PAGE_SIZE = 20;
+
+/**
+ * 列宽模板。表头与数据行共用一份，各写各的迟早错位（同 PositionHistoryList）。
+ * 窄屏退化成带微标签的两列格子，表头整条隐藏。
+ */
+const GRID = 'grid grid-cols-2 gap-x-3 gap-y-2 md:gap-y-0 md:items-center md:grid-cols-[2.25rem_minmax(7rem,1.4fr)_minmax(0,1.1fr)_minmax(0,.85fr)_minmax(0,1.05fr)_minmax(0,.8fr)_minmax(0,1.1fr)_1rem]';
 
 type Numeric = number | null | undefined;
 
 const num = (v: Numeric) => Number.isFinite(v) ? v as number : 0;
+const fmt = (v: Numeric) => fmtNum(num(v));  // 缺失值按 0.00 展示（榜单口径）
 
-const fmt = (v: Numeric) => fmtNum(num(v));  // 缺失值仍按 0.00 展示（奖台口径）
-
-// 移动端紧凑展示：1.23M / 12.3K，避免奖台窄列里大数字溢出
+/** 窄屏紧凑数字：1.23M / 12.3K，避免小屏格子里大数字换行 */
 const fmtCompact = (v: Numeric) => {
   const n = num(v);
   const abs = Math.abs(n);
@@ -28,168 +33,221 @@ const fmtCompact = (v: Numeric) => {
   return fmt(n);
 };
 
-function ProfitBadge({ pct }: { pct: Numeric }) {
-  const safePct = num(pct);
-  const up = safePct >= 0;
+/** 名次序号：等宽补零，前三名用主色。数字本身就是层级，不再叠奖牌 emoji */
+function RankNum({ rank, className }: { rank: number; className?: string }) {
   return (
-    <Badge variant="secondary" className={cn("text-xs gap-0.5", up ? "text-green-500" : "text-red-500")}>
-      {up ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-      {up ? '+' : ''}{safePct.toFixed(2)}%
-    </Badge>
+    <span className={cn('num tabular-nums', rank <= 3 ? 'text-primary' : 'text-muted-foreground', className)}>
+      {String(rank).padStart(2, '0')}
+    </span>
   );
 }
 
-/* ── 合约+现货+预测 实战盈亏 + 优惠券省下金额（全部基于Binance实时价格） ── */
-function HardcoreLine({ hardcore, buff, compact = false }: { hardcore: Numeric; buff: Numeric; compact?: boolean }) {
-  const safeHardcore = num(hardcore);
-  const safeBuff = num(buff);
-  const up = safeHardcore >= 0;
-  const color = up ? 'text-emerald-500' : 'text-rose-500';
-  const fs = compact ? 'text-[10px]' : 'text-[11px]';
-  return (
-    <div
-      className={cn(fs, "flex flex-wrap items-center justify-end gap-x-1.5 gap-y-0 leading-tight tabular-nums")}
-      title="盈亏 = 合约 + 现货 + 预测"
-    >
-      {!compact && (
-        <span className="text-muted-foreground/70 whitespace-nowrap">合约+现货+预测</span>
-      )}
-      <span className={cn('font-semibold whitespace-nowrap', color)}>
-        {up ? '+' : ''}{fmt(safeHardcore)}
-      </span>
-      {safeBuff > 0 && (
-        <span className="text-amber-500 font-medium whitespace-nowrap" title="优惠券累计省下">
-          🎟+{fmt(safeBuff)}
-        </span>
-      )}
-    </div>
-  );
-}
-
-/* ── 双钱包现金构成：总资产里的现金部分，不含持仓市值，两者相加≠总资产 ── */
-function WalletLine({ balance, game, compact = false }: { balance: Numeric; game: Numeric; compact?: boolean }) {
-  const fs = compact ? 'text-[9px]' : 'text-[10px]';
-  return (
-    <div
-      className={cn(fs, "flex flex-wrap items-center justify-end gap-x-1.5 leading-tight tabular-nums text-muted-foreground")}
-      title="账户现金构成（不含持仓市值）"
-    >
-      <span className="whitespace-nowrap">余额 {fmt(num(balance))}</span>
-      <span className="whitespace-nowrap">游戏 {fmt(num(game))}</span>
-    </div>
-  );
-}
-
-/* ── Avatar with theme-consistent styling ── */
-function RankAvatar({ username, avatar, size = 'md', accent }: {
-  username: string; avatar?: string;
-  size?: 'sm' | 'md' | 'lg';
-  accent?: string;          // ring color override for podium medals
-}) {
-  const dim = size === 'lg' ? 'w-16 h-16' : size === 'md' ? 'w-11 h-11' : 'w-8 h-8';
-  const text = size === 'lg' ? 'text-xl' : size === 'md' ? 'text-sm' : 'text-xs';
-  const ringCls = accent ?? 'ring-primary/30';
-
+/** 尺寸由调用方传（前三卡窄屏要缩），所以不做 size 枚举 */
+function Avatar({ username, avatar, className }: { username: string; avatar?: string; className?: string }) {
+  const base = 'rounded-md border border-border shrink-0';
   if (avatar) {
-    return (
-      <img
-        src={avatar} alt=""
-        className={cn(dim, "rounded-full object-cover ring-2 ring-offset-2 ring-offset-card", ringCls)}
-      />
-    );
+    return <img src={avatar} alt="" className={cn(base, 'object-cover', className)} />;
   }
   return (
-    <div className={cn(
-      dim, text,
-      "rounded-full bg-linear-to-br from-primary/20 to-accent/10",
-      "flex items-center justify-center font-bold",
-      "ring-2 ring-offset-2 ring-offset-card", ringCls,
-    )}>
+    <div className={cn(base, 'bg-card-2 flex items-center justify-center font-bold', className)}>
       {username.charAt(0).toUpperCase()}
     </div>
   );
 }
 
-/* ── Podium card for top 3 ── */
-function PodiumCard({ item, place, onOpen }: { item: RankingItem; place: 1 | 2 | 3; onOpen: () => void }) {
-  const cfg = {
-    1: { order: 'order-2', height: 'h-32', bg: 'from-amber-500/20 to-amber-500/5', ring: 'ring-amber-500/40', accent: 'ring-amber-400/60', label: '🥇' },
-    2: { order: 'order-1', height: 'h-28', bg: 'from-slate-400/20 to-slate-400/5', ring: 'ring-slate-400/40', accent: 'ring-slate-400/50', label: '🥈' },
-    3: { order: 'order-3', height: 'h-28', bg: 'from-amber-700/20 to-amber-700/5', ring: 'ring-amber-700/40', accent: 'ring-amber-600/50', label: '🥉' },
-  }[place];
+function Pct({ value, className }: { value: Numeric; className?: string }) {
+  const v = num(value);
+  const up = v >= 0;
+  return (
+    <span className={cn('num', up ? 'text-gain' : 'text-loss', className)}>
+      {up ? '+' : ''}{v.toFixed(2)}%
+    </span>
+  );
+}
 
+function TradingProfit({ value, className }: { value: Numeric; className?: string }) {
+  const v = num(value);
+  const up = v >= 0;
+  return (
+    <span className={cn('num', up ? 'text-gain' : 'text-loss', className)}>
+      {up ? '+' : ''}{fmt(v)}
+    </span>
+  );
+}
+
+/** 券只有正数才有意义，没有就留个静默的破折号，不画成绿色的"赚" */
+function Buff({ value, className }: { value: Numeric; className?: string }) {
+  const v = num(value);
+  if (v <= 0) return <span className={cn('num text-muted-foreground/40', className)}>—</span>;
+  return <span className={cn('num text-warning', className)}>+{fmt(v)}</span>;
+}
+
+/** 窄屏每格自带微标签（表头看不见了），宽屏交给表头 */
+function Cell({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
+  return (
+    <div className={cn('min-w-0', className)}>
+      <div className="microlabel md:hidden mb-0.5">{label}</div>
+      {children}
+    </div>
+  );
+}
+
+const PLACE_LABEL = ['冠军', '亚军', '季军'];
+
+const SORT_TABS: { key: RankingSort; label: string; hint: string }[] = [
+  { key: 'ASSETS', label: '总资产', hint: '账上所有钱：现金 + 持仓市值 − 借款' },
+  { key: 'TRADING_PROFIT', label: '交易盈利', hint: '只看靠交易赚到的钱：合约 + 现货 + 预测，不含优惠券和游戏' },
+  { key: 'BUFF', label: '优惠券', hint: '用优惠券累计省下的钱' },
+];
+
+const METRIC_LABEL: Record<RankingSort, string> = {
+  ASSETS: '总资产',
+  TRADING_PROFIT: '交易盈利',
+  BUFF: '优惠券省下',
+};
+
+const ALL_METRICS: RankingSort[] = ['ASSETS', 'TRADING_PROFIT', 'BUFF'];
+
+/** 按维度取值渲染。前三卡的主数字要跟着当前排序走，否则「按交易盈利排的榜、卡上最大的数是总资产」会看懵 */
+function MetricValue({ metric, item, className }: { metric: RankingSort; item: RankingItem; className?: string }) {
+  if (metric === 'TRADING_PROFIT') return <TradingProfit value={item.tradingProfit} className={className} />;
+  if (metric === 'BUFF') return <Buff value={item.buffProfit} className={className} />;
+  return (
+    <span className={cn('num', className)}>
+      <span className="sm:hidden">{fmtCompact(item.totalAssets)}</span>
+      <span className="hidden sm:inline">{fmt(item.totalAssets)}</span>
+    </span>
+  );
+}
+
+/**
+ * 前三名重点卡。用「大号序号 + 顶部高光条」拉层级，不用奖牌 emoji 和渐变台阶——
+ * 台阶那套是游戏皮，跟全站仪器风不是一个语言。三张等高并排，冠军多一条主色高光。
+ */
+function TopCard({ item, place, sort, onOpen }: {
+  item: RankingItem; place: 0 | 1 | 2; sort: RankingSort; onOpen: () => void;
+}) {
+  const champion = place === 0;
   return (
     <button
       type="button"
       onClick={onOpen}
-      title={`查看 ${item.username} 的持仓与交易历史`}
-      className={cn("flex-1 flex flex-col items-center gap-2.5 cursor-pointer group focus-visible:outline-none", cfg.order)}
+      title={`查看 ${item.username} 的持仓与仓位历史`}
+      className={cn(
+        'relative overflow-hidden rounded-lg pt-card text-left p-2.5 sm:p-3.5 transition-colors group',
+        'hover:bg-accent/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+        champion && 'border-primary/40',
+      )}
     >
-      {/* avatar + medal badge */}
-      <div className="relative">
-        <RankAvatar username={item.username} avatar={item.avatar} size={place === 1 ? 'lg' : 'md'} accent={cfg.accent} />
-        <span className="absolute -bottom-1 -right-1 text-base leading-none drop-shadow">{cfg.label}</span>
-      </div>
-
-      {/* name + rank label */}
-      <div className="flex flex-col items-center gap-0.5 min-w-0 max-w-full w-full">
-        <span className={cn("font-semibold truncate max-w-full text-center group-hover:text-primary transition-colors", place === 1 ? "text-sm" : "text-xs")}>
-          {item.username}
-        </span>
-        <span className="text-[10px] text-muted-foreground tracking-wide">
-          {place === 1 ? '冠军' : place === 2 ? '亚军' : '季军'}
-        </span>
-      </div>
-
-      {/* pedestal */}
+      {/* 顶部 1px 高光：冠军主色，二三名素色。仪器面板的选中感 */}
       <div className={cn(
-        "w-full rounded-t-xl bg-gradient-to-t flex flex-col items-center justify-end pb-3 pt-4 gap-1 ring-1 ring-inset",
-        cfg.bg, cfg.ring, cfg.height,
-      )}>
-        {/* 窄屏紧凑数字 (123.4K)，>=sm 显示完整千分位 */}
-        <span className="text-sm font-bold tabular-nums max-w-full truncate">
-          <span className="sm:hidden">{fmtCompact(item.totalAssets)}</span>
-          <span className="hidden sm:inline">{fmt(item.totalAssets)}</span>
-        </span>
-        <WalletLine balance={item.balanceWallet} game={item.gameWallet} compact />
-        <ProfitBadge pct={item.profitPct} />
-        <HardcoreLine hardcore={item.hardcoreProfit} buff={item.buffProfit} compact />
+        'absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent to-transparent',
+        champion ? 'via-primary/60' : 'via-border',
+      )} />
+
+      {/* 窄屏三卡并排每张只有 ~110px，横排放不下"序号+头像+名字"，改成竖排居中 */}
+      <div className="flex flex-col items-center text-center gap-1.5 sm:flex-row sm:items-center sm:text-left sm:gap-2.5">
+        <RankNum
+          rank={item.rank}
+          className={cn('leading-none font-black', champion ? 'text-xl sm:text-2xl' : 'text-lg sm:text-xl opacity-70')}
+        />
+        <Avatar
+          username={item.username}
+          avatar={item.avatar}
+          className="w-9 h-9 text-sm sm:w-11 sm:h-11 sm:text-base"
+        />
+        <div className="min-w-0 w-full sm:flex-1">
+          <div className="text-[12px] sm:text-[13px] font-bold truncate group-hover:text-primary transition-colors">
+            {item.username}
+          </div>
+          <div className="microlabel">{PLACE_LABEL[place]}</div>
+        </div>
+      </div>
+
+      <div className="mt-2.5 sm:mt-3 pt-2.5 sm:pt-3 border-t border-border/40 space-y-1.5">
+        {/* 主数字 = 当前排序维度，其余维度降到下面的明细行 */}
+        <div className="text-center sm:text-left">
+          <div className="microlabel">{METRIC_LABEL[sort]}</div>
+          <MetricValue metric={sort} item={item} className="block text-[15px] sm:text-lg font-bold leading-tight truncate" />
+        </div>
+        <div className="flex items-center justify-center sm:justify-between gap-2">
+          <span className="microlabel hidden sm:inline">收益率</span>
+          <Pct value={item.profitPct} className="text-[12px] font-semibold" />
+        </div>
+
+        {/* 窄屏收起下面几行：110px 宽塞五行标签值必挤成一团，这些数点进详情页都有 */}
+        <div className="hidden sm:block space-y-1.5">
+          {ALL_METRICS.filter(m => m !== sort).map(m => (
+            <div key={m} className="flex items-center justify-between gap-2">
+              <span className="microlabel">{METRIC_LABEL[m]}</span>
+              <MetricValue metric={m} item={item} className="text-[12px] font-semibold" />
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/25">
+            <span className="microlabel">余额 / 游戏</span>
+            <span className="num text-[10px] text-muted-foreground truncate">
+              {fmtCompact(item.balanceWallet)} / {fmtCompact(item.gameWallet)}
+            </span>
+          </div>
+        </div>
       </div>
     </button>
   );
 }
 
-/* ── Row for rank 4+ ── */
-function RankingRow({ item, onOpen }: { item: RankingItem; onOpen: () => void }) {
+function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort; onOpen: () => void }) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      title={`查看 ${item.username} 的持仓与交易历史`}
-      className="w-full text-left flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-3 rounded-lg hover:bg-muted/50 transition-colors cursor-pointer group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      title={`查看 ${item.username} 的持仓与仓位历史`}
+      className={cn(GRID, 'w-full text-left px-3 sm:px-4 py-2.5 border-b border-border/25 last:border-b-0',
+        'hover:bg-accent/25 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset')}
     >
-      {/* rank number */}
-      <span className="w-7 text-center text-sm font-bold tabular-nums text-muted-foreground shrink-0">
-        {item.rank}
-      </span>
-
-      {/* avatar */}
-      <RankAvatar username={item.username} avatar={item.avatar} size="sm" />
-
-      {/* name + sub label */}
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-semibold truncate group-hover:text-primary transition-colors">{item.username}</div>
-        <div className="text-[11px] text-muted-foreground leading-tight">NO.{item.rank} · 模拟账户</div>
+      {/* 名次 + 用户：窄屏并成一行占满，箭头也跟着挪到这行尾（宽屏那个在表格最后一列） */}
+      <div className="col-span-2 md:col-span-1 flex items-center gap-2 md:gap-0">
+        <RankNum rank={item.rank} className="text-[13px] font-bold" />
+        <div className="flex items-center gap-2 md:hidden min-w-0 flex-1">
+          <Avatar username={item.username} avatar={item.avatar} className="w-7 h-7 text-[11px]" />
+          <span className="text-[13px] font-semibold truncate">{item.username}</span>
+          <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/35 ml-auto shrink-0" />
+        </div>
+      </div>
+      <div className="hidden md:flex items-center gap-2 min-w-0">
+        <Avatar username={item.username} avatar={item.avatar} className="w-7 h-7 text-[11px]" />
+        <span className="text-[13px] font-semibold truncate group-hover:text-primary transition-colors">
+          {item.username}
+        </span>
       </div>
 
-      {/* assets + profit */}
-      <div className="text-right shrink-0">
-        <div className="text-sm font-semibold tabular-nums">{fmt(item.totalAssets)}</div>
-        <WalletLine balance={item.balanceWallet} game={item.gameWallet} />
-        <ProfitBadge pct={item.profitPct} />
-        <HardcoreLine hardcore={item.hardcoreProfit} buff={item.buffProfit} />
+      <Cell label="总资产" className={cn('md:text-right', sort === 'ASSETS' && 'text-primary')}>
+        <span className="num text-[13px] font-bold">
+          <span className="md:hidden">{fmtCompact(item.totalAssets)}</span>
+          <span className="hidden md:inline">{fmt(item.totalAssets)}</span>
+        </span>
+      </Cell>
+
+      <Cell label="收益率" className="md:text-right">
+        <Pct value={item.profitPct} className="text-[12px] font-semibold" />
+      </Cell>
+
+      <Cell label="交易盈利" className={cn('md:text-right', sort === 'TRADING_PROFIT' && 'text-primary')}>
+        <TradingProfit value={item.tradingProfit} className="text-[12px] font-semibold" />
+      </Cell>
+
+      <Cell label="优惠券" className={cn('md:text-right', sort === 'BUFF' && 'text-primary')}>
+        <Buff value={item.buffProfit} className="text-[12px]" />
+      </Cell>
+
+      <Cell label="余额 / 游戏" className="md:text-right">
+        <span className="num text-[11px] text-muted-foreground truncate">
+          {fmtCompact(item.balanceWallet)} / {fmtCompact(item.gameWallet)}
+        </span>
+      </Cell>
+
+      <div className="hidden md:flex justify-end">
+        <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/35 group-hover:text-primary/60 transition-colors" />
       </div>
-      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors shrink-0" />
     </button>
   );
 }
@@ -197,17 +255,19 @@ function RankingRow({ item, onOpen }: { item: RankingItem; onOpen: () => void })
 export function Ranking() {
   const navigate = useNavigate();
   const [ranking, setRanking] = useState<RankingItem[]>([]);
+  const [sort, setSort] = useState<RankingSort>('ASSETS');
   const [page, setPage] = useState(1);
   const [pages, setPages] = useState(0);
   const [total, setTotal] = useState(0);
-  // loading 由"已加载页码是否追上当前页码"派生：在 effect 里同步 setLoading(true)
+  // loading 由"已加载 key 是否追上请求 key"派生：在 effect 里同步 setLoading(true)
   // 会触发级联渲染，eslint 的 react-hooks/set-state-in-effect 直接判错（同 ForceOrders）
-  const [loadedPage, setLoadedPage] = useState<number | null>(null);
-  const loading = loadedPage !== page;
+  const requestKey = `${sort}:${page}`;
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  const loading = loadedKey !== requestKey;
 
   useEffect(() => {
     let cancelled = false;
-    rankingApi.list(page, PAGE_SIZE)
+    rankingApi.list(sort, page, PAGE_SIZE)
       .then(res => {
         if (cancelled) return;
         setRanking(res.records);
@@ -215,96 +275,135 @@ export function Ranking() {
         setTotal(res.total);
       })
       .catch(() => { if (!cancelled) setRanking([]); })
-      .finally(() => { if (!cancelled) setLoadedPage(page); });
+      .finally(() => { if (!cancelled) setLoadedKey(requestKey); });
     return () => { cancelled = true; };
-  }, [page]);
+  }, [requestKey, sort, page]);
 
   const openUser = (userId: number) => navigate(`/user/${userId}`);
 
-  if (loading) {
-    return (
-      <div className="max-w-4xl mx-auto p-4 space-y-4">
-        <Skeleton className="h-8 w-40" />
-        <Skeleton className="h-48 w-full" />
-        {[...Array(7)].map((_, i) => <Skeleton key={i} className="h-14 w-full" />)}
-      </div>
-    );
-  }
+  // 换维度必须回到第 1 页：停在第 3 页换榜，看到的是新榜的第 41 名开始，
+  // 而前三名重点卡只在第 1 页出现，换完一片空
+  const switchSort = (next: RankingSort) => {
+    if (next === sort) return;
+    setSort(next);
+    setPage(1);
+  };
 
-  // 奖台只在第 1 页出现：第 2 页往后的「前三名」是这一页的前三个，不是全榜前三
-  const showPodium = page === 1;
-  const top3 = showPodium ? ranking.slice(0, 3) : [];
-  const rest = showPodium ? ranking.slice(3) : ranking;
+  // 前三名重点卡只在第 1 页出现：第 2 页往后的"前三个"是这一页的前三个，不是全榜前三
+  const showTop = page === 1;
+  const top = showTop ? ranking.slice(0, 3) : [];
+  const rest = showTop ? ranking.slice(3) : ranking;
 
   return (
-    <div className="max-w-4xl mx-auto p-4 space-y-4">
+    <div className="page-shell p-4 md:p-6 space-y-4">
+      {/* 页头 */}
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-amber-500/10">
-              <Trophy className="w-5 h-5 text-amber-500" />
+        <CardContent className="py-4">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            <h1 className="flex items-center gap-2.5 text-lg font-black tracking-tight">
+              <span className="p-1.5 rounded-xl bg-primary/10 text-primary">
+                <Trophy className="w-4 h-4" />
+              </span>
+              资产排行榜
+            </h1>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+              <span className="flex items-center gap-1.5">
+                <span className="led" />
+                <Clock className="w-3 h-3" />
+                交易时段每 10 分钟更新
+              </span>
+              <span>仅统计有过成交的用户 · 共 <span className="num text-foreground">{total}</span> 人</span>
+              <span>点任意一行可以查看该用户的持仓与仓位历史</span>
             </div>
-            资产排行榜
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-            <span className="flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              交易时段每10分钟更新
-            </span>
-            <span>仅统计有过成交的用户 · 共 {total} 人</span>
-            <span>点头像或用户名可查看其持仓与交易历史</span>
           </div>
-        </CardHeader>
 
-        <CardContent className="space-y-4">
-          {ranking.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground">暂无排行数据</div>
-          ) : (
-            <>
-              {/* ── Podium ── */}
-              {top3.length > 0 && (
-                <div className="flex items-end gap-2 sm:gap-3 px-1 sm:px-2 pt-4 pb-0">
-                  {top3.length > 1 && <PodiumCard item={top3[1]} place={2} onOpen={() => openUser(top3[1].userId)} />}
-                  <PodiumCard item={top3[0]} place={1} onOpen={() => openUser(top3[0].userId)} />
-                  {top3.length > 2 && <PodiumCard item={top3[2]} place={3} onOpen={() => openUser(top3[2].userId)} />}
-                </div>
-              )}
-
-              {/* ── Divider ── */}
-              {rest.length > 0 && <div className="border-t border-border/50" />}
-
-              {/* ── Rest of the list ── */}
-              <div className="space-y-1">
-                {rest.map((item) => (
-                  <RankingRow key={item.userId} item={item} onOpen={() => openUser(item.userId)} />
-                ))}
-              </div>
-
-              {pages > 1 && (
-                <div className="flex items-center justify-between pt-2 border-t border-border/40">
-                  <span className="text-xs text-muted-foreground">第 {page} / {pages} 页</span>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost" size="sm" className="h-8 w-8 p-0"
-                      disabled={page <= 1}
-                      onClick={() => setPage(p => p - 1)}
-                    >
-                      <ChevronLeft className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      variant="ghost" size="sm" className="h-8 w-8 p-0"
-                      disabled={page >= pages}
-                      onClick={() => setPage(p => p + 1)}
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </>
-          )}
+          {/* 排序维度：换维度名次跟着重算，01 就是该维度第一 */}
+          <div className="mt-3.5 flex items-center gap-1 p-1 rounded-lg bg-card-2 border border-border/50">
+            {SORT_TABS.map(t => (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => switchSort(t.key)}
+                title={t.hint}
+                className={cn(
+                  'flex-1 py-1.5 px-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap',
+                  sort === t.key
+                    ? 'bg-card text-foreground border border-border shadow-[inset_0_2px_0_var(--color-primary)]'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-surface-hover',
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </CardContent>
       </Card>
+
+      {loading ? (
+        <>
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-40 sm:h-52 w-full rounded-lg" />)}
+          </div>
+          <Card><CardContent className="p-4 space-y-2.5">
+            {[...Array(8)].map((_, i) => <Skeleton key={i} className="h-11 w-full rounded-lg" />)}
+          </CardContent></Card>
+        </>
+      ) : ranking.length === 0 ? (
+        <Card><CardContent className="p-0"><EmptyState icon={<Trophy />} text="暂无排行数据" /></CardContent></Card>
+      ) : (
+        <>
+          {/* 前三名：并排等高，不做台阶。名次靠序号和高光条区分 */}
+          {top.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              {top.map((item, i) => (
+                <TopCard key={item.userId} item={item} place={i as 0 | 1 | 2} sort={sort} onOpen={() => openUser(item.userId)} />
+              ))}
+            </div>
+          )}
+
+          {rest.length > 0 && (
+            <Card className="overflow-hidden">
+              <CardContent className="p-0">
+                {/* 表头只在宽屏出现，窄屏每格自带微标签 */}
+                <div className={cn(GRID, 'hidden md:grid px-4 py-2 bg-card-2 border-b border-border/30')}>
+                  <span className="microlabel font-bold">#</span>
+                  <span className="microlabel font-bold">用户</span>
+                  <span className={cn('microlabel font-bold text-right', sort === 'ASSETS' && 'text-primary')}>总资产</span>
+                  <span className="microlabel font-bold text-right">收益率</span>
+                  <span className={cn('microlabel font-bold text-right', sort === 'TRADING_PROFIT' && 'text-primary')}
+                    title="合约 + 现货 + 预测的净盈亏，不含优惠券">交易盈利</span>
+                  <span className={cn('microlabel font-bold text-right', sort === 'BUFF' && 'text-primary')}
+                    title="优惠券累计省下">优惠券</span>
+                  <span className="microlabel font-bold text-right" title="账户现金构成，不含持仓市值">余额 / 游戏</span>
+                  <span />
+                </div>
+
+                {rest.map(item => (
+                  <RankRow key={item.userId} item={item} sort={sort} onOpen={() => openUser(item.userId)} />
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {pages > 1 && (
+            <div className="flex items-center justify-between px-1">
+              <span className="text-xs text-muted-foreground">
+                第 <span className="num">{page}</span> / <span className="num">{pages}</span> 页
+              </span>
+              <div className="flex items-center gap-1">
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
+                  disabled={page <= 1} onClick={() => setPage(p => p - 1)}>
+                  <ChevronLeft className="w-4 h-4" />
+                </Button>
+                <Button variant="ghost" size="sm" className="h-8 w-8 p-0"
+                  disabled={page >= pages} onClick={() => setPage(p => p + 1)}>
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

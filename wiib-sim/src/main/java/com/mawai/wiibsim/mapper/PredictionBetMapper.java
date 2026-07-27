@@ -17,7 +17,7 @@ public interface PredictionBetMapper extends BaseMapper<PredictionBet> {
     @Select("SELECT COALESCE(SUM(COALESCE(payout, 0) - cost), 0) FROM prediction_bet WHERE user_id = #{userId} AND status IN ('WON', 'LOST', 'DRAW', 'SOLD', 'CANCELLED')")
     BigDecimal sumRealizedProfit(@Param("userId") Long userId);
 
-    /** 排行榜硬实力：payout已扣卖出手续费；买入手续费未落库，按cost和avg_price重算扣回 */
+    /** 排行榜交易盈利：payout已扣卖出手续费；买入手续费未落库，按cost和avg_price重算扣回 */
     @Select("""
             SELECT user_id,
                    COALESCE(SUM(

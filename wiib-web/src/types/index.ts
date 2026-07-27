@@ -27,6 +27,12 @@ export interface PageResult<T> {
   pages: number;
 }
 
+/**
+ * 榜单排序维度。没有「收益率」这一档——初始资金全站是同一个常数，
+ * 收益率跟总资产是同一个序，加进来就是同一张榜换个名字。
+ */
+export type RankingSort = 'ASSETS' | 'TRADING_PROFIT' | 'BUFF';
+
 export interface RankingItem {
   rank: number;
   userId: number;
@@ -34,7 +40,8 @@ export interface RankingItem {
   avatar?: string;
   totalAssets: number;
   profitPct: number;
-  hardcoreProfit: number;
+  /** 交易盈利 = 合约 + 现货 + 预测的净盈亏，不含优惠券省下的钱 */
+  tradingProfit: number;
   buffProfit: number;
   /** 余额钱包（含冻结）与游戏钱包只是总资产的现金部分，相加 ≠ totalAssets */
   balanceWallet: number;
@@ -313,6 +320,60 @@ export interface FuturesStopLossRequest {
 export interface FuturesTakeProfitRequest {
   positionId: number;
   takeProfits: FuturesTPItem[];
+}
+
+// ==================== 合约仓位历史 ====================
+
+/** 仓位历史里的一笔成交。分批平仓靠它才看得见「0.4@110 / 0.6@120」的过程 */
+export interface PositionFill {
+  positionId: number;
+  orderId: number;
+  /** OPEN_LONG/OPEN_SHORT 开或加仓，CLOSE_LONG/CLOSE_SHORT 平仓 */
+  orderSide: string;
+  orderType: 'MARKET' | 'LIMIT';
+  /** FILLED 手动成交，STOP_LOSS/TAKE_PROFIT 止损止盈打到，LIQUIDATED 被强平 */
+  status: 'FILLED' | 'STOP_LOSS' | 'TAKE_PROFIT' | 'LIQUIDATED';
+  quantity: number;
+  price: number;
+  amount: number;
+  commission: number;
+  /** 平仓单才有，开/加仓单为 null */
+  realizedPnl: number | null;
+  filledAt: string;
+}
+
+/**
+ * 一笔合约仓位的完整生命周期（开→平）。
+ * 跟 FuturesOrder 的区别是粒度：那个是一笔笔委托，这个把同仓位的开/加/分批平合成一条生意。
+ */
+export interface PositionHistoryItem {
+  id: number;
+  symbol: string;
+  side: 'LONG' | 'SHORT';
+  marginMode: FuturesMarginMode;
+  leverage: number;
+  /** CLOSED 正常平掉（含止盈止损打到） LIQUIDATED 被强平 */
+  status: 'CLOSED' | 'LIQUIDATED';
+  /** AI 策略标签，手动开的仓为 null */
+  memo: string | null;
+  /** 开仓均价（多次加仓已按量加权） */
+  entryPrice: number;
+  /** 已平仓量 = 全部平仓单数量之和 */
+  closedQty: number;
+  closeAmount: number;
+  /** 平仓均价；一单没平过的仓位为 null（破产清零那批），显示"—" */
+  closeAvgPrice: number | null;
+  /** 累计投入保证金，回报率的分母 */
+  investedMargin: number;
+  commission: number;
+  fundingFeeTotal: number;
+  /** 已实现盈亏（净额）：已扣手续费与资金费，口径同排行榜「交易盈利」 */
+  realizedPnl: number;
+  /** 投资回报率(%)；分母为 0 时 null */
+  roiPct: number | null;
+  openedAt: string;
+  closedAt: string;
+  fills: PositionFill[];
 }
 
 export interface FuturesPosition {

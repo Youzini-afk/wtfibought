@@ -9,10 +9,12 @@ import com.mawai.wiibsim.config.FuturesLeverageBracketRegistry;
 import com.mawai.wiibsim.config.TradeFilterRegistry;
 import com.mawai.wiibcommon.market.ForceOrderService;
 import com.mawai.wiibcommon.market.TradeFilterDefaults;
+import com.mawai.wiibsim.dto.PositionHistoryDTO;
 import com.mawai.wiibsim.service.CrossMarginService;
 import com.mawai.wiibsim.service.FuturesRiskService;
 import com.mawai.wiibsim.service.FuturesTradingService;
 import com.mawai.wiibsim.service.KlineCacheService;
+import com.mawai.wiibsim.service.PositionHistoryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -31,6 +33,7 @@ public class FuturesController {
     private final FuturesLeverageBracketRegistry bracketRegistry;
     private final CrossMarginService crossMarginService;
     private final TradeFilterRegistry tradeFilterRegistry;
+    private final PositionHistoryService positionHistoryService;
 
     /** 开仓 */
     @PostMapping("/open")
@@ -110,6 +113,20 @@ public class FuturesController {
     @GetMapping("/positions")
     public Result<List<FuturesPositionDTO>> positions(@CurrentUserId Long userId, @RequestParam(required = false) String symbol) {
         return Result.ok(futuresTradingService.getUserPositions(userId, symbol));
+    }
+
+    /**
+     * 仓位历史：自己已平/已强平的合约仓位，一条记录是一笔完整仓位（开仓到全部平掉）。
+     * <p>
+     * 跟 /orders 的区别是粒度：那个是一笔笔委托流水，这个把同一仓位的开仓、加仓、分批平仓
+     * 合成一条，给的是"这笔仓位最后赚了多少、回报率多少"。
+     */
+    @GetMapping("/position-history")
+    public Result<IPage<PositionHistoryDTO>> positionHistory(@CurrentUserId Long userId,
+                                                             @RequestParam(required = false) String symbol,
+                                                             @RequestParam(defaultValue = "1") int pageNum,
+                                                             @RequestParam(defaultValue = "20") int pageSize) {
+        return Result.ok(positionHistoryService.page(userId, symbol, pageNum, pageSize));
     }
 
     /** 查询订单列表 */

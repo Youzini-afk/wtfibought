@@ -13,7 +13,7 @@ import java.util.List;
 @Data
 public class UserProfileDTO {
 
-    /** 榜单行原样复用（含名次/总资产/收益率/硬实力盈亏），口径与排行榜完全一致 */
+    /** 榜单行原样复用（含名次/总资产/收益率/交易盈利），口径与排行榜完全一致 */
     private RankingDTO summary;
 
     private List<ProfilePositionDTO> spotPositions;

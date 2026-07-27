@@ -4,8 +4,10 @@ import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.RankingDTO;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibsim.dto.PositionHistoryDTO;
 import com.mawai.wiibsim.dto.PublicTradeDTO;
 import com.mawai.wiibsim.dto.UserProfileDTO;
+import com.mawai.wiibsim.service.PositionHistoryService;
 import com.mawai.wiibsim.service.PublicTradeService;
 import com.mawai.wiibsim.service.RankingService;
 import com.mawai.wiibsim.service.UserProfileService;
@@ -27,6 +29,7 @@ public class RankingController {
     private final RankingService rankingService;
     private final UserProfileService userProfileService;
     private final PublicTradeService publicTradeService;
+    private final PositionHistoryService positionHistoryService;
 
     /**
      * 排行榜分页。
@@ -36,10 +39,11 @@ public class RankingController {
      * 全站只有前端排行页一个消费者，一并改掉，不留双轨接口。
      */
     @GetMapping
-    @Operation(summary = "排行榜分页（只含有过成交的用户；pageSize 服务端封顶 100）")
-    public Result<IPage<RankingDTO>> getRanking(@RequestParam(defaultValue = "1") int pageNum,
+    @Operation(summary = "排行榜分页（只含有过成交的用户；sort=ASSETS/TRADING_PROFIT/BUFF，pageSize 服务端封顶 100）")
+    public Result<IPage<RankingDTO>> getRanking(@RequestParam(defaultValue = "ASSETS") String sort,
+                                                @RequestParam(defaultValue = "1") int pageNum,
                                                 @RequestParam(defaultValue = "20") int pageSize) {
-        return Result.ok(rankingService.getRankingPage(pageNum, pageSize));
+        return Result.ok(rankingService.getRankingPage(sort, pageNum, pageSize));
     }
 
     /**
@@ -71,5 +75,21 @@ public class RankingController {
                                                     @RequestParam(defaultValue = "20") int pageSize) {
         userProfileService.assertVisible(targetUserId, userId);
         return Result.ok(publicTradeService.pageByUser(targetUserId, pageNum, pageSize));
+    }
+
+    /**
+     * 用户合约仓位历史分页。
+     * <p>
+     * 跟上面那条成交历史是两种粒度：那个是一笔笔委托，这个把同一仓位的开/加/平合成一条生意，
+     * 看的是"这仓最后赚没赚、回报率多少"。门控同上，一条都不能少。
+     */
+    @GetMapping("/users/{targetUserId}/position-history")
+    @Operation(summary = "指定用户的合约仓位历史（对方关闭公开时返回 403）")
+    public Result<IPage<PositionHistoryDTO>> userPositionHistory(@PathVariable Long targetUserId,
+                                                                 @CurrentUserId Long userId,
+                                                                 @RequestParam(defaultValue = "1") int pageNum,
+                                                                 @RequestParam(defaultValue = "20") int pageSize) {
+        userProfileService.assertVisible(targetUserId, userId);
+        return Result.ok(positionHistoryService.page(targetUserId, null, pageNum, pageSize));
     }
 }

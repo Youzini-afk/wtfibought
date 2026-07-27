@@ -1,9 +1,12 @@
 package com.mawai.wiibsim.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.FuturesStopLoss;
 import com.mawai.wiibcommon.entity.FuturesTakeProfit;
+import com.mawai.wiibsim.dto.PositionFillDTO;
+import com.mawai.wiibsim.dto.PositionHistoryDTO;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Options;
 import org.apache.ibatis.annotations.Param;
@@ -87,7 +90,7 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
                          @Param("closedPrice") BigDecimal closedPrice,
                          @Param("closedPnl") BigDecimal closedPnl);
 
-    /** 排行榜硬实力：资金费已从余额或保证金扣过，这里按仓位历史累计扣回 */
+    /** 排行榜交易盈利：资金费已从余额或保证金扣过，这里按仓位累计扣回 */
     @Select("SELECT user_id, COALESCE(SUM(COALESCE(funding_fee_total, 0)), 0) AS amount " +
             "FROM futures_position GROUP BY user_id")
     List<Map<String, Object>> sumFundingFeeTotalAll();
@@ -126,6 +129,81 @@ public interface FuturesPositionMapper extends BaseMapper<FuturesPosition> {
 
     @Select("SELECT COUNT(*) FROM futures_position WHERE user_id = #{userId} AND status = 'LIQUIDATED'")
     int countLiquidatedPositions(@Param("userId") Long userId);
+
+    /**
+     * 仓位历史分页：已平/已强平的仓位 + 它名下全部成交单的聚合。
+     * <p>
+     * 【为什么非聚合不可】仓位表的 closed_pnl 只是最后一次全平那笔的盈亏、quantity 只剩最后平掉那一段，
+     * 部分平仓过的仓位这两列都是残值。真实的已平仓量/平仓均价/已实现盈亏只能从订单表加出来。
+     * <p>
+     * 【子查询里也带 user_id】不带就是先对整张 futures_order 分组再 JOIN，人一多全表扫；
+     * 带上才走得了 idx_fo_user，只扫这个人的单。
+     * <p>
+     * 【状态四选】FILLED 手动成交、STOP_LOSS/TAKE_PROFIT 止盈止损触发、LIQUIDATED 强平，
+     * 这四个是订单的终态。漏一个就少算一段盈亏（早先 sumRealizedPnlByPositionIds 漏了 LIQUIDATED）。
+     * <p>
+     * 已实现盈亏在 SQL 里就减完手续费和资金费，投资回报率同理——这是聚合的自然延伸，
+     * 拆回 Java 再算一遍等于让 DTO 同时背着原料和成品两套字段。
+     */
+    @Select("""
+            <script>
+            SELECT p.id, p.symbol, p.side, p.margin_mode, p.leverage, p.status, p.memo,
+                   p.entry_price, p.funding_fee_total,
+                   p.created_at AS opened_at,
+                   p.updated_at AS closed_at,
+                   COALESCE(o.closed_qty, 0)      AS closed_qty,
+                   COALESCE(o.close_amount, 0)    AS close_amount,
+                   COALESCE(o.commission, 0)      AS commission,
+                   COALESCE(o.invested_margin, 0) AS invested_margin,
+                   CASE WHEN COALESCE(o.closed_qty, 0) > 0
+                        THEN ROUND(o.close_amount / o.closed_qty, 8) END AS close_avg_price,
+                   COALESCE(o.net_pnl, 0) - p.funding_fee_total AS realized_pnl,
+                   CASE WHEN COALESCE(o.invested_margin, 0) > 0
+                        THEN ROUND((COALESCE(o.net_pnl, 0) - p.funding_fee_total)
+                                   / o.invested_margin * 100, 2) END AS roi_pct
+            FROM futures_position p
+            LEFT JOIN (
+                SELECT position_id,
+                       SUM(CASE WHEN order_side LIKE 'CLOSE%' THEN quantity ELSE 0 END)                    AS closed_qty,
+                       SUM(CASE WHEN order_side LIKE 'CLOSE%' THEN COALESCE(filled_amount, 0) ELSE 0 END)  AS close_amount,
+                       SUM(CASE WHEN order_side LIKE 'CLOSE%' THEN 0 ELSE COALESCE(margin_amount, 0) END)  AS invested_margin,
+                       SUM(COALESCE(commission, 0))                                                        AS commission,
+                       SUM(COALESCE(realized_pnl, 0) - COALESCE(commission, 0))                            AS net_pnl
+                FROM futures_order
+                WHERE user_id = #{userId}
+                  AND status IN ('FILLED', 'STOP_LOSS', 'TAKE_PROFIT', 'LIQUIDATED')
+                GROUP BY position_id
+            ) o ON o.position_id = p.id
+            WHERE p.user_id = #{userId} AND p.status IN ('CLOSED', 'LIQUIDATED')
+            <if test="symbol != null and symbol != ''">
+                AND p.symbol = #{symbol}
+            </if>
+            ORDER BY p.updated_at DESC, p.id DESC
+            </script>
+            """)
+    IPage<PositionHistoryDTO> selectPositionHistory(IPage<PositionHistoryDTO> page,
+                                                    @Param("userId") Long userId,
+                                                    @Param("symbol") String symbol);
+
+    /**
+     * 上面那页仓位的成交明细，一次全取回来按仓位分组，不逐行再查（那是 N+1）。
+     * <p>
+     * 成交时间取 updated_at 不取 created_at：限价单挂上和真正成交是两个时刻，
+     * 按下单时间排会让"先挂后成"的单插到前面去，分批平仓的顺序就乱了。
+     */
+    @Select("""
+            <script>
+            SELECT position_id, id AS order_id, order_side, order_type, status,
+                   quantity, filled_price AS price, filled_amount AS amount,
+                   commission, realized_pnl, updated_at AS filled_at
+            FROM futures_order
+            WHERE status IN ('FILLED', 'STOP_LOSS', 'TAKE_PROFIT', 'LIQUIDATED')
+              AND position_id IN
+              <foreach collection="positionIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+            ORDER BY updated_at, id
+            </script>
+            """)
+    List<PositionFillDTO> selectFillsByPositionIds(@Param("positionIds") List<Long> positionIds);
 
     @Update("UPDATE futures_position SET status = #{status}, updated_at = NOW() " +
             "WHERE user_id = #{userId} AND status = 'OPEN'")

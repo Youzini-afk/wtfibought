@@ -79,7 +79,7 @@ public interface FuturesOrderMapper extends BaseMapper<FuturesOrder> {
             "FROM futures_order WHERE user_id = #{userId} AND realized_pnl IS NOT NULL GROUP BY symbol")
     List<Map<String, Object>> sumRealizedPnlBySymbol(@Param("userId") Long userId);
 
-    /** 排行榜硬实力：所有最终成交单都扣手续费，开仓/加仓单realized_pnl为空只贡献-fee */
+    /** 排行榜交易盈利：所有最终成交单都扣手续费，开仓/加仓单realized_pnl为空只贡献-fee */
     @Select("""
             SELECT user_id,
                    COALESCE(SUM(COALESCE(realized_pnl, 0) - COALESCE(commission, 0)), 0) AS amount

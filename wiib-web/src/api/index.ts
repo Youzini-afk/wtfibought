@@ -1,7 +1,7 @@
 import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
-import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile } from '../types';
+import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, ConvertResult, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
@@ -73,7 +73,7 @@ export const userApi = {
   // 重置账户：清空交易与游戏数据回到初始资金，每周一次，需逐字输入用户名确认
   resetAccount: (confirmUsername: string) =>
     api.post<unknown, void>('/user/reset', { confirmUsername }),
-  /** 详情页公开开关（默认开）。关掉只挡别人看你的持仓与交易历史，仍照常上排行榜 */
+  /** 详情页公开开关（默认开）。关掉只挡别人看你的持仓与仓位历史，仍照常上排行榜 */
   getProfilePublic: () => api.get<unknown, boolean>('/user/profile-public'),
   setProfilePublic: (profilePublic: boolean) =>
     api.post<unknown, void>('/user/profile-public', { profilePublic }),
@@ -93,14 +93,18 @@ export const rankingApi = {
   /**
    * 排行榜分页。只含有过成交的用户——从没交易过的人挂着初始资金进榜，
    * 排出来是一串一模一样的 10000，把真在交易的人挤到后面。
+   * sort 换维度时名次跟着重算，服务端认不出的取值退回 ASSETS。
    */
-  list: (pageNum = 1, pageSize = 20) =>
-    api.get<unknown, PageResult<RankingItem>>('/ranking', { params: { pageNum, pageSize } }),
+  list: (sort: RankingSort = 'ASSETS', pageNum = 1, pageSize = 20) =>
+    api.get<unknown, PageResult<RankingItem>>('/ranking', { params: { sort, pageNum, pageSize } }),
   /** 用户详情：榜单行 + 当前持仓。对方关了公开开关时 403（本人除外） */
   userProfile: (userId: number) => api.get<unknown, UserProfile>(`/ranking/users/${userId}`),
   /** 该用户的成交历史分页，同样过隐私门控 */
   userTrades: (userId: number, pageNum = 1, pageSize = 20) =>
     api.get<unknown, PageResult<PublicTrade>>(`/ranking/users/${userId}/trades`, { params: { pageNum, pageSize } }),
+  /** 该用户的合约仓位历史分页。跟 userTrades 是两种粒度：那个一行一笔委托，这个一行一笔完整仓位 */
+  userPositionHistory: (userId: number, pageNum = 1, pageSize = 20) =>
+    api.get<unknown, PageResult<PositionHistoryItem>>(`/ranking/users/${userId}/position-history`, { params: { pageNum, pageSize } }),
 };
 
 // ========== 留言板 ==========
@@ -318,6 +322,12 @@ export const futuresApi = {
   setStopLoss: (data: FuturesStopLossRequest) => api.post<unknown, void>('/futures/stop-loss', data),
   setTakeProfit: (data: FuturesTakeProfitRequest) => api.post<unknown, void>('/futures/take-profit', data),
   positions: (symbol?: string) => api.get<unknown, FuturesPosition[]>('/futures/positions', { params: { symbol } }),
+  /**
+   * 仓位历史：自己已平/已强平的合约仓位，一行是一笔完整仓位（开仓到全部平掉），每行带成交明细。
+   * 跟 orders 的区别是粒度——那个是一笔笔委托流水，这个把同一仓位的开仓、加仓、分批平仓合成一条。
+   */
+  positionHistory: (pageNum = 1, pageSize = 20, symbol?: string) =>
+    api.get<unknown, PageResult<PositionHistoryItem>>('/futures/position-history', { params: { pageNum, pageSize, symbol } }),
   orders: (status?: string, pageNum = 1, pageSize = 10, symbol?: string) =>
     api.get<unknown, PageResult<FuturesOrder>>('/futures/orders', { params: { status, pageNum, pageSize, symbol } }),
   live: () => api.get<unknown, FuturesOrder[]>('/futures/live'),

@@ -5,6 +5,7 @@ import { Home } from './pages/Home';
 import { BStockList } from './pages/BStockList';
 import { BStockRoute } from './pages/BStockDetail';
 import { Portfolio } from './pages/Portfolio';
+import { PositionHistory } from './pages/PositionHistory';
 import { Ledger } from './pages/Ledger';
 import { Trades } from './pages/Trades';
 import { UserProfile } from './pages/UserProfile';
@@ -77,6 +78,7 @@ function App() {
                   <Route path="/bstock" element={<BStockList />} />
                   <Route path="/bstock/:symbol" element={<BStockRoute />} />
                   <Route path="/portfolio" element={<Portfolio />} />
+                  <Route path="/portfolio/history" element={<PositionHistory />} />
                   <Route path="/ledger" element={<Ledger />} />
                   <Route path="/trades" element={<Trades />} />
                   <Route path="/coin" element={<CoinSelect />} />

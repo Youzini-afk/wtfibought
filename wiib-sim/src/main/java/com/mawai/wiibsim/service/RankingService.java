@@ -95,7 +95,7 @@ public class RankingService {
                 .collect(Collectors.groupingBy(PredictionBet::getUserId));
         Map<String, BigDecimal> predictionBidCache = new HashMap<>();
 
-        // ────── 4. 硬实力盈亏批量聚合（口径：交易净盈亏，优惠券另列） ──────
+        // ────── 4. 交易盈利批量聚合（口径：交易净盈亏，优惠券另列） ──────
         Map<Long, BigDecimal> futuresNetMap = toUserAmountMap(futuresOrderMapper.sumNetPnlAfterCommissionAll());
         Map<Long, BigDecimal> futuresFundingFeeMap = toUserAmountMap(futuresPositionMapper.sumFundingFeeTotalAll());
         Map<Long, BigDecimal> predictionRealizedMap = toUserAmountMap(predictionBetMapper.sumRealizedProfitAfterBuyFeeAll());
@@ -124,7 +124,7 @@ public class RankingService {
                     .add(futures.value()).add(predictionValue)
                     .subtract(loanPrincipal).subtract(loanInterest);
 
-            // 硬实力盈亏 = 合约净盈亏 + 现货现金流(扣优惠券) + 预测已结算净盈亏
+            // 交易盈利 = 合约净盈亏 + 现货现金流(扣优惠券) + 预测已结算净盈亏
             BigDecimal buffProfit = nz(cryptoDiscountMap.get(uid));
             BigDecimal futuresProfit = nz(futuresNetMap.get(uid))
                     .add(futures.unrealizedPnl())
@@ -134,9 +134,9 @@ public class RankingService {
                     .add(cryptoMarketValue)
                     .subtract(buffProfit);
             BigDecimal predictionProfit = nz(predictionRealizedMap.get(uid));
-            BigDecimal hardcoreProfit = futuresProfit.add(cryptoProfit).add(predictionProfit);
+            BigDecimal tradingProfit = futuresProfit.add(cryptoProfit).add(predictionProfit);
 
-            rankings.add(getRankingDTO(user, totalAssets, hardcoreProfit, buffProfit));
+            rankings.add(getRankingDTO(user, totalAssets, tradingProfit, buffProfit));
         }
 
         // ────── 6. 排序 / 截断 / 缓存 ──────
@@ -155,12 +155,61 @@ public class RankingService {
     }
 
     /**
-     * 整榜内存切片分页。排名是全局的，必须先算完整榜才有名次，所以不做 SQL 分页。
+     * 榜单排序维度。
+     * <p>
+     * 【为什么没有"收益率"这一档】初始资金全站是同一个常数，
+     * 收益率 =(总资产−初始资金)/初始资金 与总资产是同一个序，加进来就是同一张榜换个名字。
+     * <p>
+     * 【为什么没有"游戏钱包/余额钱包"】那是现金构成，不是成绩。
      */
-    public Page<RankingDTO> getRankingPage(int pageNum, int pageSize) {
+    public enum RankingSort {
+        /** 总资产。默认榜，含游戏盈亏和优惠券带来的便宜 */
+        ASSETS(Comparator.comparing(RankingDTO::getTotalAssets)),
+        /** 交易盈利。剔掉优惠券和游戏，只看靠交易赚到的钱 */
+        TRADING_PROFIT(Comparator.comparing(RankingDTO::getTradingProfit)),
+        /** 优惠券省下。看谁把折扣用得最狠 */
+        BUFF(Comparator.comparing(RankingDTO::getBuffProfit));
+
+        private final Comparator<RankingDTO> comparator;
+
+        RankingSort(Comparator<RankingDTO> comparator) {
+            this.comparator = comparator;
+        }
+
+        /** 认不出的取值一律退回默认榜，不给前端传错参就 500 的机会 */
+        static RankingSort of(String name) {
+            if (name == null) return ASSETS;
+            for (RankingSort s : values()) {
+                if (s.name().equalsIgnoreCase(name)) return s;
+            }
+            return ASSETS;
+        }
+    }
+
+    /**
+     * 整榜内存切片分页。排名是全局的，必须先算完整榜才有名次，所以不做 SQL 分页。
+     * <p>
+     * 换排序维度也在内存里重排，不重新查库——整榜本来就已经全在手上（最多 500 人）。
+     * <b>名次跟着当前维度重算</b>：按交易盈利排却显示总资产名次，会排出 01、07、03 这种跳号，
+     * 看的人只会以为榜坏了。
+     * <p>
+     * 直接改 DTO 上的 rank 是安全的：{@link #getRanking()} 命中缓存时是从 Redis 反序列化出来的新对象，
+     * 未命中时是 {@link #refreshRanking()} 刚 new 出来、且已经写完缓存的那批——两条路都不会回写缓存。
+     */
+    public Page<RankingDTO> getRankingPage(String sort, int pageNum, int pageSize) {
         int safeNum = Math.max(pageNum, 1);
         int safeSize = Math.min(Math.max(pageSize, 1), MAX_PAGE_SIZE);
+        RankingSort dimension = RankingSort.of(sort);
+
         List<RankingDTO> all = getRanking();
+        if (dimension != RankingSort.ASSETS) {
+            all = new ArrayList<>(all);
+            all.sort(dimension.comparator.reversed());
+            for (int i = 0; i < all.size(); i++) {
+                all.get(i).setRank(i + 1);
+            }
+        }
+
         int from = Math.min((safeNum - 1) * safeSize, all.size());
         int to = Math.min(from + safeSize, all.size());
 
@@ -187,7 +236,7 @@ public class RankingService {
         return list.stream().filter(d -> userId.equals(d.getUserId())).findFirst().orElse(null);
     }
 
-    private RankingDTO getRankingDTO(User user, BigDecimal totalAssets, BigDecimal hardcoreProfit, BigDecimal buffProfit) {
+    private RankingDTO getRankingDTO(User user, BigDecimal totalAssets, BigDecimal tradingProfit, BigDecimal buffProfit) {
         BigDecimal profit = totalAssets.subtract(initialBalance);
         BigDecimal profitPct = initialBalance.compareTo(BigDecimal.ZERO) > 0
                 ? profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
@@ -199,7 +248,7 @@ public class RankingService {
         dto.setAvatar(user.getAvatar());
         dto.setTotalAssets(totalAssets.setScale(2, RoundingMode.HALF_UP));
         dto.setProfitPct(profitPct.setScale(2, RoundingMode.HALF_UP));
-        dto.setHardcoreProfit(hardcoreProfit.setScale(2, RoundingMode.HALF_UP));
+        dto.setTradingProfit(tradingProfit.setScale(2, RoundingMode.HALF_UP));
         dto.setBuffProfit(buffProfit.setScale(2, RoundingMode.HALF_UP));
         dto.setBalanceWallet(balanceWalletOf(user));
         dto.setGameWallet(gameWalletOf(user));
@@ -229,7 +278,7 @@ public class RankingService {
         return v != null ? v : BigDecimal.ZERO;
     }
 
-    /** 合约仓位估值同时产出 (margin+未实现盈亏) 与 单独的未实现盈亏，硬实力计算两者都要 */
+    /** 合约仓位估值同时产出 (margin+未实现盈亏) 与 单独的未实现盈亏，交易盈利计算两者都要 */
     private record FuturesPnL(BigDecimal value, BigDecimal unrealizedPnl) {}
 
     private static BigDecimal cryptoMarketValue(List<CryptoPosition> positions, Map<String, BigDecimal> priceMap) {

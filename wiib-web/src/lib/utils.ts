@@ -51,6 +51,24 @@ export function fmtRelative(ts: number | string | Date): string {
   return fmtDateTime(ts);
 }
 
+/**
+ * 时长："3天4时 / 5时12分 / 8分30秒 / 42秒"，最多两级单位。
+ * 持仓时长用——精确到毫秒没人看，"拿了3天"和"拿了8分钟"的区别才是要传达的。
+ */
+export function fmtDuration(from: number | string | Date, to: number | string | Date): string {
+  const ms = new Date(to).getTime() - new Date(from).getTime();
+  if (!Number.isFinite(ms)) return '-';
+  // 时钟漂移能让平仓时间早于开仓，负数按 0 处理，不显示"-3分钟"
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const d = Math.floor(s / 86400);
+  const h = Math.floor(s / 3600) % 24;
+  const m = Math.floor(s / 60) % 60;
+  if (d > 0) return h > 0 ? `${d}天${h}时` : `${d}天`;
+  if (h > 0) return m > 0 ? `${h}时${m}分` : `${h}时`;
+  if (m > 0) return s % 60 > 0 ? `${m}分${s % 60}秒` : `${m}分`;
+  return `${s}秒`;
+}
+
 /** 大额缩写：≥1亿 → X.XX亿，≥1万 → X.XX万，其余两位小数；null/NaN 返回 '-'。 */
 export function fmtMoney(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '-';

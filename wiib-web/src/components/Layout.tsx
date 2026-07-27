@@ -89,6 +89,9 @@ export function Layout({ children }: Props) {
             <HeaderNavItem to="/" label="首页" />
             <MarketDropdown isActive={isMarketActive} />
             <HeaderNavItem to="/portfolio" label="持仓" />
+            {/* 账单：桌面端唯一入口（手机端在「我的」页里）。原先挂在持仓页当按钮，
+                资金流水跟持仓是两件事，藏在别的页面里找不着 */}
+            <HeaderNavItem to="/ledger" label="账单" />
             <HeaderNavItem to="/ai" label="AI" />
             <HeaderNavItem to="/ranking" label="排行" />
             <HeaderNavItem to="/games" label="游戏" />

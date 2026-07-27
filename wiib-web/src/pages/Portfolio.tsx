@@ -32,7 +32,7 @@ import {
   Target,
   Landmark,
   RotateCcw,
-  Receipt,
+  History,
 } from 'lucide-react';
 import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSnapshot, CategoryAverages, BStock } from '../types';
 import { formatCoinPrice, getCoin } from '../lib/coinConfig';
@@ -541,11 +541,12 @@ export function Portfolio() {
         />
       )}
 
-      {/* 资金账单入口 + 刷新。账单没进顶栏导航（已经十项了），桌面端从这儿进 */}
+      {/* 仓位历史入口 + 刷新。入口没放进上面那张合约持仓卡——那张卡没持仓时整个 return null，
+          而"手上一个仓都没有"恰恰是最想翻历史的时候。摆这行才一直在 */}
       <div className="flex items-center justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={() => navigate('/ledger')}>
-          <Receipt className="w-4 h-4" />
-          资金账单
+        <Button variant="outline" size="sm" onClick={() => navigate('/portfolio/history')}>
+          <History className="w-4 h-4" />
+          合约持仓历史
         </Button>
         <Button
           variant="outline"
