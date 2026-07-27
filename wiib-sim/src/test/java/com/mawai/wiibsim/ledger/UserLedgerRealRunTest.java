@@ -125,8 +125,12 @@ class UserLedgerRealRunTest {
         createdUserIds.forEach(ledgerMapper::deleteByUserId);
         createdUserIds.forEach(userMapper::deleteById);
         createdUserIds.clear();
-        // 混合业务用例用 LedgerCtx.mark 补语义，中途断言失败会把标注留在线程上，
-        // 串到下一个用例第一笔资金变动的头上。自己造的就自己兜干净。
+        // 混合业务用例用 LedgerCtx.mark 补语义，这里兜的是标注泄漏。
+        // 泄漏路径不是"断言失败"：mark 后面紧跟的那次调用即使返 null 也会把标注消费掉
+        // （LedgerAspect 的 takeMark 刻意放在 ret != null 之前），而每次 assertInvariant 之前都没有待消费的标注。
+        // 真正够得着的是"service 方法在摸到 mapper 之前就早返回/抛异常"——本类的
+        // mark(SPOT_SETTLE) + applyCashInflow 就是：它 amount<=0 直接 return、用户查不到直接抛，
+        // 两条都不经过任何 atomic*，@AfterThrowing 切的又是 atomic*，也切不着，标注就留在线程上串到下一条用例。
         LedgerCtx.takeMark();
     }
 
@@ -527,6 +531,16 @@ class UserLedgerRealRunTest {
      * 链上出现 "balanceAfter=790 而上一条 balanceAfter=1000" 直接红）。
      * 换句话说：这条用例裹事务是在<b>复刻生产形态</b>，不是为了让断言好看。
      * <p>
+     * <b>这条实测反过来说明了生产上的一个风险，值得改代码的人记住</b>：任何一个不在事务里的
+     * {@code atomic*} 调用点，都会让<b>真账本</b>的 balance_after 审计链损坏——账单上出现
+     * "上一行 1000、下一行 790 而 delta 只有 −10"，而 {@code SUM(delta)} 照样对得上。
+     * 也就是说<b>对账脚本查不出这类问题</b>，只能靠审查时看调用点在不在事务里。
+     * 现状：全部 {@code atomic*} 调用点都在事务内（非游戏侧在 @Transactional 的 do* 里、
+     * 游戏侧走 GameLockExecutor/TransactionTemplate 的编程式事务），但这一点<b>没有任何自动化守卫</b>，
+     * 只有代码审查兜着；唯一相关的真跑覆盖是
+     * {@code LedgerProxyRealRunTest#protected方法抛异常时资金必须回滚()} 那一条路径。
+     * （刻意不加运行时检查：现存路径一条都没漏，为将来可能的回归在每笔资金变动上付常驻成本不值当。）
+     * <p>
      * 刻意混两种资金 SQL（扣余额 / 冻结）而不是同一句打 20 遍：要验的是不同语句抢同一行时
      * 账本顺序仍然自洽，只打一句测不出来。冻结那半边顺带把 FROZEN 的链也验了。
      */
@@ -572,8 +586,9 @@ class UserLedgerRealRunTest {
      * <ul>
      *   <li>对<b>账本上线后建号</b>的用户成立——建号那一刻补的 INITIAL_GRANT 就是期初基准。
      *       本类一律用 {@link #newUserWithGrant} 新建用户来断言，就是为了拿到这个基准；</li>
-     *   <li>对<b>存量用户不成立</b>，且没法修：期初基准既没记录也不回填，累加出来必然少一整个期初余额。
-     *       所以<b>不许拿真库既有 userId 跑这个断言</b>；将来谁在真库上跑一句
+     *   <li>对<b>存量用户不成立</b>，且没法修：期初基准既没记录也不回填，每个钱包各差"上线那一刻该列的值"
+     *       （BALANCE 差的就是期初余额；FROZEN/GAME/借款那几列多数是 0，所以那几个钱包是碰巧对得上，
+     *       不是因为口径成立）。所以<b>不许拿真库既有 userId 跑这个断言</b>；将来谁在真库上跑一句
      *       {@code SELECT user_id, wallet, SUM(delta) FROM user_ledger GROUP BY 1,2} 去比余额，
      *       发现那几个用户全对不上，那是<b>刻意的口径而不是漏账</b>，别当 bug 追。</li>
      * </ul>
@@ -602,6 +617,12 @@ class UserLedgerRealRunTest {
      * <p>
      * 求和对得上还不够：两笔并发变动若基于同一个旧值各算各的，求和照样对，但链上会出现跳变。
      * 这条才是"并发没把一致性打破"的硬证据。
+     * <p>
+     * 【隐含前提：id 序 == 时间序】本断言按 id 升序还原真实变动顺序，靠的是 user_ledger_id_seq
+     * <b>不带 CACHE</b>（当前 seqcache = 1，逐个 nextval）。谁执行一句
+     * {@code ALTER SEQUENCE user_ledger_id_seq CACHE 32}，每个连接就会预取一段 id，
+     * 跨 session 的 id 序不再等于时间序，这条断言会<b>静默失效</b>——变成随机红/绿，
+     * 而不是干脆地红。改序列前先想清楚这里。
      */
     private void assertBalanceChain(Long uid, LedgerWallet wallet) {
         // selectByCursor 是 id 倒序，reversed() 转成 id 升序 —— 同事务内 INSERT 的 id 顺序即真实变动顺序
