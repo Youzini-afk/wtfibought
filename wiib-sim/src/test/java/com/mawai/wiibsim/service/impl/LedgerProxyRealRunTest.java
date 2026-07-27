@@ -113,9 +113,9 @@ class LedgerProxyRealRunTest {
      * <p>
      * 刻意<b>不</b>摘 Redis 触发索引：本类的仓位都是直接 INSERT 造的、从没 registerPositionIndex 过，
      * 而资金费用例走到的 updateLiquidationPrice 只在 zScore 已有该 member 时才 zAdd
-     * （见 FuturesPositionIndexServiceImpl），所以压根没有索引可留。真去调 unregisterAll 反而会挂：
-     * 那批 executePipelined + (StringRedisConnection) 强转在 Spring Boot 4 下抛 ClassCastException，
-     * 是迁移遗留的独立 bug（启动日志"重建futures ZSet索引 成功=0 失败=N"就是它），与账本无关。
+     * （见 FuturesPositionIndexServiceImpl），所以压根没有索引可留，没什么要清的。
+     * （曾经这里还写着"调 unregisterAll 会抛 ClassCastException"——那个 Spring Boot 4 迁移遗留的强转 bug
+     * 已修，索引读写现在由 FuturesPositionIndexRealRunTest 单独兜。）
      */
     @AfterEach
     void 清掉本次建的测试数据() {

@@ -9,9 +9,10 @@ import java.util.List;
 
 public interface FuturesPositionIndexService {
 
-    /** 开仓时一次Pipeline注册所有索引(LIQ始终注册 + SL + TP) */
+    /** 开仓时注册该仓位全部触发索引：LIQ(仅逐仓) + SL + TP。SL/TP 为 null 或空即跳过 */
     void registerPositionIndex(FuturesPosition position);
 
+    /** 平仓/强平/爆仓/重置时摘掉该仓位全部触发索引 */
     void unregisterAll(FuturesPosition position);
 
     void updateLiquidationPrice(Long positionId, String symbol, String side, BigDecimal liqPrice);

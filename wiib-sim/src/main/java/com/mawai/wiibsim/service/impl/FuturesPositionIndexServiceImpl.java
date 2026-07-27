@@ -13,9 +13,6 @@ import com.mawai.wiibsim.service.FuturesPositionIndexService;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.connection.StringRedisConnection;
-import org.springframework.data.redis.core.RedisCallback;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -24,6 +21,30 @@ import java.util.List;
 
 import static com.mawai.wiibsim.service.impl.FuturesHelper.*;
 
+/**
+ * 强平/止损/止盈触发索引的写入侧（Redis ZSet），消费侧是 FuturesLiquidationServiceImpl。
+ * <p>
+ * <b>这里刻意逐条走 cacheService.zAdd/zRemove，不用 pipeline —— 别"优化"回去。</b>
+ * 原写法是 {@code stringRedisTemplate.executePipelined} 里 {@code (StringRedisConnection) connection} 强转。
+ * Spring Boot 4（spring-data-redis 4.1.0）把 {@code StringRedisTemplate.preProcessConnection} 删了
+ * （3.4/3.5 还在）：正是那一层负责把连接包成 {@code DefaultStringRedisConnection}
+ * （它 implements {@code StringRedisConnection}），RedisTemplate 按实现类接口生成的 JDK 代理才带得上
+ * 这个接口、强转才合法。删掉后基类原样返回 Lettuce 连接，暴露出来的代理<b>不含</b>该接口，强转必抛
+ * ClassCastException。
+ * <p>
+ * 最坑的是 {@code StringRedisConnection} 这个接口本身 4.1.0 里还在，所以<b>编译期一点动静没有</b>，
+ * 只在运行期炸：市价开仓 500 + 事务回滚、止损止盈全挂、带仓位的用户爆仓永远完不成、
+ * 启动日志"重建futures ZSet索引 成功=0 失败=N"。
+ * <p>
+ * 为什么不是"保留 pipeline，改用 {@code conn.zAdd(key.getBytes(UTF_8), score, member.getBytes(UTF_8))}"：
+ * 那等于把序列化契约手抄一份进业务代码，跟消费侧 StringRedisSerializer 一旦对不上就是静默错 key，
+ * 比 ClassCastException 更难查。而 pipeline 在这里本来也没什么可省：单仓位最多 1 条强平 + 4 条 SL
+ * + 4 条 TP（SL/TP 条数由 FUTURES_SPLIT_LIMIT 卡死 4），init() 还是逐个仓位调的，攒不出批量。
+ * 用一个编译器看不见的坑去换个位数的 round trip，不值。
+ * <p>
+ * 现在写入侧和消费侧、以及限价单索引（FuturesHelper.addToLimitZSet）统一都走 cacheService，
+ * key/member 序列化只有一份来源。
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
@@ -34,7 +55,6 @@ public class FuturesPositionIndexServiceImpl implements FuturesPositionIndexServ
     private final FuturesPositionMapper positionMapper;
     private final CacheService cacheService;
     private final FuturesLeverageBracketRegistry bracketRegistry;
-    private final StringRedisTemplate stringRedisTemplate;
 
 
     @PostConstruct
@@ -65,68 +85,33 @@ public class FuturesPositionIndexServiceImpl implements FuturesPositionIndexServ
         String symbol = position.getSymbol();
         String side = position.getSide();
 
-        List<FuturesStopLoss> sls = position.getStopLosses();
-        List<FuturesTakeProfit> tps = position.getTakeProfits();
+        // 逐仓注册静态强平价；全仓强平价随账户动态变化，不走ZSet，由CrossLiquidationService账户级巡检。
+        // 强平价必须先算：档位没配会在这里抛 FUTURES_SYMBOL_NOT_CONFIGURED，此时 SL/TP 一条都还没写进去
+        if (!position.isCross()) {
+            BigDecimal liqPrice = calcStaticLiqPrice(symbol, side, position.getEntryPrice(), position.getMargin(),
+                    position.getQuantity());
+            cacheService.zAdd(liqKey(symbol, side), positionId.toString(), liqPrice.doubleValue());
+        }
 
-        stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            StringRedisConnection conn = (StringRedisConnection) connection;
-            // 逐仓注册静态强平价；全仓强平价随账户动态变化，不走ZSet，由CrossLiquidationService账户级巡检
-            if (!position.isCross()) {
-                BigDecimal liqPrice = calcStaticLiqPrice(symbol, side, position.getEntryPrice(), position.getMargin(),
-                        position.getQuantity());
-                String liqKey = "LONG".equals(side) ? LIQ_LONG_PREFIX + symbol : LIQ_SHORT_PREFIX + symbol;
-                conn.zAdd(liqKey, liqPrice.doubleValue(), positionId.toString());
-            }
-
-            if (sls != null && !sls.isEmpty()) {
-                String slKey = "LONG".equals(side) ? SL_LONG_PREFIX + symbol : SL_SHORT_PREFIX + symbol;
-                for (FuturesStopLoss sl : sls) {
-                    conn.zAdd(slKey, sl.getPrice().doubleValue(), positionId + ":" + sl.getId());
-                }
-            }
-            if (tps != null && !tps.isEmpty()) {
-                String tpKey = "LONG".equals(side) ? TP_LONG_PREFIX + symbol : TP_SHORT_PREFIX + symbol;
-                for (FuturesTakeProfit tp : tps) {
-                    conn.zAdd(tpKey, tp.getPrice().doubleValue(), positionId + ":" + tp.getId());
-                }
-            }
-            return null;
-        });
+        registerStopLosses(positionId, symbol, side, position.getStopLosses());
+        registerTakeProfits(positionId, symbol, side, position.getTakeProfits());
     }
 
     @Override
     public void unregisterAll(FuturesPosition position) {
-        String id = position.getId().toString();
+        Long positionId = position.getId();
         String symbol = position.getSymbol();
         String side = position.getSide();
 
-        List<FuturesStopLoss> sls = position.getStopLosses();
-        List<FuturesTakeProfit> tps = position.getTakeProfits();
-
-        stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            StringRedisConnection conn = (StringRedisConnection) connection;
-            conn.zRem("LONG".equals(side) ? LIQ_LONG_PREFIX + symbol : LIQ_SHORT_PREFIX + symbol, id);
-
-            if (sls != null) {
-                String slKey = "LONG".equals(side) ? SL_LONG_PREFIX + symbol : SL_SHORT_PREFIX + symbol;
-                for (FuturesStopLoss sl : sls) {
-                    conn.zRem(slKey, id + ":" + sl.getId());
-                }
-            }
-
-            if (tps != null) {
-                String tpKey = "LONG".equals(side) ? TP_LONG_PREFIX + symbol : TP_SHORT_PREFIX + symbol;
-                for (FuturesTakeProfit tp : tps) {
-                    conn.zRem(tpKey, id + ":" + tp.getId());
-                }
-            }
-            return null;
-        });
+        // 强平索引无条件摘：全仓本来就没注册过，多删一次 ZREM 返 0，比按 isCross 分支更耐脏数据（改过保证金模式的老仓位）
+        cacheService.zRemove(liqKey(symbol, side), positionId.toString());
+        unregisterStopLosses(positionId, symbol, side, position.getStopLosses());
+        unregisterTakeProfits(positionId, symbol, side, position.getTakeProfits());
     }
 
     @Override
     public void updateLiquidationPrice(Long positionId, String symbol, String side, BigDecimal liqPrice) {
-        String key = "LONG".equals(side) ? LIQ_LONG_PREFIX + symbol : LIQ_SHORT_PREFIX + symbol;
+        String key = liqKey(symbol, side);
         Double existing = cacheService.zScore(key, positionId.toString());
         if (existing != null) {
             cacheService.zAdd(key, positionId.toString(), liqPrice.doubleValue());
@@ -135,50 +120,58 @@ public class FuturesPositionIndexServiceImpl implements FuturesPositionIndexServ
 
     @Override
     public void registerStopLosses(Long positionId, String symbol, String side, List<FuturesStopLoss> stopLosses) {
-        String slKey = "LONG".equals(side) ? SL_LONG_PREFIX + symbol : SL_SHORT_PREFIX + symbol;
-        stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            StringRedisConnection conn = (StringRedisConnection) connection;
-            for (FuturesStopLoss sl : stopLosses) {
-                conn.zAdd(slKey, sl.getPrice().doubleValue(), positionId + ":" + sl.getId());
-            }
-            return null;
-        });
+        if (stopLosses == null || stopLosses.isEmpty()) return;
+        String key = slKey(symbol, side);
+        for (FuturesStopLoss sl : stopLosses) {
+            // cacheService.zAdd 参数序是 (key, member, score)，跟 RedisConnection.zAdd(key, score, member) 正好相反，别抄反
+            cacheService.zAdd(key, member(positionId, sl.getId()), sl.getPrice().doubleValue());
+        }
     }
 
     @Override
     public void registerTakeProfits(Long positionId, String symbol, String side, List<FuturesTakeProfit> takeProfits) {
-        String tpKey = "LONG".equals(side) ? TP_LONG_PREFIX + symbol : TP_SHORT_PREFIX + symbol;
-        stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            StringRedisConnection conn = (StringRedisConnection) connection;
-            for (FuturesTakeProfit tp : takeProfits) {
-                conn.zAdd(tpKey, tp.getPrice().doubleValue(), positionId + ":" + tp.getId());
-            }
-            return null;
-        });
+        if (takeProfits == null || takeProfits.isEmpty()) return;
+        String key = tpKey(symbol, side);
+        for (FuturesTakeProfit tp : takeProfits) {
+            cacheService.zAdd(key, member(positionId, tp.getId()), tp.getPrice().doubleValue());
+        }
     }
 
     @Override
     public void unregisterStopLosses(Long positionId, String symbol, String side, List<FuturesStopLoss> stopLosses) {
-        String slKey = "LONG".equals(side) ? SL_LONG_PREFIX + symbol : SL_SHORT_PREFIX + symbol;
-        stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            StringRedisConnection conn = (StringRedisConnection) connection;
-            for (FuturesStopLoss sl : stopLosses) {
-                conn.zRem(slKey, positionId + ":" + sl.getId());
-            }
-            return null;
-        });
+        if (stopLosses == null || stopLosses.isEmpty()) return;
+        String key = slKey(symbol, side);
+        for (FuturesStopLoss sl : stopLosses) {
+            cacheService.zRemove(key, member(positionId, sl.getId()));
+        }
     }
 
     @Override
     public void unregisterTakeProfits(Long positionId, String symbol, String side, List<FuturesTakeProfit> takeProfits) {
-        String tpKey = "LONG".equals(side) ? TP_LONG_PREFIX + symbol : TP_SHORT_PREFIX + symbol;
-        stringRedisTemplate.executePipelined((RedisCallback<Object>) connection -> {
-            StringRedisConnection conn = (StringRedisConnection) connection;
-            for (FuturesTakeProfit tp : takeProfits) {
-                conn.zRem(tpKey, positionId + ":" + tp.getId());
-            }
-            return null;
-        });
+        if (takeProfits == null || takeProfits.isEmpty()) return;
+        String key = tpKey(symbol, side);
+        for (FuturesTakeProfit tp : takeProfits) {
+            cacheService.zRemove(key, member(positionId, tp.getId()));
+        }
+    }
+
+    // ==================== key/member 拼装：写入侧与消费侧(FuturesLiquidationServiceImpl)必须一致 ====================
+
+    private static String liqKey(String symbol, String side) {
+        return "LONG".equals(side) ? LIQ_LONG_PREFIX + symbol : LIQ_SHORT_PREFIX + symbol;
+    }
+
+    private static String slKey(String symbol, String side) {
+        return "LONG".equals(side) ? SL_LONG_PREFIX + symbol : SL_SHORT_PREFIX + symbol;
+    }
+
+    private static String tpKey(String symbol, String side) {
+        return "LONG".equals(side) ? TP_LONG_PREFIX + symbol : TP_SHORT_PREFIX + symbol;
+    }
+
+    /** SL/TP 的 member 带档位 id：一个仓位可有多档，光 positionId 会互相覆盖 */
+    private static String member(Long positionId, String itemId) {
+        return positionId + ":" + itemId;
     }
 
     /**
