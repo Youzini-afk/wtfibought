@@ -31,6 +31,13 @@ import { TestnetMonitor } from './pages/TestnetMonitor';
 import { ForceOrders } from './pages/ForceOrders';
 import { useUserStore } from './stores/userStore';
 
+declare global {
+  interface Window {
+    /** 开屏动画的收尾钩子，定义在 index.html 内联脚本里（那边还有 6s 兜底，漏调不会卡死） */
+    __wiibSplashDone?: () => void;
+  }
+}
+
 /**
  * 全站唯一登录守卫，挂在 /* 上。
  * 判 token 不判 user：token 是 localStorage 同步恢复的，user 要等 fetchUser 异步回来，
@@ -46,9 +53,11 @@ function App() {
   const { token, fetchUser } = useUserStore();
   const fetchKey = useMemo(() => (token ? `auth:current:${token}` : null), [token]);
 
+  // 开屏一直遮到用户信息就位，顺带把顶栏"登录→用户名"那一下闪烁盖掉。
+  // 游客没 token 不发请求，直接放行，否则开屏要一路等到 6s 兜底
   useEffect(() => {
-      if (fetchKey == null) return;
-      void fetchUser();
+      if (fetchKey == null) { window.__wiibSplashDone?.(); return; }
+      void fetchUser().finally(() => window.__wiibSplashDone?.());
     }, [fetchKey, fetchUser]);
 
   return (
