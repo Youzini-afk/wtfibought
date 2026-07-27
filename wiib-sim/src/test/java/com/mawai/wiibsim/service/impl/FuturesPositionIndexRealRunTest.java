@@ -34,9 +34,15 @@ import static org.assertj.core.api.Assertions.offset;
  * <p>
  * 跑法（项目根）：
  * <pre>
+ * set -a &amp;&amp; source .env.local &amp;&amp; set +a
  * WIIB_REAL_RUN=1 mvn -o test -pl wiib-sim -am -DskipTests=false \
- *   -Dtest=FuturesPositionIndexRealRunTest -Dsurefire.failIfNoSpecifiedTests=false
+ *   -Dtest=FuturesPositionIndexRealRunTest -Dsurefire.failIfNoSpecifiedTests=false \
+ *   -DREDIS_PASSWORD=
  * </pre>
+ * 末尾那个空的 {@code -DREDIS_PASSWORD=} 不是笔误：本地 redis-docker 容器起的时候没带
+ * {@code --requirepass}，而 .env.local 里 REDIS_PASSWORD 是个真密码，照它连必 AUTH 失败
+ * （"called without any password configured"）。系统属性优先级高于 spring.config.import 进来的
+ * .env.local，置空即 {@code RedisPassword.of("")} → 压根不发 AUTH。哪天容器补上密码了这段可以去掉。
  */
 @SpringBootTest
 @EnabledIfEnvironmentVariable(named = "WIIB_REAL_RUN", matches = "1")
@@ -180,19 +186,29 @@ class FuturesPositionIndexRealRunTest {
     /**
      * SHORT 走的是另一组 key。少了这条，"key 拼装把 side 丢了"这种错会静默通过：
      * SHORT 仓位的 member 全落到 LONG key 上，而 SHORT 扫描永远查不到它们（=止损止盈静默失效）。
-     * SHORT 的触发方向和 LONG 相反，所以这里的 SL 取大值、TP 取小值，保证不会被真扫描误触发。
+     * <p>
+     * 用独立的 {@link #isolatedShort} 夹具，<b>不许</b>拿 isolatedLong 改 side 凑：
+     * 那组数（entry 100 / margin 200）是专为把 <em>LONG</em> 强平价压成负数调的，翻 side 后公式反向，
+     * 强平价变成 +298.80，正好掉进 SHORT 的触发窗口里 —— 详见夹具区那张窗口方向表。
      */
     @Test
     void SHORT仓位的索引落在short那组key上() {
-        FuturesPosition pos = isolatedLong(null, null);
-        pos.setSide("SHORT");
-        // SHORT 强平价 = (notional + margin + maintAmount) / (qty × (1+MMR))，必为正且远高于现价，不会被扫描捞到
-        pos.setStopLosses(List.of(new FuturesStopLoss("sl1", bd("9000000"), bd("0.5"))));
-        pos.setTakeProfits(List.of(new FuturesTakeProfit("tp1", bd("1"), bd("0.5"))));
+        // SHORT 触发方向与 LONG 全反：SL 要取大值、TP 要取小值才躲得开扫描窗口
+        FuturesPosition pos = isolatedShort(
+                List.of(new FuturesStopLoss("sl1", bd("9000000"), bd("0.5"))),
+                List.of(new FuturesTakeProfit("tp1", bd("1"), bd("0.5"))));
 
         indexService.registerPositionIndex(pos);
 
-        assertThat(score(LIQ_SHORT, String.valueOf(posId))).isNotNull();
+        Double liq = score(LIQ_SHORT, String.valueOf(posId));
+        assertThat(liq).isNotNull();
+        // 夹具自检，不是业务断言：SHORT 强平扫描窗口是 [0, markPrice]，这个 score 必须高过任何
+        // 可能的 BTC markPrice，否则本类那个负数 id 的假仓位会被真扫描摘走再装回来，变成永久幽灵索引。
+        // 谁改了 isolatedShort 的 entryPrice/margin 又把强平价压回现价量级，这行就红。
+        assertThat(liq)
+                .as("SHORT 强平价必须远离扫描窗口 [0, markPrice]，否则会污染所有者真实 Redis")
+                .isGreaterThan(FAR_ABOVE_ANY_PRICE);
+
         assertScore(SL_SHORT, posId + ":sl1", 9000000d);
         assertScore(TP_SHORT, posId + ":tp1", 1d);
         // 没串到 LONG 那组去
@@ -227,7 +243,10 @@ class FuturesPositionIndexRealRunTest {
      */
     @Test
     void 强平价更新只对已在册的仓位生效() {
-        // 没注册过：不许凭空创建 member，否则等于用一个随手算的价把仓位塞进强平扫描
+        // 【注意分工】下面这半段是<b>行为断言，不是本次回归的守卫</b>：updateLiquidationPrice 走 cacheService、
+        // 从来没有过那个强转，所以这半段在 buggy 版和修复版都绿。它守的是"不许凭空创建 member"
+        // （否则等于用一个随手算的价把不存在的仓位塞进强平扫描）。
+        // 真正咬住 CCE 的是后半段那句 registerPositionIndex。
         indexService.updateLiquidationPrice(posId, SYMBOL, "LONG", bd("-50"));
         assertThat(score(LIQ_LONG, String.valueOf(posId))).isNull();
 
@@ -241,11 +260,39 @@ class FuturesPositionIndexRealRunTest {
 
     // ==================== 夹具与断言 ====================
 
+    /*
+     * ★ 改夹具数值前先读这段 ★
+     *
+     * 本类的 member 全挂在负数 positionId 上、是不存在的假仓位。一旦某个 score 落进消费侧的
+     * 触发窗口，链条是：真扫描 zRangeByScoreAndRemove 原子摘走(断言先红) → forceClose(负数id) 失败
+     * → catch 里 cacheService.zAdd 把 member <b>装回去</b> → 若这步发生在 @AfterEach 之后，
+     * 一个 score 永在触发区的幽灵 member 就永久留在所有者真实 Redis 里，每个 tick 刷一次 error 再装回，
+     * 无限循环。futures:liq:long:* 里那两个僵尸 member(177/178) 就是这个病，AccountResetService
+     * 开头的注释也点了同一件事。
+     *
+     * 所以夹具取值不是随手写的数，必须避开窗口。消费侧窗口方向（FuturesLiquidationServiceImpl:40-49）：
+     *
+     *   索引        扫描窗口              夹具 score 必须
+     *   LIQ  LONG   [markPrice, +∞)       低于现价   → 让强平价算成负数（margin > notional）
+     *   LIQ  SHORT  [0, markPrice]        高于现价   → SHORT 公式全是加项、恒为正，压不到负数，
+     *                                                 只能把 entryPrice 抬到百万量级
+     *   SL   LONG   [markPrice, +∞)       低于现价   → 取 1、2
+     *   SL   SHORT  [0, markPrice]        高于现价   → 取 9000000
+     *   TP   LONG   [0, currentPrice]     高于现价   → 取 9000000
+     *   TP   SHORT  [currentPrice, +∞)    低于现价   → 取 1
+     *
+     * LONG 和 SHORT 方向<b>整组相反</b>，所以两个 side 各有独立夹具，别拿一个改 side 凑。
+     */
+
+    /** 比任何可能的 BTC markPrice 都高一个量级，用来给 SHORT 强平价的"躲开窗口"做可断言的下界 */
+    private static final double FAR_ABOVE_ANY_PRICE = 1_000_000d;
+
     /**
-     * 逐仓 LONG 仓位。margin(200) 刻意大于 notional(100)，让 LONG 强平价算成负数：
-     * LONG 强平是 score ≥ markPrice 才触发，负分永远捞不到——连的是所有者真实 Redis，
-     * 万一 @AfterEach 前进程被打断，残留 member 也不会真去强平一个不存在的仓位。
-     * 同理 SL 取极小值、TP 取极大值（LONG 的触发方向）。
+     * 逐仓 LONG 仓位。margin(200) 刻意大于 notional(100)，让 LONG 强平价算成 −100.40：
+     * LONG 强平是 score ≥ markPrice 才触发，负分永远捞不到。
+     * <p>
+     * <b>这组数只对 LONG 成立</b>——SHORT 的强平公式是 (notional + margin + maint)/(qty×(1+MMR))，
+     * 同样的数会算出 +298.80，正好掉进 SHORT 窗口 [0, markPrice] 里。SHORT 请用 isolatedShort。
      */
     private FuturesPosition isolatedLong(List<FuturesStopLoss> sls, List<FuturesTakeProfit> tps) {
         FuturesPosition p = new FuturesPosition();
@@ -257,6 +304,30 @@ class FuturesPositionIndexRealRunTest {
         p.setQuantity(bd("1"));
         p.setEntryPrice(bd("100"));
         p.setMargin(bd("200"));
+        p.setStopLosses(sls);
+        p.setTakeProfits(tps);
+        return p;
+    }
+
+    /**
+     * 逐仓 SHORT 仓位。SHORT 强平价 = (notional + margin + maintAmount) / (qty × (1 + MMR))，
+     * 三个加项全非负 → <b>恒为正，压不到负数</b>，躲窗口只能往上跑：
+     * entryPrice 抬到 9000000（qty=1、margin=1）落 BTC 第 4 档(MMR 1%、速算数 12000)，
+     * 强平价 ≈ 8922773，比现价高两个量级，SHORT 窗口 [0, markPrice] 永远捞不到。
+     * <p>
+     * 数字经济上不合理（1 USDT 保证金撑 900 万名义）无所谓：本夹具不入库、不过保证金校验，
+     * 只喂 calcStaticLiqPrice。要的就是"离真实价格足够远"。
+     */
+    private FuturesPosition isolatedShort(List<FuturesStopLoss> sls, List<FuturesTakeProfit> tps) {
+        FuturesPosition p = new FuturesPosition();
+        p.setId(posId);
+        p.setSymbol(SYMBOL);
+        p.setSide("SHORT");
+        p.setMarginMode(FuturesPosition.ISOLATED);
+        p.setLeverage(1);
+        p.setQuantity(bd("1"));
+        p.setEntryPrice(bd("9000000"));
+        p.setMargin(bd("1"));
         p.setStopLosses(sls);
         p.setTakeProfits(tps);
         return p;
