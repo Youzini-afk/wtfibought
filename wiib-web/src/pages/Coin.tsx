@@ -18,13 +18,24 @@ import { fmtNum } from '../lib/utils';
 import { COIN_MAP, getCoin, DEFAULT_SYMBOL, formatCoinPrice } from '../lib/coinConfig';
 import type { CryptoPosition, FuturesBracket } from '../types';
 
-/** 图表周期：现货/合约统一 K 线（各拉 500 根：5m≈41h / 15m≈5天 / 1h≈20天）；TABS 之后一位 = TradingView 高级图 */
+/** 图表周期：现货/合约统一 K 线（各拉 500 根：5m≈41h / 15m≈5天 / 1h≈20天 / 4h≈83天 / 1d≈1.4年）；TABS 之后一位 = TradingView 高级图 */
 const TABS = [
   { label: '5m', interval: '5m' as const, limit: 500 },
   { label: '15m', interval: '15m' as const, limit: 500 },
   { label: '1h', interval: '1h' as const, limit: 500 },
+  { label: '4h', interval: '4h' as const, limit: 500 },
+  { label: '1d', interval: '1d' as const, limit: 500 },
 ];
 const TV_TAB = TABS.length;
+
+/** feed 只为这三档开了 WS 广播（Kline5m/15m/1h StreamHandler）；不在表里的走价格 tick 驱动最后一根 */
+const KLINE_BROADCAST: readonly string[] = ['5m', '15m', '1h'];
+
+/** 周期 tab 按钮样式：激活=顶部主色内阴影。extra 给周期档位加 num 字体 */
+const tabCls = (on: boolean, extra = '') =>
+  `${extra} px-2 sm:px-3.5 py-2 sm:py-1.5 text-[11px] sm:text-xs font-semibold transition-colors cursor-pointer ${
+    on ? 'bg-card-2 text-foreground shadow-[inset_0_2px_0_var(--color-primary)]'
+       : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`;
 
 export function CoinRoute() {
   const { symbol } = useParams<{ symbol: string }>();
@@ -119,10 +130,12 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const changePct = base24h > 0 ? (change / base24h) * 100 : 0;
   const isUp = change >= 0;
 
-  // K线实时驱动分派：crypto 合约 5m/15m/1h 后端都有K线广播（含量/额）；
-  // 大宗商品合约只有 5m 广播，15m/1h 退化为价格 tick 驱动；现货全部由价格 tick 驱动最后一根
+  // K线实时驱动分派：crypto 合约 5m/15m/1h 有后端广播（含量/额），4h/1d 没有；
+  // 大宗商品/美股永续只有 5m 广播；现货全部由价格 tick 驱动最后一根。
+  // 无广播的档位量/额停在进页时的 REST 快照，只有 OHLC 随价格流跳
   const chartInterval = activeTab < TABS.length ? TABS[activeTab].interval : null;
-  const klineLive = isFuturesMode && (!cfg.futuresOnly || chartInterval === '5m');
+  const klineLive = isFuturesMode && chartInterval != null
+    && (cfg.futuresOnly ? chartInterval === '5m' : KLINE_BROADCAST.includes(chartInterval));
   const chartTick = useMemo(() => {
     if (tick?.ts == null) return null;
     const p = isFuturesMode ? (tick.fp ?? tick.price) : tick.price;
@@ -206,13 +219,15 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
             <CardHeader className="pb-2 pt-4 px-4">
               <div className="flex items-center justify-between">
                 <CardTitle>走势</CardTitle>
+                {/* 6 个档位并排（5 周期 + 高级）：手机端收窄 padding/字号硬塞进一行，不换行；sm 以上恢复原尺寸。
+                    py-2 不动，触摸高度保持 32px */}
                 <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
                   {TABS.map((tab, i) => (
-                    <button key={tab.label} onClick={() => setActiveTab(i)} className={`num px-3 sm:px-3.5 py-2 sm:py-1.5 text-xs font-semibold transition-colors cursor-pointer ${activeTab === i ? 'bg-card-2 text-foreground shadow-[inset_0_2px_0_var(--color-primary)]' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
+                    <button key={tab.label} onClick={() => setActiveTab(i)} className={tabCls(activeTab === i, 'num')}>
                       {tab.label}
                     </button>
                   ))}
-                  <button onClick={() => setActiveTab(TV_TAB)} className={`px-3 sm:px-3.5 py-2 sm:py-1.5 text-xs font-semibold transition-colors cursor-pointer ${activeTab === TV_TAB ? 'bg-card-2 text-foreground shadow-[inset_0_2px_0_var(--color-primary)]' : 'text-muted-foreground hover:bg-surface-hover hover:text-foreground'}`}>
+                  <button onClick={() => setActiveTab(TV_TAB)} className={tabCls(activeTab === TV_TAB)}>
                     高级
                   </button>
                 </div>

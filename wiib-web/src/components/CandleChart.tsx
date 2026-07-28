@@ -17,17 +17,28 @@ const TZ = -8 * 3600;                                       // 固定 UTC+8 偏�
 const toBarTime = (ms: number) => Math.floor(ms / 1000) - TZ;
 const barDate = (t: number) => new Date((t + TZ) * 1000);   // 反算真实时刻用于格式化
 const fmtVol = (n: number) => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(2) + 'K' : n.toFixed(2);
+/** 币安原始行 → Bar：k[0]=开盘ms，1-4=OHLC，5=量(基础币)，7=额(USDT) */
+const toBar = (k: number[]): Bar => ({
+  time: toBarTime(k[0]), openMs: k[0],
+  open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5], quote: +k[7],
+});
 const VOL_UP = 'rgba(8,153,129,.5)', VOL_DOWN = 'rgba(242,54,69,.5)';
 
+/** 日线气泡只显示日期：1d 的 bar 开在 UTC 0 点(=新加坡 08:00)，挂个 08:00 纯噪音 */
+const fmtBarTime = (d: Date, interval: string) =>
+  interval === '1d'
+    ? d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Singapore', month: '2-digit', day: '2-digit' })
+    : fmtDateTime(d);
+
 /** 气泡 HTML（固定深色，亮/暗主题下都清晰）：时间·开高低收·涨跌·涨跌幅·振幅·量·额。 */
-function tooltipHtml(bar: Bar, bars: Bar[], idx: Map<number, number>, d: number, base: string): string {
+function tooltipHtml(bar: Bar, bars: Bar[], idx: Map<number, number>, d: number, base: string, interval: string): string {
   const i = idx.get(bar.time);
   const prevClose = (i != null && i > 0) ? bars[i - 1].close : bar.open;   // 昨收=前一根收盘
   const chg = bar.close - prevClose;
   const chgPct = prevClose ? chg / prevClose * 100 : 0;
   const amp = prevClose ? (bar.high - bar.low) / prevClose * 100 : 0;
   const up = chg >= 0, col = up ? '#0abf95' : '#ff5a68', sign = up ? '+' : '';
-  const tStr = fmtDateTime(barDate(bar.time));
+  const tStr = fmtBarTime(barDate(bar.time), interval);
   const row = (k: string, v: string, c = '#d1d4dc') =>
     `<div style="display:flex;justify-content:space-between;gap:18px"><span style="color:#6b7280">${k}</span><span style="color:${c};font-weight:700">${v}</span></div>`;
   return `<div style="color:#878b96;font-weight:700;margin-bottom:5px;padding-bottom:5px;border-bottom:1px solid #23262e">${tStr}</div>`
@@ -309,10 +320,25 @@ function updateIndicatorsLast(ind: IndSeries, bars: Bar[]) {
  * - streamLive=true（默认，合约）：走 {@link useKlineStream}(后端实时广播 o/h/l/c/v/q)
  * - streamLive=false（现货/bstock，后端不广播其K线）：由外部 tick(价格流)更新最后一根的 c/h/l
  */
-const BUCKET_MS = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000 } as const;
+// 桶宽即对齐口径：floor(ts/bucket)*bucket 落到 UTC 整点，与币安各周期的开盘时刻一致
+// （4h→UTC 00/04/08/12/16/20，1d→UTC 00:00），所以 tick 驱动落桶不会错位。
+const BUCKET_MS = { '5m': 300_000, '15m': 900_000, '1h': 3_600_000, '4h': 14_400_000, '1d': 86_400_000 } as const;
 type Interval = keyof typeof BUCKET_MS;
 
-export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean }) {
+// ========== 向左翻历史的三个阈值 ==========
+/** 每次往回翻的根数，与首屏同量级 */
+const PAGE_SIZE = 500;
+/** 左边还剩这么多根就预取。默认视口 110 根≈留一屏缓冲，让加载在用户拖到墙之前就完成 */
+const LOAD_THRESHOLD = 100;
+/**
+ * 内存上限。每次实时 tick 都要对全量 bars 重算 11 条指标序列
+ * （见 updateIndicatorsLast 的注释：故意不做增量，否则同一根被反复重写时会算错），
+ * 5000 根≈2-5ms/tick 还无感，上万就开始掉帧。
+ * 覆盖范围：5m≈17天 / 15m≈52天 / 1h≈208天 / 4h≈2.3年 / 1d≈13.7年。
+ */
+const MAX_BARS = 5000;
+
+export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, klinesFn = futuresApi.klines, streamLive = true, tick = null, indicators = false }: { symbol: string; interval: Interval; limit?: number; visibleBars?: number; klinesFn?: (symbol: string, interval: string, limit: number, endTime?: number) => Promise<number[][]>; streamLive?: boolean; tick?: { price: number; ts: number } | null; indicators?: boolean }) {
   const isDark = useIsDark();
   const wrapRef = useRef<HTMLDivElement>(null);
   const chartDivRef = useRef<HTMLDivElement>(null);
@@ -331,6 +357,11 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const barsRef = useRef<Bar[]>([]);
   const idxRef = useRef<Map<number, number>>(new Map());
   const readyRef = useRef(false);
+  const hintRef = useRef<HTMLDivElement>(null);
+  // 翻历史的两道闸：in-flight 锁挡住 setData 自己触发的那次 range 变化（漏了就是无限自激狂发请求），
+  // 枯竭标记挡住"币安没有更早数据了还一直问"
+  const loadingRef = useRef(false);
+  const exhaustedRef = useRef(false);
   const hoverRef = useRef<{ time: number | null; x: number; y: number }>({ time: null, x: 0, y: 0 });
   const isDarkRef = useRef(isDark);
   const decimals = getCoinPriceDecimals(symbol);
@@ -346,7 +377,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   // 显示/定位气泡（用 ref，避免闭包读到过期 isDark/props）
   const showTip = (bar: Bar, px: number, py: number) => {
     const tip = tipRef.current, wrap = wrapRef.current; if (!tip || !wrap) return;
-    tip.innerHTML = tooltipHtml(bar, barsRef.current, idxRef.current, decimals, base);
+    tip.innerHTML = tooltipHtml(bar, barsRef.current, idxRef.current, decimals, base, interval);
     tip.style.display = 'block';
     const W = wrap.clientWidth, H = wrap.clientHeight, tw = tip.offsetWidth, th = tip.offsetHeight;
     let x = px + 16, y = py + 16;
@@ -363,6 +394,8 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   useEffect(() => {
     const wrap = wrapRef.current, host = chartDivRef.current;
     if (!wrap || !host) return;
+    // 异步回调回来时图可能已被 cleanup 销毁（切了 symbol/interval），对死图 setData 会抛
+    let disposed = false;
     const dark = isDarkRef.current;
     const grid = dark ? '#181b21' : '#f1f1ee', border = dark ? '#23262e' : '#e4e4df', text = dark ? '#878b96' : '#71737b';
 
@@ -457,28 +490,83 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       showTipRef.current(barsRef.current[i], param.point.x, param.point.y);
     });
 
-    readyRef.current = false;
-    klinesFn(symbol, interval, limit).then(raw => {
-      const bars: Bar[] = [], idx = new Map<number, number>();
-      for (const k of raw) {
-        const time = toBarTime(k[0]);
-        idx.set(time, bars.length);
-        bars.push({ time, openMs: k[0], open: +k[1], high: +k[2], low: +k[3], close: +k[4], volume: +k[5], quote: +k[7] });
-      }
-      barsRef.current = bars; idxRef.current = idx;
+    /** 全量重灌蜡烛+量柱+指标。首屏和前插历史共用——LWC 只能 append 不能 prepend，前插只能整条重灌 */
+    const paintAll = (bars: Bar[]) => {
       candle.setData(bars.map(b => ({ time: b.time as UTCTimestamp, open: b.open, high: b.high, low: b.low, close: b.close })));
       vol.setData(bars.map(b => ({ time: b.time as UTCTimestamp, value: b.volume, color: b.close >= b.open ? VOL_UP : VOL_DOWN })));
+      // 指标必须全量重算：MA/BOLL 是滑动窗口老值不变，但 EMA/RSI/MACD 是从最早那根递推的，
+      // 前面接上历史后种子位置变了，接缝往后几百根的值都会跟着变（再远指数衰减到看不见）
       if (indRef.current) { setIndicators(indRef.current, bars); renderLegends(indRef.current, null); }
       if (ovRef.current) {
         setOverlayData(ovRef.current, bars);
-        renderOverlayLegend(ovRef.current, legendRefs(), overlaysRef.current, null, decimals, chartRef.current ? isCompact(chartRef.current) : false);
+        renderOverlayLegend(ovRef.current, legendRefs(), overlaysRef.current, null, decimals, isCompact(chart));
       }
+    };
+
+    // ========== 向左翻历史 ==========
+    // 提示走 DOM 直改：走 setState 会把整个图表子树连带重渲染
+    let hintTimer: ReturnType<typeof setTimeout> | undefined;
+    const showHint = (text: string, autoHideMs = 2000) => {
+      const el = hintRef.current; if (!el) return;
+      clearTimeout(hintTimer);
+      el.textContent = text;
+      el.style.display = 'block';
+      if (autoHideMs) hintTimer = setTimeout(() => { el.style.display = 'none'; }, autoHideMs);
+    };
+    const hideHint = () => { clearTimeout(hintTimer); if (hintRef.current) hintRef.current.style.display = 'none'; };
+
+    const loadMore = () => {
+      if (loadingRef.current || exhaustedRef.current || !readyRef.current || !barsRef.current.length) return;
+      if (barsRef.current.length >= MAX_BARS) { exhaustedRef.current = true; showHint('已达载入上限'); return; }
+
+      loadingRef.current = true;
+      showHint('载入历史…', 0);
+      // endTime = 现有最早那根开盘前 1ms；后端按 endTime 缓存 1h（闭合 bar 不可变），多人翻同一页共享同一个 key
+      klinesFn(symbol, interval, PAGE_SIZE, barsRef.current[0].openMs - 1).then(raw => {
+        if (disposed) return;
+        // 去重：币安边界可能回一根重叠的，LWC 遇到重复时间会抛
+        const oldest = barsRef.current[0].time;
+        const older = raw.map(toBar).filter(b => b.time < oldest);
+        if (!older.length) { exhaustedRef.current = true; showHint('已到最早'); return; }
+
+        const merged = older.concat(barsRef.current);
+        const idx = new Map<number, number>();
+        merged.forEach((b, i) => idx.set(b.time, i));
+        barsRef.current = merged; idxRef.current = idx;
+
+        // 重灌把 logical index 整体右移了 older.length 格，视口不补回去画面就弹走那么多根
+        const before = chart.timeScale().getVisibleLogicalRange();
+        paintAll(merged);
+        if (before) {
+          chart.timeScale().setVisibleLogicalRange({ from: before.from + older.length, to: before.to + older.length });
+        }
+        hideHint();
+      }).catch(() => { if (!disposed) hideHint(); })
+        // disposed 时新一轮 effect 已经重置过锁了，这里别再动，否则会把新请求的锁误清
+        .finally(() => { if (!disposed) loadingRef.current = false; });
+    };
+
+    chart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+      if (r && r.from < LOAD_THRESHOLD) loadMore();
+    });
+
+    readyRef.current = false;
+    loadingRef.current = false;
+    exhaustedRef.current = false;
+    klinesFn(symbol, interval, limit).then(raw => {
+      if (disposed) return;
+      const bars = raw.map(toBar);
+      const idx = new Map<number, number>();
+      bars.forEach((b, i) => idx.set(b.time, i));
+      barsRef.current = bars; idxRef.current = idx;
+      paintAll(bars);
       // 默认只看最近 visibleBars 根（fitContent 会把全量挤进视口，蜡烛小成一条线）；往左拖/缩放仍可看全历史
       if (bars.length > visibleBars) {
         chart.timeScale().setVisibleLogicalRange({ from: bars.length - visibleBars, to: bars.length + 5 });
       } else {
         chart.timeScale().fitContent();
       }
+      exhaustedRef.current = raw.length < limit;   // 首屏就没拉满 = 币安只有这么多，别再往回问
       readyRef.current = true;
     }).catch(() => { /* 历史失败仍可靠实时累积 */ });
 
@@ -493,10 +581,14 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     ro.observe(host);
 
     return () => {
+      // hint 是 JSX 节点、不随图表销毁重建：切 symbol/interval 时若正挂着"载入历史…"，
+      // 在飞的请求会因 disposed 直接 return 而走不到 hideHint，不在这里收就永远留在新图上
+      disposed = true; hideHint();
       ro.disconnect(); chart.remove();
       chartRef.current = null; candleRef.current = null; volRef.current = null;
       indRef.current = null; ovRef.current = null;
       readyRef.current = false; barsRef.current = []; idxRef.current = new Map();
+      loadingRef.current = false; exhaustedRef.current = false;
     };
   }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, legendRefs]);
 
@@ -617,6 +709,12 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
 
       <div ref={wrapRef} className="relative w-full flex-1 min-h-0">
         <div ref={chartDivRef} className="absolute inset-0" />
+        {/* 翻历史提示（载入中 / 到底）。主图 pane 左上角是空的：叠加指标的读数条在图表外的工具条上 */}
+        <div ref={hintRef} style={{
+          position: 'absolute', left: 10, top: 6, display: 'none', pointerEvents: 'none', zIndex: 4,
+          background: 'rgba(13,14,18,.82)', border: '1px solid #23262e', borderRadius: 6, padding: '2px 8px',
+          font: '600 11px/1.5 ui-monospace, Consolas, monospace', color: '#a6abb6',
+        }} />
         <div ref={tipRef} style={{
           position: 'absolute', display: 'none', pointerEvents: 'none', zIndex: 5,
           background: 'rgba(13,14,18,.9)', border: '1px solid #23262e', borderRadius: 8, padding: '8px 11px',

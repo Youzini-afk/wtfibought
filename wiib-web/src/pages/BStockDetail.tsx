@@ -16,7 +16,11 @@ import { ChevronLeft, Wallet, Globe, Landmark } from 'lucide-react';
 import type { BStock, CryptoPosition } from '../types';
 
 const COMMISSION_RATE = 0.001;
-const CHART_TABS = [{ label: '5m', interval: '5m' as const }, { label: '15m', interval: '15m' as const }, { label: '1h', interval: '1h' as const }];
+const CHART_TABS = [
+  { label: '5m', interval: '5m' as const }, { label: '15m', interval: '15m' as const },
+  { label: '1h', interval: '1h' as const }, { label: '4h', interval: '4h' as const },
+  { label: '1d', interval: '1d' as const },
+];
 const PCTS = [0.25, 0.5, 0.75, 1];
 const LEVERAGES = [1, 2, 3, 5, 10];
 const QTY_STEP = 0.0001;   // 数量精度：与 toFixed(4) 同口径，缓动动画的步长
@@ -142,9 +146,10 @@ function BStockDetail({ symbol }: { symbol: string }) {
         {/* 左：图 + 公司信息 */}
         <div className="lg:col-span-2 space-y-4">
           <Card className="overflow-hidden">
-            <div className="px-4 pt-3 flex items-center gap-1.5">
+            {/* 5 个档位保持一行（手机端收窄 padding/字号）；右侧高低价挤不下时整体换行到第二行 */}
+            <div className="px-4 pt-3 flex flex-wrap items-center gap-x-1 gap-y-1 sm:gap-x-1.5">
               {CHART_TABS.map((t, i) => (
-                <Button key={t.label} variant={chartTab === i ? 'secondary' : 'ghost'} size="sm" className="h-7 text-xs px-3" onClick={() => setChartTab(i)}>
+                <Button key={t.label} variant={chartTab === i ? 'secondary' : 'ghost'} size="sm" className="h-7 px-2 text-[11px] sm:px-3 sm:text-xs" onClick={() => setChartTab(i)}>
                   {t.label}
                 </Button>
               ))}

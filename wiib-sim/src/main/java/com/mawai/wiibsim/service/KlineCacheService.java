@@ -24,20 +24,33 @@ public class KlineCacheService {
     private static final Duration LATEST_TTL = Duration.ofSeconds(10);
     /** 历史翻页（带 endTime）：闭合 bar 不可变，1h 纯为控内存 */
     private static final Duration HISTORY_TTL = Duration.ofHours(1);
+    /**
+     * limit 上限。三个 controller 都把用户传的 limit 原样透传币安，不夹住的话
+     * limit=100000 会让请求权重从 2 跳到 10，返回体还会被塞进 Redis 挂一小时。
+     * 币安上限现货 1000、合约 1500，前端最多要 500 —— 统一收到 1000。
+     */
+    private static final int MAX_LIMIT = 1000;
 
     private final BinanceRestClient binanceRestClient;
     private final StringRedisTemplate redisTemplate;
 
     /** 现货K线（crypto 现货 / bStock 共用） */
     public String spotKlines(String symbol, String interval, int limit, Long endTime) {
-        return cached("spot", symbol, interval, limit, endTime,
-                () -> binanceRestClient.getKlinesLight(symbol, interval, limit, endTime));
+        // 先夹再建闭包：loader 捕获的是这个变量，夹在 cached() 里面对回源无效
+        int n = clamp(limit);
+        return cached("spot", symbol, interval, n, endTime,
+                () -> binanceRestClient.getKlinesLight(symbol, interval, n, endTime));
     }
 
     /** 合约K线 */
     public String futuresKlines(String symbol, String interval, int limit, Long endTime) {
-        return cached("fut", symbol, interval, limit, endTime,
-                () -> binanceRestClient.getFuturesKlinesLight(symbol, interval, limit, endTime));
+        int n = clamp(limit);
+        return cached("fut", symbol, interval, n, endTime,
+                () -> binanceRestClient.getFuturesKlinesLight(symbol, interval, n, endTime));
+    }
+
+    private static int clamp(int limit) {
+        return Math.min(Math.max(limit, 1), MAX_LIMIT);
     }
 
     private String cached(String market, String symbol, String interval, int limit, Long endTime, Supplier<String> loader) {
