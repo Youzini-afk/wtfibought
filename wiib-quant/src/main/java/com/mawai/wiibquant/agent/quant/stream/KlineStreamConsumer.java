@@ -27,7 +27,7 @@ import java.time.Duration;
 import java.util.Map;
 
 /**
- * K线收盘 Stream 消费者（quant 侧），消费 {@link KlineStreamCache#CLOSED_STREAM_KEY}。
+ * K线收盘 Stream 消费者（quant 侧），消费 KlineStreamCache的KLINE_CLOSED_STREAM
  *
  * <p>feed 把收盘写进 Stream，本消费者重建 {@link KlineBar} 并 republish 本地 {@link KlineClosedEvent}，
  * 驱动 quant 域的预测/策略/MacroContext 三个监听者。这是 quant 跨进程获取实时收盘的<b>唯一</b>入口——
