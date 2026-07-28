@@ -156,6 +156,12 @@ public class FuturesController {
         return Result.ok(forceOrderService.getPage(symbol, safePageNum, safePageSize));
     }
 
+    /** 首页爆仓卡：只取最新一条，绕开分页那条 COUNT(*) 全表扫。无记录返回 null */
+    @GetMapping("/force-orders/latest")
+    public Result<ForceOrder> forceOrderLatest() {
+        return Result.ok(forceOrderService.getLatest());
+    }
+
     /** 合约K线（代理 Binance，Redis短TTL缓存） */
     @GetMapping("/klines")
     public String klines(

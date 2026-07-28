@@ -46,7 +46,8 @@ spring:
       minimum-idle: 2
       connection-timeout: 30000
       idle-timeout: 300000
-      max-lifetime: 550000
+      # 同 wiib-sim：550s 太短会让 PG 反复新建 backend 重读 pg_catalog，取 Hikari 默认 30 分钟
+      max-lifetime: 1800000
   # 行情总线：消费 feed 写入的 kline/markprice Stream + depth/orderflow KV
   data:
     redis:

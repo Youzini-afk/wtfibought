@@ -53,4 +53,17 @@ public class ForceOrderService {
                 .eq(symbol != null && !symbol.isBlank(), ForceOrder::getSymbol, symbol)
                 .orderByDesc(ForceOrder::getTradeTime));
     }
+
+    /**
+     * 最新一条强平记录，无记录返回 null。首页卡片专用。
+     *
+     * <p>不复用 getPage(null,1,1)：不带 symbol 时它的 WHERE 是空的，selectPage 会额外发一条
+     * COUNT(*) 全表扫，而卡片只要一行、根本不用 total。配合 idx_fo_time(trade_time DESC)
+     * 索引首行直取，代价与表大小无关。</p>
+     */
+    public ForceOrder getLatest() {
+        return forceOrderMapper.selectOne(new LambdaQueryWrapper<ForceOrder>()
+                .orderByDesc(ForceOrder::getTradeTime)
+                .last("LIMIT 1"));
+    }
 }

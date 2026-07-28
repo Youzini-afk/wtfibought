@@ -1,6 +1,7 @@
 package com.mawai.wiibcommon.market;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Range;
 import org.springframework.data.redis.connection.stream.MapRecord;
 import org.springframework.data.redis.connection.stream.StreamRecords;
@@ -74,6 +75,34 @@ class OrderFlowAggregatorTest {
         assertThat(m).isNotNull();
         assertThat(m.tradeCount()).isEqualTo(1);
         assertThat(m.totalVolumeUsdt()).isEqualTo(100.0);
+    }
+
+    /** 窗口裁剪必须发生在 Redis 服务端：起点是 cutoff 往前 5s，终点开放，否则又变成全量拉取 */
+    @Test
+    @SuppressWarnings("unchecked")
+    void queriesOnlyWindowRangeOnServerSide() {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        StreamOperations<String, Object, Object> streamOps = mock(StreamOperations.class);
+        when(redisTemplate.opsForStream()).thenReturn(streamOps);
+        when(streamOps.range(eq("market:orderflow:BTCUSDT"), any(Range.class))).thenReturn(List.of());
+        OrderFlowAggregator agg = new OrderFlowAggregator(redisTemplate);
+
+        long before = System.currentTimeMillis();
+        agg.getMetrics("BTCUSDT", 180);
+        long after = System.currentTimeMillis();
+
+        ArgumentCaptor<Range<String>> captor = ArgumentCaptor.forClass(Range.class);
+        verify(streamOps).range(eq("market:orderflow:BTCUSDT"), captor.capture());
+        Range<String> range = captor.getValue();
+
+        // 终点必须开放（等价 XRANGE 的 +），封死就取不到最新成交
+        assertThat(range.getUpperBound().isBounded()).isFalse();
+
+        // 起点 = (now - 180s - 5s)-0
+        String lower = range.getLowerBound().getValue().orElseThrow();
+        assertThat(lower).endsWith("-0");
+        long lowerMs = Long.parseLong(lower.substring(0, lower.indexOf('-')));
+        assertThat(lowerMs).isBetween(before - 185_000, after - 185_000);
     }
 
     private static MapRecord<String, Object, Object> mapRecord(String symbol, long ts, double p, double q, String bm) {

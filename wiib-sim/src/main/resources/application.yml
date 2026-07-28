@@ -26,7 +26,10 @@ spring:
       minimum-idle: 3
       connection-timeout: 30000
       idle-timeout: 300000
-      max-lifetime: 550000
+      # 连接寿命。原来 550s 太短：连接一换，PG 那边就是新建 backend 进程，
+      # 得重读一遍 pg_catalog 冷启动 relcache——系统目录表的读量因此排到了全库第一。
+      # 容器内网直连 PG，中间没有会掐空闲连接的设备，取 Hikari 默认 30 分钟。
+      max-lifetime: 1800000
   data:
     redis:
       host: ${REDIS_HOST:localhost}

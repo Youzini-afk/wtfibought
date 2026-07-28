@@ -16,8 +16,8 @@ export function ForceOrdersCard() {
 
   useEffect(() => {
     let cancelled = false;
-    const load = () => futuresApi.forceOrders(undefined, 1, 1)
-      .then(res => { if (!cancelled) setLatest(res.records[0] ?? null); })
+    const load = () => futuresApi.forceOrderLatest()
+      .then(res => { if (!cancelled) setLatest(res ?? null); })
       .catch(() => { if (!cancelled) setLatest(l => l ?? null); });
     load();
     const timer = window.setInterval(load, POLL_MS);

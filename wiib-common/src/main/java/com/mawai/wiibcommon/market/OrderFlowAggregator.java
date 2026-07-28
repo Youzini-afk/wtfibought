@@ -28,6 +28,8 @@ public class OrderFlowAggregator {
     private static final String KEY_PREFIX = "market:orderflow:";
     private static final double LARGE_TRADE_USDT = 50_000; // BTC 大单阈值
     private static final long TRIM_MAXLEN = 30_000L;       // 兜底防无限增长，覆盖远超窗口(180s)的量
+    /** 服务端粗筛的时钟余量，见 {@link #getMetrics} 注释 */
+    private static final long CLOCK_SKEW_MS = 5_000L;
 
     private final StringRedisTemplate redisTemplate;
 
@@ -62,16 +64,25 @@ public class OrderFlowAggregator {
     }
 
     /**
-     * 获取指定窗口（秒）内的 order flow 指标。读全部后按交易所 ts 精确过滤窗口（不依赖进程/Redis 时钟同步）。
-     * 返回 null 表示无数据（WS 未连接或刚启动）。
+     * 获取指定窗口（秒）内的 order flow 指标。返回 null 表示无数据（WS 未连接或刚启动）。
+     *
+     * <p>两层过滤：先按 Stream ID 让 Redis 在服务端切好只传窗口那段，再按交易所 ts 精确定窗口。
+     * Stream 自动 ID 的高位就是写入时的毫秒时间戳，所以能直接当时间游标用。不这么切的话，
+     * 整条 Stream 存着 {@link #TRIM_MAXLEN} 条（约 50 分钟），要 180 秒的量得全拉回来丢掉九成，
+     * 白白占满 Redis 单线程 20ms。</p>
+     *
+     * <p>起点再往前退 {@link #CLOCK_SKEW_MS}：cutoff 是本进程时钟，ID 是 Redis 服务器时钟，
+     * 两者不同步时正好会切掉窗口边缘。粗筛留余量，宁可多传一点也不能漏；精确窗口交给下面的
+     * ts 过滤，"不依赖时钟同步"的原语义不变。</p>
      */
     public Metrics getMetrics(String symbol, int windowSeconds) {
         try {
-            List<MapRecord<String, Object, Object>> records =
-                    redisTemplate.opsForStream().range(KEY_PREFIX + symbol, Range.unbounded());
+            long cutoff = System.currentTimeMillis() - windowSeconds * 1000L;
+            String startId = (cutoff - CLOCK_SKEW_MS) + "-0";
+            List<MapRecord<String, Object, Object>> records = redisTemplate.opsForStream()
+                    .range(KEY_PREFIX + symbol, Range.rightUnbounded(Range.Bound.inclusive(startId)));
             if (records == null || records.isEmpty()) return null;
 
-            long cutoff = System.currentTimeMillis() - windowSeconds * 1000L;
             double buyVol = 0, sellVol = 0, largeBuyVol = 0, largeSellVol = 0;
             int count = 0;
             for (MapRecord<String, Object, Object> r : records) {
