@@ -14,7 +14,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.lang.NonNull;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
@@ -37,8 +36,9 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
         SaTokenConfig config = new SaTokenConfig();
         config.setTokenName("satoken");
         config.setActiveTimeout(60 * 60 * 24 * 7); // 7天无操作过期
-        config.setIsConcurrent(false);
-        config.setIsShare(true);
+        config.setIsConcurrent(true);   // 允许同账号多端同时在线，不再互相顶下线
+        config.setIsShare(false);       // 每次登录签发独立token，一端退出不影响另一端
+        config.setMaxLoginCount(2);     // 最多两端在线，第三端登录顶掉最早那个（仅 isConcurrent+非share 时生效）
         config.setTokenStyle("uuid");
         config.setIsLog(true);
         config.setIsReadCookie(false);
@@ -63,7 +63,7 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
 
             @Override
             public void doReplaced(String loginType, Object loginId, String tokenValue) {
-                // 被顶下线时删除旧token
+                // 双端并发后只剩一种触发场景：登第三端，最早那端被顶掉，清掉残留token
                 try {
                     stringRedisTemplate.delete("satoken:login:token:" + tokenValue);
                 } catch (Exception e) {
@@ -118,14 +118,14 @@ public abstract class BaseSaTokenConfig implements WebMvcConfigurer {
     protected abstract List<String> getExcludePaths();
 
     @Override
-    public void addInterceptors(@NonNull InterceptorRegistry registry) {
+    public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new SaInterceptor(handle ->
                 SaRouter.match("/**")
                         .notMatch(getExcludePaths())
                         .check(r -> StpUtil.checkLogin())
         ) {
             @Override
-            public boolean preHandle(@NonNull HttpServletRequest request, @NonNull HttpServletResponse response, @NonNull Object handler) throws Exception {
+            public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
                 if (request.getDispatcherType() == DispatcherType.ASYNC) {
                     // 跳过流式返回的鉴权，只需要鉴权第一次即可
                     return true;
