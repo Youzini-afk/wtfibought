@@ -8,6 +8,7 @@ import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisReport;
 import com.mawai.wiibquant.agent.behavior.BehaviorAnalysisService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibquant.agent.analysis.ScorecardService;
+import com.mawai.wiibquant.agent.research.ForecastHorizon;
 import com.mawai.wiibquant.agent.toolkit.NewsCache;
 import com.mawai.wiibcommon.entity.QuantDeepAnalysis;
 import com.mawai.wiibcommon.entity.QuantSnapshot;
@@ -84,33 +85,36 @@ public class AiAgentController {
         return analysis != null ? Result.ok(analysis) : Result.fail("暂无深研判数据");
     }
 
-    /** 时间线曲线点：三腿预测 + 脆弱度 + H6 已验证 realized（到期才有，尾部 6h 天然缺）。 */
+    /** 时间线曲线点：三腿预测 + 脆弱度 + 三腿已验证 realized（各腿到期才有，尾部按腿长天然缺）。 */
     public record SnapshotSeriesPoint(long closeTime, BigDecimal lastPrice,
                                       Double h6SigmaBps, Double h12SigmaBps, Double h24SigmaBps,
                                       String volState, Integer fragilityScore, String fragilityLevel,
-                                      Integer realizedAbsBps) {
+                                      Integer realizedH6AbsBps, Integer realizedH12AbsBps, Integer realizedH24AbsBps) {
     }
 
     @GetMapping("/quant/snapshots/series")
-    @Operation(summary = "快照时间线序列（vol三腿+脆弱度+H6 realized，工作台画曲线）")
+    @Operation(summary = "快照时间线序列（vol三腿+脆弱度+三腿realized，工作台画阶梯预测图）")
     public Result<List<SnapshotSeriesPoint>> snapshotSeries(
             @Symbol String symbol,
             @RequestParam(defaultValue = "24") int hours) {
         StpUtil.checkLogin();
-        long from = System.currentTimeMillis() - Math.clamp(hours, 1, 168) * 3_600_000L;
+        // 前端按"兑现时刻"画线（每点右移自己那条腿的长度），故多取最长腿 24h 的历史快照垫底，
+        // 否则右移后图左端会空出一截没线
+        long from = System.currentTimeMillis() - Math.clamp(hours, 1, 168) * 3_600_000L
+                - ForecastHorizon.H24.millis();
         List<QuantSnapshot> snaps = snapshotMapper.selectList(new LambdaQueryWrapper<QuantSnapshot>()
                 .eq(QuantSnapshot::getSymbol, symbol)
                 .ge(QuantSnapshot::getCloseTime, from)
                 .orderByAsc(QuantSnapshot::getCloseTime));
-        // 预测 vs 实际同图对照：realized 按 snapshotId 挂到各点
-        Map<Long, Integer> realizedBySnapshot = new HashMap<>();
+        // 预测 vs 实际同图对照：realized 按 snapshotId + horizon 双键挂到各点，三腿各自配对
+        Map<Long, Map<String, Integer>> realizedBySnapshot = new HashMap<>();
         volVerificationMapper.selectList(new LambdaQueryWrapper<QuantVolVerification>()
                         .eq(QuantVolVerification::getSymbol, symbol)
-                        .eq(QuantVolVerification::getHorizon, "H6")
                         .ge(QuantVolVerification::getCloseTime, from))
                 .forEach(v -> {
                     if (v.getSnapshotId() != null && v.getRealizedReturnBps() != null) {
-                        realizedBySnapshot.put(v.getSnapshotId(), Math.abs(v.getRealizedReturnBps()));
+                        realizedBySnapshot.computeIfAbsent(v.getSnapshotId(), k -> new HashMap<>())
+                                .put(v.getHorizon(), Math.abs(v.getRealizedReturnBps()));
                     }
                 });
         List<SnapshotSeriesPoint> points = snaps.stream().map(s -> {
@@ -118,6 +122,7 @@ public class AiAgentController {
             var h6 = legs != null ? legs.getJSONObject("H6") : null;
             var h12 = legs != null ? legs.getJSONObject("H12") : null;
             var h24 = legs != null ? legs.getJSONObject("H24") : null;
+            Map<String, Integer> realized = realizedBySnapshot.getOrDefault(s.getId(), Map.of());
             return new SnapshotSeriesPoint(
                     s.getCloseTime(), s.getLastPrice(),
                     h6 != null ? h6.getDouble("sigmaBps") : null,
@@ -125,7 +130,9 @@ public class AiAgentController {
                     h24 != null ? h24.getDouble("sigmaBps") : null,
                     h6 != null ? h6.getString("volState") : null,
                     s.getFragilityScore(), s.getFragilityLevel(),
-                    realizedBySnapshot.get(s.getId()));
+                    realized.get(ForecastHorizon.H6.name()),
+                    realized.get(ForecastHorizon.H12.name()),
+                    realized.get(ForecastHorizon.H24.name()));
         }).toList();
         return Result.ok(points);
     }
