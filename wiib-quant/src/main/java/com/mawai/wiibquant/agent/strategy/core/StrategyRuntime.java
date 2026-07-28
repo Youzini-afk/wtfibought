@@ -67,9 +67,24 @@ public class StrategyRuntime {
         Thread.startVirtualThread(() -> evaluate(symbol, event.bar()));
     }
 
+    /**
+     * 取/建 symbol 视图。seed 是"REST 回填 + 查库 12000 根"的重操作，绝不能放进
+     * computeIfAbsent 的 mapping 里：mapping 在 CHM 桶锁(synchronized)内执行，JDK21 虚拟线程
+     * 在 synchronized 里 park 会钉死 carrier——重启后首根 K 线收盘多 symbol 并发冷 seed，
+     * 曾把 3 个 carrier(=cpus)全部钉死，整个进程假死（2026-07-28 线上事故）。
+     * 锁外 seed + putIfAbsent：并发 miss 最多白 seed 一次，留先放进去的那份。
+     */
+    private WindowedMarketView viewFor(String symbol) {
+        WindowedMarketView view = views.get(symbol);
+        if (view != null) return view;
+        WindowedMarketView fresh = seedView(symbol);
+        WindowedMarketView prev = views.putIfAbsent(symbol, fresh);
+        return prev != null ? prev : fresh;
+    }
+
     private void evaluate(String symbol, KlineBar eventBar) {
         try {
-            WindowedMarketView view = views.computeIfAbsent(symbol, this::seedView);
+            WindowedMarketView view = viewFor(symbol);
             synchronized (view) {
                 // 事件已携带收盘 bar（KlineStreamConsumer republish 时重建），不再回查进程内缓存
                 if (eventBar != null) {
@@ -112,7 +127,7 @@ public class StrategyRuntime {
             if (!ids.contains(strategy.id().toUpperCase(Locale.ROOT))) continue;
             for (String symbol : strategy.symbols()) {
                 try {
-                    WindowedMarketView view = views.computeIfAbsent(symbol, this::seedView);
+                    WindowedMarketView view = viewFor(symbol);
                     synchronized (view) {
                         StrategySignalState state = strategy.signalState(symbol, view);
                         if (state != null) out.add(state);
