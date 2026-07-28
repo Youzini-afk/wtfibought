@@ -156,6 +156,7 @@ public class ChatAgentFactory {
     private final QuantForecastToolkit quantForecastToolkit;
     private final NewsToolkit newsToolkit;
     private final DeepAnalysisToolkit deepAnalysisToolkit;
+    private final ApprovalRegistry approvalRegistry;
     private final BaseCheckpointSaver checkpointSaver;
     /** 与 saver 同一个实例：序列化格式不一致会导致 checkpoint 写得进读不出 */
     private final StateSerializer<MessagesState<Message>> stateSerializer;
@@ -180,6 +181,7 @@ public class ChatAgentFactory {
                             QuantForecastToolkit quantForecastToolkit,
                             NewsToolkit newsToolkit,
                             DeepAnalysisToolkit deepAnalysisToolkit,
+                            ApprovalRegistry approvalRegistry,
                             BaseCheckpointSaver checkpointSaver,
                             StateSerializer<MessagesState<Message>> stateSerializer,
                             @Value("${quant.workbench.run-model-call-limit:12}") int runModelCallLimit,
@@ -191,6 +193,7 @@ public class ChatAgentFactory {
         this.quantForecastToolkit = quantForecastToolkit;
         this.newsToolkit = newsToolkit;
         this.deepAnalysisToolkit = deepAnalysisToolkit;
+        this.approvalRegistry = approvalRegistry;
         this.checkpointSaver = checkpointSaver;
         this.stateSerializer = stateSerializer;
         this.runModelCallLimit = runModelCallLimit;
@@ -260,7 +263,7 @@ public class ChatAgentFactory {
 
         // 序列化器必须显式给：默认重载装的是 Java 对象流，存 checkpoint 时 clone 不动 Spring AI Message
         StateGraph<MessagesState<Message>> graph = new StateGraph<>(MessagesState.SCHEMA, stateSerializer);
-        graph.addNode(NODE_ROUTER, node_async(state -> route(state, light)));
+        graph.addNode(NODE_ROUTER, node_async((state, config) -> route(state, light, config)));
         graph.addNode(NODE_DISPATCH, node_async(state -> Map.of()));
         // 只有 news 需要预取（工具无参、必调）；market/quant 的工具要按问题选 symbol，交给模型
         experts.forEach((name, expert) -> addExpertNode(graph, name, expert,
@@ -336,8 +339,9 @@ public class ChatAgentFactory {
                         3. 被问涨跌方向时不要生硬拒绝：本系统验证过的能力是波动与风险预测（方向预测无验证优势），
                            给"双向情景 + 当前风险画像 + 仓位/止损等风控参考"，并说明方向确定性低的原因
                         4. 信号矛盾时大方说"看不清"，这是专业而不是失职
-                        5. 用户明确要"深度研判/全面分析"时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
-                           返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）
+                        5. 仅当用户明确说出"深度研判/全面分析"这类字眼时 → 调 run_deep_analysis 工具（昂贵，需用户确认：
+                           返回 PENDING_APPROVAL 时告知用户确认卡片已弹出，等确认后你会被再次唤起执行）；
+                           "怎么看走势"这类普通提问不要调它、也不要主动推销，直接按专家数据作答
 
                         输出精炼中文。""".formatted(supplementTag, mergedTag))
                 .addCallModelHook(wrapBefore(new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages)))
@@ -397,7 +401,14 @@ public class ChatAgentFactory {
      * 路由是控制流不是对话内容。之前把它当消息塞进历史，直接导致三件事：
      * 泄漏给用户看、被模型照抄着反复派发、解析 {@code ["a"]["a"]} 失败。
      */
-    Map<String, Object> route(MessagesState<Message> state, ChatModel model) {
+    Map<String, Object> route(MessagesState<Message> state, ChatModel model, RunnableConfig config) {
+        // 深研判确认后的续跑轮：存在未消费授权说明这一轮的使命就是让 summarizer 重调工具。
+        // 专家数据上一轮刚取过、深研判也不消费它们，重派一遍纯烧钱——代码直通，不指望模型自觉 FINISH
+        String sessionId = config.threadId().orElseGet(approvalRegistry::activeSession);
+        if (approvalRegistry.hasApproval(sessionId)) {
+            log.info("[Workbench] 存在未消费的深研判授权，跳过派发直通汇总 session={}", sessionId);
+            return Map.of(NEXT_KEY, FINISH);
+        }
         int round = state.<Number>value(DISPATCH_ROUND_KEY).map(Number::intValue).orElse(0);
         if (round >= MAX_DISPATCH_ROUNDS) {
             log.warn("[Workbench] 派发轮次达上限 {}，转汇总", MAX_DISPATCH_ROUNDS);

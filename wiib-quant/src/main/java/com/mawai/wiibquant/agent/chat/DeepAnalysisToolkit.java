@@ -36,6 +36,8 @@ public class DeepAnalysisToolkit {
 
     @Tool(name = "run_deep_analysis", description = """
             Run a full deep market analysis (Bull vs Bear adversarial debate + Judge verdict) for a symbol.
+            ONLY call when the user EXPLICITLY asks with words like "深度研判"/"全面分析"; for ordinary
+            trend/outlook questions answer from expert data directly - never call this uninvited.
             EXPENSIVE: costs 3 deep-model LLM calls. Requires user approval per session.
             If the result status is PENDING_APPROVAL, tell the user approval is needed and why - the UI
             will show a confirmation card; after they approve, call this tool again to execute.

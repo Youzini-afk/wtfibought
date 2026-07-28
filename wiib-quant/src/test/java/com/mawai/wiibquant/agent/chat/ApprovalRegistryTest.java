@@ -24,6 +24,19 @@ class ApprovalRegistryTest {
         assertThat(registry.consumeApproval("s1")).isFalse(); // 一次授权只放行一次
     }
 
+    /** hasApproval 是路由侧的"只探不消费"：探完授权还在，工具闸门照常消费 */
+    @Test
+    void peekDoesNotConsumeApproval() {
+        assertThat(registry.hasApproval("s1")).isFalse(); // 未授权时探不到
+
+        registry.approve("s1");
+
+        assertThat(registry.hasApproval("s1")).isTrue();
+        assertThat(registry.hasApproval("s1")).isTrue();      // 反复探不消费
+        assertThat(registry.consumeApproval("s1")).isTrue();  // 消费仍归工具闸门
+        assertThat(registry.hasApproval("s1")).isFalse();     // 消费后探不到
+    }
+
     @Test
     void rejectClearsApprovalAndPending() {
         registry.approve("s1");

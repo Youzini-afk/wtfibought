@@ -55,6 +55,12 @@ public class ApprovalRegistry {
         pending.remove(sessionId);
     }
 
+    /** 路由侧：只探不消费。续跑轮（用户刚确认贵操作）据此直通汇总不再派专家；消费仍归工具闸门。 */
+    public boolean hasApproval(String sessionId) {
+        Long until = approvedUntil.get(sessionId);
+        return until != null && until >= System.currentTimeMillis();
+    }
+
     /** 工具侧：检查并消费授权（一次授权只放行一次执行，防止后续误触发）。 */
     public boolean consumeApproval(String sessionId) {
         Long until = approvedUntil.remove(sessionId);

@@ -7,6 +7,7 @@ import com.mawai.wiibquant.agent.toolkit.NewsToolkit;
 import com.mawai.wiibquant.agent.toolkit.QuantForecastToolkit;
 import org.bsc.langgraph4j.CompiledGraph;
 import org.bsc.langgraph4j.GraphRepresentation;
+import org.bsc.langgraph4j.RunnableConfig;
 import org.bsc.langgraph4j.StateGraph;
 import org.bsc.langgraph4j.checkpoint.BaseCheckpointSaver;
 import org.bsc.langgraph4j.prebuilt.MessagesState;
@@ -38,6 +39,7 @@ import static org.mockito.Mockito.when;
 class ChatAgentFactoryTest {
 
     private final AiAgentRuntimeManager runtimeManager = mock(AiAgentRuntimeManager.class);
+    private final ApprovalRegistry approvalRegistry = new ApprovalRegistry();
 
     private ChatAgentFactory factory() {
         ChatModel model = mock(ChatModel.class);
@@ -46,8 +48,12 @@ class ChatAgentFactoryTest {
         when(runtimeManager.current()).thenReturn(new AiAgentRuntime(model, model, model, model));
         return new ChatAgentFactory(runtimeManager,
                 mock(MarketToolkit.class), mock(QuantForecastToolkit.class), mock(NewsToolkit.class),
-                mock(DeepAnalysisToolkit.class), mock(BaseCheckpointSaver.class),
+                mock(DeepAnalysisToolkit.class), approvalRegistry, mock(BaseCheckpointSaver.class),
                 new SpringAIJacksonStateSerializer<>(MessagesState::new), 12, 32000, 6, "X");
+    }
+
+    private static RunnableConfig runConfig() {
+        return RunnableConfig.builder().threadId("wb-1-t").build();
     }
 
     /** 路由用的 tool_call：模型按 route 工具的 schema 结构化地给出去向 */
@@ -135,7 +141,7 @@ class ChatAgentFactoryTest {
         MessagesState<Message> state = new MessagesState<>(
                 Map.of("messages", List.of(new UserMessage("帮我查最新快讯"))));
 
-        Map<String, Object> update = factory().route(state, model);
+        Map<String, Object> update = factory().route(state, model, runConfig());
 
         assertThat(update)
                 .containsEntry(ChatAgentFactory.NEXT_KEY, "dispatch")
@@ -155,7 +161,7 @@ class ChatAgentFactoryTest {
                 "messages", List.of(new UserMessage("帮我查最新快讯")),
                 ChatAgentFactory.DISPATCHED_KEY, List.of("news_agent")));
 
-        assertThat(factory().route(state, model))
+        assertThat(factory().route(state, model, runConfig()))
                 .containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
     }
 
@@ -168,7 +174,7 @@ class ChatAgentFactoryTest {
                 "messages", List.of(new UserMessage("结合行情和新闻看看")),
                 ChatAgentFactory.DISPATCHED_KEY, List.of("news_agent")));
 
-        Map<String, Object> update = factory().route(state, model);
+        Map<String, Object> update = factory().route(state, model, runConfig());
 
         // 只派没派过的那个，但累积名单要含全部
         assertThat(update).containsEntry(ChatAgentFactory.DISPATCH_KEY, List.of("market_agent"));
@@ -184,8 +190,24 @@ class ChatAgentFactoryTest {
                 Map.of("messages", List.of(new UserMessage("帮我查最新快讯"))));
 
         // 路由失败不该把整轮对话拖死，退化成直接作答
-        assertThat(factory().route(state, model))
+        assertThat(factory().route(state, model, runConfig()))
                 .containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
+    }
+
+    /**
+     * 深研判确认后的续跑轮：存在未消费授权 → 直通汇总让 summarizer 重调工具。
+     * 专家数据上一轮刚取过且深研判不消费它们，重派一遍纯浪费（真跑实证过会重派）。
+     */
+    @Test
+    void unconsumedApprovalSkipsDispatchStraightToSummarizer() {
+        ChatModel model = mock(ChatModel.class);
+        approvalRegistry.approve("wb-1-t"); // 与 runConfig() 的 threadId 同一会话
+
+        Map<String, Object> update = factory().route(new MessagesState<>(
+                Map.of("messages", List.of(new UserMessage("已确认，请继续执行深度研判")))), model, runConfig());
+
+        assertThat(update).containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
+        verify(model, never()).call(any(Prompt.class)); // 直通不烧路由调用
     }
 
     /**
@@ -199,7 +221,7 @@ class ChatAgentFactoryTest {
                 "messages", List.of(new UserMessage("帮我查最新快讯")),
                 ChatAgentFactory.DISPATCH_ROUND_KEY, ChatAgentFactory.MAX_DISPATCH_ROUNDS));
 
-        Map<String, Object> update = factory().route(state, model);
+        Map<String, Object> update = factory().route(state, model, runConfig());
 
         assertThat(update).containsEntry(ChatAgentFactory.NEXT_KEY, ChatAgentFactory.FINISH);
         verify(model, never()).call(any(Prompt.class)); // 到顶了就别再烧一次调用
