@@ -15,7 +15,7 @@ const PAGE_SIZE = 20;
  * 列宽模板。表头与数据行共用一份，各写各的迟早错位（同 PositionHistoryList）。
  * 窄屏退化成带微标签的两列格子，表头整条隐藏。
  */
-const GRID = 'grid grid-cols-2 gap-x-3 gap-y-2 md:gap-y-0 md:items-center md:grid-cols-[2.25rem_minmax(7rem,1.4fr)_minmax(0,1.1fr)_minmax(0,.85fr)_minmax(0,1.05fr)_minmax(0,.8fr)_minmax(0,1.1fr)_1rem]';
+const GRID = 'grid grid-cols-2 gap-x-3 gap-y-2 md:gap-y-0 md:items-center md:grid-cols-[2.25rem_minmax(7rem,1.4fr)_minmax(0,1.1fr)_minmax(0,.85fr)_minmax(0,1.05fr)_minmax(0,1.1fr)_1rem]';
 
 type Numeric = number | null | undefined;
 
@@ -75,13 +75,6 @@ function TradingProfit({ value, className }: { value: Numeric; className?: strin
   );
 }
 
-/** 券只有正数才有意义，没有就留个静默的破折号，不画成绿色的"赚" */
-function Buff({ value, className }: { value: Numeric; className?: string }) {
-  const v = num(value);
-  if (v <= 0) return <span className={cn('num text-muted-foreground/40', className)}>—</span>;
-  return <span className={cn('num text-warning', className)}>+{fmt(v)}</span>;
-}
-
 /** 窄屏每格自带微标签（表头看不见了），宽屏交给表头 */
 function Cell({ label, className, children }: { label: string; className?: string; children: React.ReactNode }) {
   return (
@@ -97,21 +90,18 @@ const PLACE_LABEL = ['冠军', '亚军', '季军'];
 const SORT_TABS: { key: RankingSort; label: string; hint: string }[] = [
   { key: 'ASSETS', label: '总资产', hint: '账上所有钱：现金 + 持仓市值 − 借款' },
   { key: 'TRADING_PROFIT', label: '交易盈利', hint: '只看靠交易赚到的钱：合约 + 现货 + 预测，不含优惠券和游戏' },
-  { key: 'BUFF', label: '优惠券', hint: '用优惠券累计省下的钱' },
 ];
 
 const METRIC_LABEL: Record<RankingSort, string> = {
   ASSETS: '总资产',
   TRADING_PROFIT: '交易盈利',
-  BUFF: '优惠券省下',
 };
 
-const ALL_METRICS: RankingSort[] = ['ASSETS', 'TRADING_PROFIT', 'BUFF'];
+const ALL_METRICS: RankingSort[] = ['ASSETS', 'TRADING_PROFIT'];
 
 /** 按维度取值渲染。前三卡的主数字要跟着当前排序走，否则「按交易盈利排的榜、卡上最大的数是总资产」会看懵 */
 function MetricValue({ metric, item, className }: { metric: RankingSort; item: RankingItem; className?: string }) {
   if (metric === 'TRADING_PROFIT') return <TradingProfit value={item.tradingProfit} className={className} />;
-  if (metric === 'BUFF') return <Buff value={item.buffProfit} className={className} />;
   return (
     <span className={cn('num', className)}>
       <span className="sm:hidden">{fmtCompact(item.totalAssets)}</span>
@@ -233,10 +223,6 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
 
       <Cell label="交易盈利" className={cn('md:text-right', sort === 'TRADING_PROFIT' && 'text-primary')}>
         <TradingProfit value={item.tradingProfit} className="text-[12px] font-semibold" />
-      </Cell>
-
-      <Cell label="优惠券" className={cn('md:text-right', sort === 'BUFF' && 'text-primary')}>
-        <Buff value={item.buffProfit} className="text-[12px]" />
       </Cell>
 
       <Cell label="余额 / 游戏" className="md:text-right">
@@ -372,8 +358,6 @@ export function Ranking() {
                   <span className="microlabel font-bold text-right">收益率</span>
                   <span className={cn('microlabel font-bold text-right', sort === 'TRADING_PROFIT' && 'text-primary')}
                     title="合约 + 现货 + 预测的净盈亏，不含优惠券">交易盈利</span>
-                  <span className={cn('microlabel font-bold text-right', sort === 'BUFF' && 'text-primary')}
-                    title="优惠券累计省下">优惠券</span>
                   <span className="microlabel font-bold text-right" title="账户现金构成，不含持仓市值">余额 / 游戏</span>
                   <span />
                 </div>

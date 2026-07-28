@@ -223,7 +223,7 @@ export function UserProfile() {
                   </Badge>
                 )}
               </div>
-              <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2">
+              <div className="mt-2 grid grid-cols-3 gap-x-6 gap-y-2">
                 <div>
                   <div className="microlabel">总资产</div>
                   <div className="num text-base font-bold">{fmtNum(s.totalAssets)}</div>
@@ -237,10 +237,6 @@ export function UserProfile() {
                 <div>
                   <div className="microlabel" title="合约 + 现货 + 预测的净盈亏，不含优惠券">交易盈利</div>
                   <ProfitText value={s.tradingProfit} className="text-base font-bold" />
-                </div>
-                <div>
-                  <div className="microlabel">优惠券省下</div>
-                  <div className="num text-base font-bold text-amber-500">{fmtNum(s.buffProfit)}</div>
                 </div>
               </div>
             </div>

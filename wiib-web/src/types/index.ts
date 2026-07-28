@@ -31,7 +31,7 @@ export interface PageResult<T> {
  * 榜单排序维度。没有「收益率」这一档——初始资金全站是同一个常数，
  * 收益率跟总资产是同一个序，加进来就是同一张榜换个名字。
  */
-export type RankingSort = 'ASSETS' | 'TRADING_PROFIT' | 'BUFF';
+export type RankingSort = 'ASSETS' | 'TRADING_PROFIT';
 
 export interface RankingItem {
   rank: number;
@@ -42,7 +42,6 @@ export interface RankingItem {
   profitPct: number;
   /** 交易盈利 = 合约 + 现货 + 预测的净盈亏，不含优惠券省下的钱 */
   tradingProfit: number;
-  buffProfit: number;
   /** 余额钱包（含冻结）与游戏钱包只是总资产的现金部分，相加 ≠ totalAssets */
   balanceWallet: number;
   gameWallet: number;

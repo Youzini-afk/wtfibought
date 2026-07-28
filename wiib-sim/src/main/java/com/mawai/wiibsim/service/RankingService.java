@@ -57,7 +57,14 @@ public class RankingService {
     private BigDecimal initialBalance;
 
     public List<RankingDTO> getRanking() {
-        List<RankingDTO> cached = cacheService.getList(RANKING_KEY);
+        // DTO 字段演进后（如去掉 buffProfit），Redis 里旧结构的缓存反序列化会抛异常，
+        // 当未命中处理刷新覆盖，别让一份 15 分钟就过期的缓存把榜打挂
+        List<RankingDTO> cached = null;
+        try {
+            cached = cacheService.getList(RANKING_KEY);
+        } catch (Exception e) {
+            log.warn("排行榜缓存反序列化失败，按未命中刷新: {}", e.getMessage());
+        }
         if (cached != null && !cached.isEmpty()) {
             return cached;
         }
@@ -95,7 +102,7 @@ public class RankingService {
                 .collect(Collectors.groupingBy(PredictionBet::getUserId));
         Map<String, BigDecimal> predictionBidCache = new HashMap<>();
 
-        // ────── 4. 交易盈利批量聚合（口径：交易净盈亏，优惠券另列） ──────
+        // ────── 4. 交易盈利批量聚合（口径：交易净盈亏，优惠券折扣要剔掉） ──────
         Map<Long, BigDecimal> futuresNetMap = toUserAmountMap(futuresOrderMapper.sumNetPnlAfterCommissionAll());
         Map<Long, BigDecimal> futuresFundingFeeMap = toUserAmountMap(futuresPositionMapper.sumFundingFeeTotalAll());
         Map<Long, BigDecimal> predictionRealizedMap = toUserAmountMap(predictionBetMapper.sumRealizedProfitAfterBuyFeeAll());
@@ -124,19 +131,19 @@ public class RankingService {
                     .add(futures.value()).add(predictionValue)
                     .subtract(loanPrincipal).subtract(loanInterest);
 
-            // 交易盈利 = 合约净盈亏 + 现货现金流(扣优惠券) + 预测已结算净盈亏
-            BigDecimal buffProfit = nz(cryptoDiscountMap.get(uid));
+            // 交易盈利 = 合约净盈亏 + 现货现金流(扣优惠券折扣) + 预测已结算净盈亏
+            BigDecimal buffDiscount = nz(cryptoDiscountMap.get(uid));
             BigDecimal futuresProfit = nz(futuresNetMap.get(uid))
                     .add(futures.unrealizedPnl())
                     .subtract(nz(futuresFundingFeeMap.get(uid)));
             BigDecimal cryptoProfit = nz(cryptoSellMap.get(uid))
                     .subtract(nz(cryptoBuyMap.get(uid)))
                     .add(cryptoMarketValue)
-                    .subtract(buffProfit);
+                    .subtract(buffDiscount);
             BigDecimal predictionProfit = nz(predictionRealizedMap.get(uid));
             BigDecimal tradingProfit = futuresProfit.add(cryptoProfit).add(predictionProfit);
 
-            rankings.add(getRankingDTO(user, totalAssets, tradingProfit, buffProfit));
+            rankings.add(getRankingDTO(user, totalAssets, tradingProfit));
         }
 
         // ────── 6. 排序 / 截断 / 缓存 ──────
@@ -166,9 +173,7 @@ public class RankingService {
         /** 总资产。默认榜，含游戏盈亏和优惠券带来的便宜 */
         ASSETS(Comparator.comparing(RankingDTO::getTotalAssets)),
         /** 交易盈利。剔掉优惠券和游戏，只看靠交易赚到的钱 */
-        TRADING_PROFIT(Comparator.comparing(RankingDTO::getTradingProfit)),
-        /** 优惠券省下。看谁把折扣用得最狠 */
-        BUFF(Comparator.comparing(RankingDTO::getBuffProfit));
+        TRADING_PROFIT(Comparator.comparing(RankingDTO::getTradingProfit));
 
         private final Comparator<RankingDTO> comparator;
 
@@ -236,7 +241,7 @@ public class RankingService {
         return list.stream().filter(d -> userId.equals(d.getUserId())).findFirst().orElse(null);
     }
 
-    private RankingDTO getRankingDTO(User user, BigDecimal totalAssets, BigDecimal tradingProfit, BigDecimal buffProfit) {
+    private RankingDTO getRankingDTO(User user, BigDecimal totalAssets, BigDecimal tradingProfit) {
         BigDecimal profit = totalAssets.subtract(initialBalance);
         BigDecimal profitPct = initialBalance.compareTo(BigDecimal.ZERO) > 0
                 ? profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
@@ -249,7 +254,6 @@ public class RankingService {
         dto.setTotalAssets(totalAssets.setScale(2, RoundingMode.HALF_UP));
         dto.setProfitPct(profitPct.setScale(2, RoundingMode.HALF_UP));
         dto.setTradingProfit(tradingProfit.setScale(2, RoundingMode.HALF_UP));
-        dto.setBuffProfit(buffProfit.setScale(2, RoundingMode.HALF_UP));
         dto.setBalanceWallet(balanceWalletOf(user));
         dto.setGameWallet(gameWalletOf(user));
         return dto;

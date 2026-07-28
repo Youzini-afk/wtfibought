@@ -39,7 +39,7 @@ public class RankingController {
      * 全站只有前端排行页一个消费者，一并改掉，不留双轨接口。
      */
     @GetMapping
-    @Operation(summary = "排行榜分页（只含有过成交的用户；sort=ASSETS/TRADING_PROFIT/BUFF，pageSize 服务端封顶 100）")
+    @Operation(summary = "排行榜分页（只含有过成交的用户；sort=ASSETS/TRADING_PROFIT，pageSize 服务端封顶 100）")
     public Result<IPage<RankingDTO>> getRanking(@RequestParam(defaultValue = "ASSETS") String sort,
                                                 @RequestParam(defaultValue = "1") int pageNum,
                                                 @RequestParam(defaultValue = "20") int pageSize) {
