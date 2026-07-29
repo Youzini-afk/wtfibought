@@ -17,6 +17,8 @@ public interface UserService extends IService<User> {
      */
     User findByLinuxDoId(String linuxDoId);
 
+    User findByNewApiUserId(Long newApiUserId);
+
     /**
      * 根据用户名查找用户（username 有唯一索引）
      */

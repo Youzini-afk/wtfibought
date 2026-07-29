@@ -12,6 +12,7 @@ import com.mawai.wiibsim.config.LinuxDoConfig;
 import com.mawai.wiibsim.dto.LinuxDoUserInfo;
 import com.mawai.wiibsim.mapper.InviteCodeMapper;
 import com.mawai.wiibsim.service.AuthService;
+import com.mawai.wiibsim.service.NewApiIntegrationService;
 import com.mawai.wiibsim.service.UserService;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -44,18 +45,21 @@ public class AuthServiceImpl implements AuthService {
     private final LinuxDoConfig linuxDoConfig;
     private final RestTemplate linuxDoRestTemplate;
     private final InviteCodeMapper inviteCodeMapper;
+    private final NewApiIntegrationService newApiIntegrationService;
 
     public AuthServiceImpl(
             UserService userService,
             LinuxDoConfig linuxDoConfig,
             @Qualifier("linuxDoRestTemplate") RestTemplate linuxDoRestTemplate,
-            InviteCodeMapper inviteCodeMapper
+            InviteCodeMapper inviteCodeMapper,
+            NewApiIntegrationService newApiIntegrationService
     )
     {
         this.userService = userService;
         this.linuxDoConfig = linuxDoConfig;
         this.linuxDoRestTemplate = linuxDoRestTemplate;
         this.inviteCodeMapper = inviteCodeMapper;
+        this.newApiIntegrationService = newApiIntegrationService;
     }
 
     @Value("${trading.initial-balance:0}")
@@ -174,13 +178,39 @@ public class AuthServiceImpl implements AuthService {
         return linuxDoConfig.isEnabled();
     }
 
+    @Override
+    public boolean isNewApiEnabled() {
+        return newApiIntegrationService.isEnabled();
+    }
+
+    @Override
+    public String getNewApiAuthorizeUrl() {
+        return newApiIntegrationService.authorizeUrl();
+    }
+
+    @Override
+    public String handleNewApiCallback(String code) {
+        try {
+            User user = newApiIntegrationService.resolveSsoUser(code);
+            StpUtil.login(user.getId());
+            log.info("New API SSO 登录成功 username={} userId={} newApiUserId={}",
+                    user.getUsername(), user.getId(), user.getNewApiUserId());
+            return StpUtil.getTokenValue();
+        } catch (BizException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("New API SSO 登录失败", e);
+            throw new BizException(ErrorCode.SYSTEM_ERROR.getCode(), "New API 登录暂时失败，请稍后重试");
+        }
+    }
+
     /**
      * 仅管理员直登：LinuxDo 和密码登录都没开时，任何人点"进入"即以 admin(id=1) 登录
      * 开了任一正式登录方式则拒绝，避免公网部署被绕过成 admin
      */
     @Override
     public String localLogin() {
-        if (linuxDoConfig.isEnabled() || passwordLoginEnabled) {
+        if (linuxDoConfig.isEnabled() || passwordLoginEnabled || newApiIntegrationService.isEnabled()) {
             throw new BizException("已启用正式登录方式，管理员直登不可用");
         }
         userService.ensureAdminUser();   // 幂等，保证 id=1 存在

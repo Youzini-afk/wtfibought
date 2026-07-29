@@ -55,6 +55,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     }
 
     @Override
+    public User findByNewApiUserId(Long newApiUserId) {
+        LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(User::getNewApiUserId, newApiUserId);
+        return baseMapper.selectOne(wrapper);
+    }
+
+    @Override
     public User findByUsername(String username) {
         LambdaQueryWrapper<User> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(User::getUsername, username);

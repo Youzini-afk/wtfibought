@@ -13,10 +13,16 @@ public interface AuthService {
      */
     String handleLinuxDoCallback(String code);
 
+    String handleNewApiCallback(String code);
+
     /**
      * LinuxDo OAuth 是否启用——前端据此决定展示 OAuth 登录还是管理员直登
      */
     boolean isLinuxDoEnabled();
+
+    boolean isNewApiEnabled();
+
+    String getNewApiAuthorizeUrl();
 
     /**
      * 仅管理员直登：确保 admin(id=1) 存在并登录，返回 Token

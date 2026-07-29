@@ -7,7 +7,7 @@ import { useCryptoStream } from '../hooks/useCryptoStream';
 import { DecryptedText } from '../components/fx/DecryptedText';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
-import { Loader2, BarChart3, Wallet, LineChart, LogIn } from 'lucide-react';
+import { Loader2, BarChart3, Wallet, LineChart, LogIn, KeyRound } from 'lucide-react';
 
 /** LinuxDo 官方三色圆 Logo（取自 linux.do favicon SVG） */
 function LinuxDoLogo({ className }: { className?: string }) {
@@ -58,7 +58,12 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   // null=模式加载中；两个开关决定展示哪些登录入口
-  const [mode, setMode] = useState<{ linuxDoEnabled: boolean; passwordLoginEnabled: boolean } | null>(null);
+  const [mode, setMode] = useState<{
+    linuxDoEnabled: boolean;
+    passwordLoginEnabled: boolean;
+    newApiEnabled: boolean;
+    newApiAuthorizeUrl: string;
+  } | null>(null);
   const callbackHandled = useRef(false);
   // 账号密码表单
   const [isRegister, setIsRegister] = useState(false);
@@ -66,26 +71,30 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [inviteCode, setInviteCode] = useState('');
 
-  const handleOAuthCallback = useCallback(async (code: string, state: string) => {
+  const handleOAuthCallback = useCallback(async (code: string, state: string, provider: string) => {
     const savedState = localStorage.getItem('oauth_state');
-    if (state !== savedState) {
+    const savedProvider = localStorage.getItem('oauth_provider') || 'linuxdo';
+    if (state !== savedState || provider !== savedProvider) {
       setError('安全验证失败，请重试');
       return;
     }
     localStorage.removeItem('oauth_state');
+    localStorage.removeItem('oauth_provider');
 
     setLoading(true);
     setError('');
 
     try {
-      const token = await authApi.linuxDoCallback(code);
+      const token = provider === 'new-api'
+        ? await authApi.newApiCallback(code)
+        : await authApi.linuxDoCallback(code);
       if (token) {
         setToken(token);
         await fetchUser();
         navigate('/');
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'LinuxDo 登录失败';
+      const msg = e instanceof Error ? e.message : '登录失败';
       setError(msg);
     } finally {
       setLoading(false);
@@ -101,23 +110,47 @@ export function Login() {
   // 拉登录模式：两个开关都关才展示管理员直登；失败兜底回 OAuth（既有行为）
   useEffect(() => {
     authApi.mode()
-      .then(m => setMode({ linuxDoEnabled: m.linuxDoEnabled, passwordLoginEnabled: m.passwordLoginEnabled ?? false }))
-      .catch(() => setMode({ linuxDoEnabled: true, passwordLoginEnabled: false }));
+      .then(m => setMode({
+        linuxDoEnabled: m.linuxDoEnabled,
+        passwordLoginEnabled: m.passwordLoginEnabled ?? false,
+        newApiEnabled: m.newApiEnabled ?? false,
+        newApiAuthorizeUrl: m.newApiAuthorizeUrl ?? '',
+      }))
+      .catch(() => setMode({
+        linuxDoEnabled: true,
+        passwordLoginEnabled: false,
+        newApiEnabled: false,
+        newApiAuthorizeUrl: '',
+      }));
   }, []);
 
   useEffect(() => {
     const code = searchParams.get('code');
     const state = searchParams.get('state');
+    const provider = searchParams.get('provider') || 'linuxdo';
     if (code && state && !callbackHandled.current) {
       callbackHandled.current = true;
-      handleOAuthCallback(code, state);
+      handleOAuthCallback(code, state, provider);
     }
   }, [searchParams, handleOAuthCallback]);
 
   const handleLinuxDoLogin = () => {
-    const state = Math.random().toString(36).substring(2, 10);
+    const state = crypto.randomUUID();
     localStorage.setItem('oauth_state', state);
+    localStorage.setItem('oauth_provider', 'linuxdo');
     window.location.href = `${LINUXDO_CONFIG.authorizeUrl}?client_id=${LINUXDO_CONFIG.clientId}&redirect_uri=${encodeURIComponent(LINUXDO_CONFIG.redirectUri)}&response_type=code&state=${state}`;
+  };
+
+  const handleNewApiLogin = () => {
+    if (!mode?.newApiAuthorizeUrl) {
+      setError('New API 登录地址未配置');
+      return;
+    }
+    const state = crypto.randomUUID();
+    localStorage.setItem('oauth_state', state);
+    localStorage.setItem('oauth_provider', 'new-api');
+    const separator = mode.newApiAuthorizeUrl.includes('?') ? '&' : '?';
+    window.location.href = `${mode.newApiAuthorizeUrl}${separator}state=${encodeURIComponent(state)}`;
   };
 
   // 管理员直登：无 OAuth 跳转，直接调后端拿 token 进站
@@ -293,12 +326,19 @@ export function Login() {
                   </form>
                 )}
 
-                {mode.passwordLoginEnabled && mode.linuxDoEnabled && (
+                {mode.passwordLoginEnabled && (mode.linuxDoEnabled || mode.newApiEnabled) && (
                   <div className="flex items-center gap-3">
                     <div className="flex-1 h-px bg-border" />
                     <span className="text-[10px] font-semibold text-muted-foreground tracking-widest">或</span>
                     <div className="flex-1 h-px bg-border" />
                   </div>
+                )}
+
+                {mode.newApiEnabled && (
+                  <Button className="w-full h-11" onClick={handleNewApiLogin}>
+                    <KeyRound className="w-4 h-4" />
+                    使用 Youzi API 登录
+                  </Button>
                 )}
 
                 {mode.linuxDoEnabled && (
@@ -308,7 +348,7 @@ export function Login() {
                   </Button>
                 )}
 
-                {!mode.linuxDoEnabled && !mode.passwordLoginEnabled && (
+                {!mode.linuxDoEnabled && !mode.passwordLoginEnabled && !mode.newApiEnabled && (
                   <Button className="w-full h-11" onClick={handleLocalLogin}>
                     <LogIn className="w-4 h-4" />
                     进入终端

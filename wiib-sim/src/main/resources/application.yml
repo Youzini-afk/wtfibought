@@ -66,6 +66,18 @@ auth:
     enabled: ${PASSWORD_LOGIN_ENABLED:false}
     admin-password: ${ADMIN_PASSWORD:}
 
+# New API 主站 SSO 与额度桥接。两个站使用同一 APP_ID/APP_SECRET；主站另配回调地址。
+new-api:
+  enabled: ${NEW_API_ENABLED:false}
+  base-url: ${NEW_API_BASE_URL:https://youzi.today}
+  app-id: ${NEW_API_APP_ID:wtfib}
+  app-secret: ${NEW_API_APP_SECRET:}
+  # New API 内部额度中，多少额度等于游戏内 1.00；必须与主站 QuotaPerUnit 一致。
+  quota-per-unit: ${NEW_API_QUOTA_PER_UNIT:500000}
+  connect-timeout: ${NEW_API_CONNECT_TIMEOUT:3000}
+  read-timeout: ${NEW_API_READ_TIMEOUT:8000}
+  reconcile-interval-ms: ${NEW_API_RECONCILE_INTERVAL_MS:30000}
+
 # 交易配置
 trading:
   # 合约 AI 主决策周期：M1/M3/M5/M15/H1（影响 K 线采集 / 指标计算 / 回测聚合系数）

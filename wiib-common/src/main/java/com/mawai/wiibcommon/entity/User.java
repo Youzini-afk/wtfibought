@@ -21,6 +21,9 @@ public class User {
     /** LinuxDo用户ID，OAuth登录标识 */
     private String linuxDoId;
 
+    /** New API 用户ID，主站 SSO 的稳定唯一标识 */
+    private Long newApiUserId;
+
     /** 用户名 */
     private String username;
 

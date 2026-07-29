@@ -28,7 +28,11 @@ public class AuthController {
     @GetMapping("/mode")
     @Operation(summary = "获取登录模式")
     public Result<AuthModeDTO> mode() {
-        return Result.ok(new AuthModeDTO(authService.isLinuxDoEnabled(), authService.isPasswordLoginEnabled()));
+        return Result.ok(new AuthModeDTO(
+                authService.isLinuxDoEnabled(),
+                authService.isPasswordLoginEnabled(),
+                authService.isNewApiEnabled(),
+                authService.getNewApiAuthorizeUrl()));
     }
 
     /**
@@ -59,6 +63,12 @@ public class AuthController {
     public Result<String> linuxDoCallback(@RequestParam String code) {
         String token = authService.handleLinuxDoCallback(code);
         return Result.ok(token);
+    }
+
+    @GetMapping("/callback/new-api")
+    @Operation(summary = "New API SSO 回调")
+    public Result<String> newApiCallback(@RequestParam String code) {
+        return Result.ok(authService.handleNewApiCallback(code));
     }
 
     /**

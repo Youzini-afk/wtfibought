@@ -61,6 +61,10 @@ public enum LedgerBizType {
     WALLET_TRANSFER_OUT("划转转出"),
     WALLET_TRANSFER_IN("划转转入"),
 
+    // ===== 主站额度桥接 =====
+    EXTERNAL_DEPOSIT("主站额度转入"),
+    EXTERNAL_WITHDRAWAL("盈利转回主站"),
+
     // ===== 杠杆 =====
     MARGIN_LOAN("杠杆借款"),
     MARGIN_INTEREST_ACCRUE("杠杆计息"),
@@ -92,6 +96,7 @@ public enum LedgerBizType {
         if (n.startsWith("MINES_") || n.startsWith("POKER_")
                 || n.startsWith("PREDICTION_") || n.startsWith("BLACKJACK_")) return "游戏";
         if (n.startsWith("WALLET_TRANSFER_")) return "划转";
+        if (n.startsWith("EXTERNAL_")) return "额度";
         if (n.startsWith("MARGIN_") || n.startsWith("CASH_")) return "杠杆";
         return "其它";
     }

@@ -12,6 +12,7 @@
 CREATE TABLE IF NOT EXISTS "user" (
     id BIGSERIAL PRIMARY KEY,
     linux_do_id VARCHAR(64) UNIQUE,
+    new_api_user_id BIGINT UNIQUE,
     username VARCHAR(64) NOT NULL UNIQUE,
     avatar VARCHAR(256),
     password_hash VARCHAR(60),
@@ -33,6 +34,7 @@ CREATE TABLE IF NOT EXISTS "user" (
 COMMENT ON TABLE "user" IS '用户表';
 COMMENT ON COLUMN "user".id IS '主键';
 COMMENT ON COLUMN "user".linux_do_id IS 'LinuxDo用户ID，OAuth登录标识（本地注册用户为空）';
+COMMENT ON COLUMN "user".new_api_user_id IS 'New API 主站用户ID，SSO稳定唯一标识';
 COMMENT ON COLUMN "user".username IS '用户名（全局唯一，密码登录按此查人）';
 COMMENT ON COLUMN "user".avatar IS '头像URL';
 COMMENT ON COLUMN "user".password_hash IS 'BCrypt密码哈希（定长60，OAuth用户为空）';
@@ -793,6 +795,36 @@ COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持
 -- 额度经济接入：已有库重跑 init.sql 时也取消新用户/21点独立筹码的默认赠送。
 ALTER TABLE "user" ALTER COLUMN balance SET DEFAULT 0.00;
 ALTER TABLE blackjack_account ALTER COLUMN chips SET DEFAULT 0;
+
+-- New API SSO 绑定。部分唯一索引允许未绑定账户继续保持 NULL。
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS new_api_user_id BIGINT;
+CREATE UNIQUE INDEX IF NOT EXISTS uk_user_new_api_user_id
+    ON "user"(new_api_user_id) WHERE new_api_user_id IS NOT NULL;
+
+-- 主站额度桥接本地事务表：operation_id 与 New API 幂等操作号一一对应。
+CREATE TABLE IF NOT EXISTS external_quota_transfer (
+    id                 BIGSERIAL PRIMARY KEY,
+    operation_id       VARCHAR(128) NOT NULL UNIQUE,
+    user_id            BIGINT NOT NULL,
+    new_api_user_id    BIGINT NOT NULL,
+    direction          VARCHAR(16) NOT NULL,
+    amount             DECIMAL(18,2) NOT NULL,
+    quota_amount       BIGINT NOT NULL,
+    status             VARCHAR(16) NOT NULL,
+    remote_status      VARCHAR(16),
+    error_code         VARCHAR(64),
+    error_message      VARCHAR(255),
+    remote_quota_after BIGINT,
+    attempt_count      INT NOT NULL DEFAULT 0,
+    next_retry_at      TIMESTAMP,
+    completed_at       TIMESTAMP,
+    created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_external_quota_transfer_user
+    ON external_quota_transfer(user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_external_quota_transfer_reconcile
+    ON external_quota_transfer(status, direction, next_retry_at, id);
 
 --新版本删掉这两列(待执行不进入commit)
 ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;

@@ -47,9 +47,16 @@ api.interceptors.response.use(
 // ========== 认证接口 ==========
 export const authApi = {
   // 登录模式：两个开关都关时走管理员直登
-  mode: () => api.get<unknown, { linuxDoEnabled: boolean; passwordLoginEnabled: boolean }>('/auth/mode'),
+  mode: () => api.get<unknown, {
+    linuxDoEnabled: boolean;
+    passwordLoginEnabled: boolean;
+    newApiEnabled: boolean;
+    newApiAuthorizeUrl: string;
+  }>('/auth/mode'),
   // LinuxDo OAuth回调
   linuxDoCallback: (code: string) => api.get<unknown, string>('/auth/callback/linuxdo', { params: { code } }),
+  // New API 主站一次性授权码回调
+  newApiCallback: (code: string) => api.get<unknown, string>('/auth/callback/new-api', { params: { code } }),
   // 管理员直登（仅所有正式登录方式都未启用时可用）
   localLogin: () => api.post<unknown, string>('/auth/login/local'),
   // 邀请码注册（成功即登录，返回 token）
