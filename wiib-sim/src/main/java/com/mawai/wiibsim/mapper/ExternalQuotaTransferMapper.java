@@ -67,4 +67,8 @@ public interface ExternalQuotaTransferMapper extends BaseMapper<ExternalQuotaTra
             "WHERE user_id = #{userId} AND direction = 'WITHDRAWAL' " +
             "AND status IN ('PENDING', 'APPLYING')")
     long countOpenWithdrawals(@Param("userId") long userId);
+
+    @Select("SELECT COUNT(*) FROM external_quota_transfer " +
+            "WHERE user_id = #{userId} AND status IN ('PENDING', 'APPLYING')")
+    long countOpenTransfers(@Param("userId") long userId);
 }

@@ -2,7 +2,9 @@ package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.entity.CryptoOrder;
 import com.mawai.wiibcommon.entity.FuturesPosition;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
+import com.mawai.wiibsim.mapper.ExternalQuotaTransferMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +35,7 @@ class AccountResetServiceTest {
 
     private FuturesPositionMapper positionMapper;
     private CryptoOrderMapper cryptoOrderMapper;
+    private ExternalQuotaTransferMapper externalQuotaTransferMapper;
     private FuturesPositionIndexService indexService;
     private AccountPurgeTx purgeTx;
     private StringRedisTemplate redis;
@@ -44,6 +47,7 @@ class AccountResetServiceTest {
     void setUp() {
         positionMapper = mock(FuturesPositionMapper.class);
         cryptoOrderMapper = mock(CryptoOrderMapper.class);
+        externalQuotaTransferMapper = mock(ExternalQuotaTransferMapper.class);
         indexService = mock(FuturesPositionIndexService.class);
         purgeTx = mock(AccountPurgeTx.class);
 
@@ -55,7 +59,8 @@ class AccountResetServiceTest {
         when(cryptoOrderMapper.selectList(any())).thenReturn(List.of());
         when(zSetOps.range(anyString(), anyLong(), anyLong())).thenReturn(Set.of());
 
-        service = new AccountResetService(positionMapper, cryptoOrderMapper, indexService, purgeTx, redis);
+        service = new AccountResetService(
+                positionMapper, cryptoOrderMapper, externalQuotaTransferMapper, indexService, purgeTx, redis);
     }
 
     private static FuturesPosition openPosition() {
@@ -135,5 +140,15 @@ class AccountResetServiceTest {
         service.reset(7L);
 
         verify(zSetOps).remove("crypto:limit:buy:BTCUSDT", "500");
+    }
+
+    @Test
+    void rejectsResetBeforeTouchingIndexesWhenExternalTransferIsPending() {
+        when(externalQuotaTransferMapper.countOpenTransfers(7L)).thenReturn(1L);
+
+        assertThrows(BizException.class, () -> service.reset(7L));
+
+        verifyNoInteractions(indexService, purgeTx);
+        verify(positionMapper, never()).selectList(any());
     }
 }

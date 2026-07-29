@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.mapper.CryptoOrderMapper;
+import com.mawai.wiibsim.mapper.ExternalQuotaTransferMapper;
 import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -41,6 +42,7 @@ public class AccountResetService {
 
     private final FuturesPositionMapper futuresPositionMapper;
     private final CryptoOrderMapper cryptoOrderMapper;
+    private final ExternalQuotaTransferMapper externalQuotaTransferMapper;
     private final FuturesPositionIndexService indexService;
     private final AccountPurgeTx purgeTx;
     private final StringRedisTemplate redis;
@@ -73,6 +75,10 @@ public class AccountResetService {
     }
 
     void reset(long userId) {
+        if (externalQuotaTransferMapper.countOpenTransfers(userId) > 0) {
+            throw new BizException(ErrorCode.RESET_EXTERNAL_TRANSFER_PENDING);
+        }
+
         List<FuturesPosition> openPositions = futuresPositionMapper.selectList(
                 new LambdaQueryWrapper<FuturesPosition>()
                         .eq(FuturesPosition::getUserId, userId)

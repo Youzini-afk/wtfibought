@@ -1,6 +1,6 @@
 import { fmtNum } from '../lib/utils';
 import { useMemo } from 'react';
-import { ArrowLeftRight } from 'lucide-react';
+import { ArrowLeftRight, Landmark } from 'lucide-react';
 import { Button } from './ui/button';
 
 export interface WalletAsset {
@@ -20,6 +20,8 @@ interface Props {
   ready?: boolean;
   /** 打开划转弹窗 */
   onTransfer?: () => void;
+  /** 打开 New API 主站额度钱包 */
+  onExternalWallet?: () => void;
 }
 
 function compact(n: number): string {
@@ -30,7 +32,16 @@ function compact(n: number): string {
   return n.toFixed(0);
 }
 
-export function PortfolioWallet({ totalAssets, balance, gameBalance, username, assets, ready = true, onTransfer }: Props) {
+export function PortfolioWallet({
+  totalAssets,
+  balance,
+  gameBalance,
+  username,
+  assets,
+  ready = true,
+  onTransfer,
+  onExternalWallet,
+}: Props) {
   const cards = useMemo(() => {
     type C = {
       key: string; name: string; label: string;
@@ -193,11 +204,21 @@ export function PortfolioWallet({ totalAssets, balance, gameBalance, username, a
           </div>
         </div>
       </div>
-      {onTransfer && (
-        <Button variant="outline" size="sm" onClick={onTransfer}>
-          <ArrowLeftRight className="w-3.5 h-3.5" />
-          划转
-        </Button>
+      {(onExternalWallet || onTransfer) && (
+        <div className="flex flex-wrap justify-center gap-2">
+          {onExternalWallet && (
+            <Button variant="outline" size="sm" onClick={onExternalWallet}>
+              <Landmark className="w-3.5 h-3.5" />
+              主站额度
+            </Button>
+          )}
+          {onTransfer && (
+            <Button variant="outline" size="sm" onClick={onTransfer}>
+              <ArrowLeftRight className="w-3.5 h-3.5" />
+              钱包划转
+            </Button>
+          )}
+        </div>
       )}
     </div>
   );

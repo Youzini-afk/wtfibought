@@ -3,6 +3,8 @@ package com.mawai.wiibsim.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.toolkit.support.SFunction;
 import com.mawai.wiibcommon.entity.*;
+import com.mawai.wiibcommon.enums.ErrorCode;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.mapper.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -22,6 +24,7 @@ import java.math.BigDecimal;
 public class AccountPurgeTx {
 
     private final UserMapper userMapper;
+    private final ExternalQuotaTransferMapper externalQuotaTransferMapper;
     private final FuturesPositionMapper futuresPositionMapper;
     private final FuturesOrderMapper futuresOrderMapper;
     private final CryptoPositionMapper cryptoPositionMapper;
@@ -45,6 +48,14 @@ public class AccountPurgeTx {
      */
     @Transactional(rollbackFor = Exception.class)
     public void purge(long userId) {
+        // 与提现预留共用 user 行锁，并在真正删数据前二次核验，封住“预检后才提交提现”的竞态。
+        if (userMapper.selectByIdForUpdate(userId) == null) {
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
+        if (externalQuotaTransferMapper.countOpenTransfers(userId) > 0) {
+            throw new BizException(ErrorCode.RESET_EXTERNAL_TRANSFER_PENDING);
+        }
+
         // 交易
         futuresPositionMapper.delete(eq(FuturesPosition.class, FuturesPosition::getUserId, userId));
         futuresOrderMapper.delete(eq(FuturesOrder.class, FuturesOrder::getUserId, userId));

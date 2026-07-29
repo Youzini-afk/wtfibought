@@ -117,6 +117,7 @@ public enum ErrorCode {
     // 账户重置错误码 2000+（1200/1600 段已被杠杆与 Crypto 占用）
     RESET_TOO_FREQUENT(2001, "每周只能重置一次账户"),
     RESET_NOT_ALLOWED(2002, "该账户不可重置"),
+    RESET_EXTERNAL_TRANSFER_PENDING(2003, "有主站额度转账仍在处理中，请完成后再重置"),
 
     // 留言板错误码 2100+
     COMMENT_MUTED(2101, "你已被禁言"),

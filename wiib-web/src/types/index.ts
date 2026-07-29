@@ -300,6 +300,71 @@ export interface WalletTransferPreview {
   positions?: WalletTransferPreviewPosition[];
 }
 
+// ==================== New API 主站额度钱包 ====================
+
+export interface ExternalWalletInfo {
+  enabled: boolean;
+  withdrawalEnabled: boolean;
+  bound: boolean;
+  newApiUserId: number | null;
+  /** 主站多少额度等于游戏内 1.00 */
+  quotaPerUnit: number;
+  balance: number;
+  gameBalance: number;
+  /** 本经济周期累计从主站转入的本金，不计作盈利 */
+  protectedPrincipal: number;
+}
+
+export type ExternalQuotaTransferDirection = 'DEPOSIT' | 'WITHDRAWAL';
+export type ExternalQuotaTransferStatus = 'PENDING' | 'APPLYING' | 'COMPLETED' | 'FAILED';
+
+export interface ExternalQuotaTransfer {
+  operationId: string;
+  direction: ExternalQuotaTransferDirection;
+  /** 游戏内计价：转入额或提现毛额 */
+  amount: number;
+  fee: number;
+  netAmount: number | null;
+  effectiveTaxRate: number;
+  businessDate: string | null;
+  quotaAmount: number;
+  status: ExternalQuotaTransferStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
+  remoteQuotaAfter: number | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface WithdrawalTaxBracket {
+  /** null 表示最后一个无上限税档 */
+  upTo: number | null;
+  rate: number;
+}
+
+export interface ExternalWithdrawalPreview {
+  totalAssets: number;
+  capitalBase: number;
+  currentProfit: number;
+  cashAvailable: number;
+  profitRate: number;
+  dailyLimit: number;
+  minimumAmount: number;
+  businessDate: string;
+  withdrawnToday: number;
+  remainingDailyLimit: number;
+  remainingProfitLimit: number;
+  maximumGrossAmount: number;
+  withdrawalPending: boolean;
+  requestedGrossAmount: number | null;
+  estimatedTax: number | null;
+  estimatedNetAmount: number | null;
+  effectiveTaxRate: number | null;
+  requestAllowed: boolean;
+  rejectionReason: string | null;
+  taxBrackets: WithdrawalTaxBracket[];
+}
+
 export interface FuturesStopLossRequest {
   positionId: number;
   stopLosses: FuturesSLItem[];

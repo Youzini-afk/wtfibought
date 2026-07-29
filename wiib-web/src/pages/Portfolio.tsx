@@ -10,6 +10,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { useToast } from '../components/ui/use-toast';
 import { PortfolioChart } from '../components/PortfolioChart';
 import { PortfolioWallet } from '../components/PortfolioWallet';
+import { ExternalWalletModal } from '../components/ExternalWalletModal';
 import { WalletTransferModal } from '../components/WalletTransferModal';
 import { FuturesPositionsCard } from '../components/coin/FuturesPositionsCard';
 import { ProfitChart } from '../components/ProfitChart';
@@ -99,6 +100,7 @@ export function Portfolio() {
   const [realtimeSnapshot, setRealtimeSnapshot] = useState<AssetSnapshot | null>(null);
   const [categoryAverages, setCategoryAverages] = useState<CategoryAverages | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
+  const [externalWalletOpen, setExternalWalletOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [confirmName, setConfirmName] = useState('');
   const [resetting, setResetting] = useState(false);
@@ -443,6 +445,7 @@ export function Portfolio() {
                       assets={walletAssets}
                       ready={walletReady}
                       onTransfer={() => setTransferOpen(true)}
+                      onExternalWallet={() => setExternalWalletOpen(true)}
                     />
                   </div>
                 )}
@@ -874,6 +877,11 @@ export function Portfolio() {
       </div>
 
       <WalletTransferModal open={transferOpen} onClose={() => setTransferOpen(false)} />
+      <ExternalWalletModal
+        open={externalWalletOpen}
+        onClose={() => setExternalWalletOpen(false)}
+        onSuccess={() => setRefreshNonce(n => n + 1)}
+      />
     </div>
   );
 }

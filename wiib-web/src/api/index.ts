@@ -2,7 +2,7 @@ import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -93,6 +93,21 @@ export const walletApi = {
   // 划转预检：余额→游戏 有全仓敞口时算净值/新强平价/最大可转
   transferPreview: (direction: 'TO_GAME' | 'TO_BALANCE', amount: number) =>
     api.get<unknown, WalletTransferPreview>('/wallet/transfer/preview', { params: { direction, amount } }),
+};
+
+// ========== New API 主站额度钱包 ===========
+export const externalWalletApi = {
+  info: () => api.get<unknown, ExternalWalletInfo>('/external-wallet/info'),
+  deposit: (amount: number) =>
+    api.post<unknown, ExternalQuotaTransfer>('/external-wallet/deposit', { amount }),
+  withdrawalPreview: (amount?: number) =>
+    api.get<unknown, ExternalWithdrawalPreview>('/external-wallet/withdrawal-preview', {
+      params: amount == null ? undefined : { amount },
+    }),
+  withdraw: (amount: number) =>
+    api.post<unknown, ExternalQuotaTransfer>('/external-wallet/withdrawal', { amount }),
+  transfers: (limit = 20) =>
+    api.get<unknown, ExternalQuotaTransfer[]>('/external-wallet/transfers', { params: { limit } }),
 };
 
 // ========== 排行榜接口 ==========
