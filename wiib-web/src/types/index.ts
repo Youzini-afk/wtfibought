@@ -307,6 +307,8 @@ export interface ExternalWalletInfo {
   withdrawalEnabled: boolean;
   bound: boolean;
   newApiUserId: number | null;
+  /** New API 浏览器授权入口；仅桥接启用时返回 */
+  authorizeUrl: string;
   /** 主站多少额度等于游戏内 1.00 */
   quotaPerUnit: number;
   balance: number;

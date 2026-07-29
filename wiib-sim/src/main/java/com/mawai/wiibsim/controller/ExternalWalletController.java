@@ -6,6 +6,7 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.config.NewApiIntegrationConfig;
+import com.mawai.wiibsim.dto.ExternalAccountBindRequest;
 import com.mawai.wiibsim.dto.ExternalDepositRequest;
 import com.mawai.wiibsim.dto.ExternalQuotaTransferDTO;
 import com.mawai.wiibsim.dto.ExternalWalletInfoDTO;
@@ -45,10 +46,19 @@ public class ExternalWalletController {
                 integrationService.isWithdrawalEnabled(),
                 newApiUserId != null && newApiUserId > 0,
                 newApiUserId,
+                integrationService.authorizeUrl(),
                 config.getQuotaPerUnit(),
                 nz(user.getBalance()),
                 nz(user.getGameBalance()),
                 nz(user.getProtectedPrincipal())));
+    }
+
+    @PostMapping("/bind")
+    @Operation(summary = "把当前游戏账号绑定到 New API 主站身份")
+    public Result<Void> bind(@RequestBody ExternalAccountBindRequest request) {
+        integrationService.bindSsoUser(
+                StpUtil.getLoginIdAsLong(), request == null ? null : request.code());
+        return Result.ok();
     }
 
     @PostMapping("/deposit")

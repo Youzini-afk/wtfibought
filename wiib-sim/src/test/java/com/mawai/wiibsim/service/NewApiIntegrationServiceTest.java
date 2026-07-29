@@ -38,6 +38,7 @@ class NewApiIntegrationServiceTest {
     @Mock ExternalQuotaTransferMapper transferMapper;
     @Mock ExternalQuotaSettlementService settlementService;
     @Mock ExternalWithdrawalService withdrawalService;
+    @Mock NewApiAccountBindingService accountBindingService;
 
     private NewApiIntegrationService service;
 
@@ -46,7 +47,8 @@ class NewApiIntegrationServiceTest {
         when(config.isUsable()).thenReturn(true);
         when(config.getQuotaPerUnit()).thenReturn(new BigDecimal("500000"));
         service = new NewApiIntegrationService(
-                config, client, userService, transferMapper, settlementService, withdrawalService);
+                config, client, userService, transferMapper, settlementService, withdrawalService,
+                accountBindingService);
     }
 
     @Test
@@ -159,6 +161,22 @@ class NewApiIntegrationServiceTest {
 
         assertThat(resolved).isSameAs(existing);
         verify(userService, never()).save(any(User.class));
+    }
+
+    @Test
+    void authenticatedAccountBindingExchangesAndValidatesOneTimeCode() {
+        NewApiIdentity identity = new NewApiIdentity(42L, "tester", "Tester", "", 1000L, 500000L);
+        User bound = new User();
+        bound.setId(7L);
+        bound.setUsername("legacy-user");
+        bound.setNewApiUserId(42L);
+        when(client.exchangeCode("bind-code")).thenReturn(identity);
+        when(accountBindingService.bind(7L, identity)).thenReturn(bound);
+
+        User result = service.bindSsoUser(7L, " bind-code ");
+
+        assertThat(result).isSameAs(bound);
+        verify(accountBindingService).bind(7L, identity);
     }
 
     private ExternalQuotaTransfer pendingTransfer(String operationId) {

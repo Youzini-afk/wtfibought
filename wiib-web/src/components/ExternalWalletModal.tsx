@@ -3,6 +3,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   Clock3,
+  Link2,
   Landmark,
   RefreshCw,
   ShieldCheck,
@@ -228,6 +229,19 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
     }
   };
 
+  const handleBind = () => {
+    if (!info?.authorizeUrl) {
+      toast('New API 登录地址未配置', 'error');
+      return;
+    }
+    const state = crypto.randomUUID();
+    localStorage.setItem('oauth_state', state);
+    localStorage.setItem('oauth_provider', 'new-api');
+    localStorage.setItem('oauth_intent', 'bind');
+    const separator = info.authorizeUrl.includes('?') ? '&' : '?';
+    window.location.href = `${info.authorizeUrl}${separator}state=${encodeURIComponent(state)}`;
+  };
+
   const withdrawalBlocked = mode === 'WITHDRAWAL'
     && (!info?.withdrawalEnabled || previewLoading || !preview?.requestAllowed);
   const submitDisabled = !info?.enabled || !info.bound || submitting || !amountValid || withdrawalBlocked;
@@ -266,7 +280,10 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
         ) : info && !info.bound ? (
           <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-4 text-sm">
             <p className="font-semibold text-yellow-500">尚未绑定主站账户</p>
-            <p className="mt-1 text-xs text-muted-foreground">请退出后使用 New API 主站登录一次，系统会自动绑定同一账户。</p>
+            <p className="mt-1 text-xs text-muted-foreground">完成一次主站授权即可保留当前游戏账号、持仓和历史记录；已被其他游戏账号使用的主站身份不能重复绑定。</p>
+            <Button className="mt-3" size="sm" onClick={handleBind}>
+              <Link2 className="h-4 w-4" />绑定 New API 主站账户
+            </Button>
           </div>
         ) : info ? (
           <>

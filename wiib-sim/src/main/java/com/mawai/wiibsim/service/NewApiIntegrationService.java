@@ -39,6 +39,7 @@ public class NewApiIntegrationService {
     private final ExternalQuotaTransferMapper transferMapper;
     private final ExternalQuotaSettlementService settlementService;
     private final ExternalWithdrawalService withdrawalService;
+    private final NewApiAccountBindingService accountBindingService;
 
     public boolean isEnabled() {
         return config.isUsable();
@@ -82,6 +83,23 @@ public class NewApiIntegrationService {
             }
         }
         throw new BizException("无法创建 New API 关联账户，请稍后重试");
+    }
+
+    /**
+     * 把已登录的存量游戏账号绑定到主站身份。远端换码发生在事务外，真正的唯一绑定
+     * 由 NewApiAccountBindingService 的本地事务和唯一索引完成。
+     */
+    public User bindSsoUser(long localUserId, String code) {
+        if (!isEnabled()) throw new BizException("New API 登录未启用");
+        if (code == null || code.isBlank()) {
+            throw new BizException(ErrorCode.PARAM_ERROR.getCode(), "授权码不能为空");
+        }
+        NewApiIdentity identity = client.exchangeCode(code.trim());
+        validateIdentity(identity);
+        User bound = accountBindingService.bind(localUserId, identity);
+        log.info("New API SSO 绑定成功 username={} userId={} newApiUserId={}",
+                bound.getUsername(), bound.getId(), identity.userId());
+        return bound;
     }
 
     public ExternalQuotaTransferDTO deposit(long userId, BigDecimal requestedAmount) {

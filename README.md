@@ -379,8 +379,14 @@ cd wtfibought
 
 ```bash
 psql -U postgres -c "CREATE DATABASE wiib;"
-psql -U postgres -d wiib -f sql/init.sql      # 业务 + 量化 + AI runtime（29 张表）
+psql -U postgres -d wiib -f sql/init.sql      # 业务 + 量化 + AI runtime
 psql -U postgres -d wiib -f sql/bstock.sql    # bStock 代币化美股静态表 + 10 只种子
+```
+
+已有数据库升级到 New API 额度经济时，只执行专用增量脚本：
+
+```bash
+psql -v ON_ERROR_STOP=1 -U postgres -d wiib -f sql/migrations/20260730_new_api_quota_economy.sql
 ```
 
 ### 3. 后端配置
@@ -396,6 +402,7 @@ cp .env.example .env.local    # 填 PG_USER / PG_PASSWORD（必填），其余�
 要点：
 
 - **共享库 / 总线**：三进程指向同一 PostgreSQL `wiib` + 同一 Redis，读同一份 `.env.local`；`INTERNAL_API_TOKEN` 天然一致（进程间 `/internal/**` 鉴权），不填走统一默认值。
+- **New API SSO / 额度桥接**：两边变量、上线顺序、账号绑定、提现规则与回滚步骤见 [`NEW_API_QUOTA_ECONOMY.md`](NEW_API_QUOTA_ECONOMY.md)。
 - **LLM 配置不在 yml**：唯一来源是 DB（`ai_runtime_config` + `ai_model_assignment`）。启动后用管理员账号进 Admin 页填 LLM（API Key + Base URL + 模型名，Base URL 不含 `/v1`）并给各功能位分配，即时生效、无需重启。
 - **quant 必须关掉 Spring AI 的 OpenAI 自动装配**（6 类全关，否则缺 api-key 拒绝启动）：
 

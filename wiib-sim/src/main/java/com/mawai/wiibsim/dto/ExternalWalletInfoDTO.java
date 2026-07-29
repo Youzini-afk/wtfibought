@@ -7,6 +7,7 @@ public record ExternalWalletInfoDTO(
         boolean withdrawalEnabled,
         boolean bound,
         Long newApiUserId,
+        String authorizeUrl,
         BigDecimal quotaPerUnit,
         BigDecimal balance,
         BigDecimal gameBalance,

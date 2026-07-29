@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
-import { authApi } from '../api';
+import { authApi, externalWalletApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { DecryptedText } from '../components/fx/DecryptedText';
@@ -74,17 +74,25 @@ export function Login() {
   const handleOAuthCallback = useCallback(async (code: string, state: string, provider: string) => {
     const savedState = localStorage.getItem('oauth_state');
     const savedProvider = localStorage.getItem('oauth_provider') || 'linuxdo';
+    const intent = localStorage.getItem('oauth_intent') || 'login';
     if (state !== savedState || provider !== savedProvider) {
       setError('安全验证失败，请重试');
       return;
     }
     localStorage.removeItem('oauth_state');
     localStorage.removeItem('oauth_provider');
+    localStorage.removeItem('oauth_intent');
 
     setLoading(true);
     setError('');
 
     try {
+      if (provider === 'new-api' && intent === 'bind') {
+        await externalWalletApi.bind(code);
+        await fetchUser();
+        navigate('/');
+        return;
+      }
       const token = provider === 'new-api'
         ? await authApi.newApiCallback(code)
         : await authApi.linuxDoCallback(code);
@@ -102,10 +110,11 @@ export function Login() {
   }, [fetchUser, navigate, setToken]);
 
   useEffect(() => {
-    if (user) {
+    const callbackPending = Boolean(searchParams.get('code') && searchParams.get('state'));
+    if (user && !callbackPending) {
       navigate('/');
     }
-  }, [user, navigate]);
+  }, [user, navigate, searchParams]);
 
   // 拉登录模式：两个开关都关才展示管理员直登；失败兜底回 OAuth（既有行为）
   useEffect(() => {
@@ -138,6 +147,7 @@ export function Login() {
     const state = crypto.randomUUID();
     localStorage.setItem('oauth_state', state);
     localStorage.setItem('oauth_provider', 'linuxdo');
+    localStorage.setItem('oauth_intent', 'login');
     window.location.href = `${LINUXDO_CONFIG.authorizeUrl}?client_id=${LINUXDO_CONFIG.clientId}&redirect_uri=${encodeURIComponent(LINUXDO_CONFIG.redirectUri)}&response_type=code&state=${state}`;
   };
 
@@ -149,6 +159,7 @@ export function Login() {
     const state = crypto.randomUUID();
     localStorage.setItem('oauth_state', state);
     localStorage.setItem('oauth_provider', 'new-api');
+    localStorage.setItem('oauth_intent', 'login');
     const separator = mode.newApiAuthorizeUrl.includes('?') ? '&' : '?';
     window.location.href = `${mode.newApiAuthorizeUrl}${separator}state=${encodeURIComponent(state)}`;
   };

@@ -98,6 +98,7 @@ export const walletApi = {
 // ========== New API 主站额度钱包 ===========
 export const externalWalletApi = {
   info: () => api.get<unknown, ExternalWalletInfo>('/external-wallet/info'),
+  bind: (code: string) => api.post<unknown, void>('/external-wallet/bind', { code }),
   deposit: (amount: number) =>
     api.post<unknown, ExternalQuotaTransfer>('/external-wallet/deposit', { amount }),
   withdrawalPreview: (amount?: number) =>
