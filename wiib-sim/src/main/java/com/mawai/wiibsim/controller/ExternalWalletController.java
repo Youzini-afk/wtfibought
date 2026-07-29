@@ -9,6 +9,8 @@ import com.mawai.wiibsim.config.NewApiIntegrationConfig;
 import com.mawai.wiibsim.dto.ExternalDepositRequest;
 import com.mawai.wiibsim.dto.ExternalQuotaTransferDTO;
 import com.mawai.wiibsim.dto.ExternalWalletInfoDTO;
+import com.mawai.wiibsim.dto.ExternalWithdrawalPreviewDTO;
+import com.mawai.wiibsim.dto.ExternalWithdrawalRequest;
 import com.mawai.wiibsim.service.NewApiIntegrationService;
 import com.mawai.wiibsim.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -40,6 +42,7 @@ public class ExternalWalletController {
         Long newApiUserId = user.getNewApiUserId();
         return Result.ok(new ExternalWalletInfoDTO(
                 integrationService.isEnabled(),
+                integrationService.isWithdrawalEnabled(),
                 newApiUserId != null && newApiUserId > 0,
                 newApiUserId,
                 config.getQuotaPerUnit(),
@@ -51,7 +54,22 @@ public class ExternalWalletController {
     @PostMapping("/deposit")
     @Operation(summary = "从 New API 额度转入交易钱包")
     public Result<ExternalQuotaTransferDTO> deposit(@RequestBody ExternalDepositRequest request) {
-        return Result.ok(integrationService.deposit(StpUtil.getLoginIdAsLong(), request.amount()));
+        return Result.ok(integrationService.deposit(
+                StpUtil.getLoginIdAsLong(), request == null ? null : request.amount()));
+    }
+
+    @GetMapping("/withdrawal-preview")
+    @Operation(summary = "预览盈利提现额度、税费和税后到账")
+    public Result<ExternalWithdrawalPreviewDTO> withdrawalPreview(
+            @RequestParam(required = false) BigDecimal amount) {
+        return Result.ok(integrationService.withdrawalPreview(StpUtil.getLoginIdAsLong(), amount));
+    }
+
+    @PostMapping("/withdrawal")
+    @Operation(summary = "将可提现盈利税后转回 New API 主站")
+    public Result<ExternalQuotaTransferDTO> withdraw(@RequestBody ExternalWithdrawalRequest request) {
+        return Result.ok(integrationService.withdraw(
+                StpUtil.getLoginIdAsLong(), request == null ? null : request.amount()));
     }
 
     @GetMapping("/transfers")

@@ -77,6 +77,15 @@ new-api:
   connect-timeout: ${NEW_API_CONNECT_TIMEOUT:3000}
   read-timeout: ${NEW_API_READ_TIMEOUT:8000}
   reconcile-interval-ms: ${NEW_API_RECONCILE_INTERVAL_MS:30000}
+  withdrawal:
+    enabled: ${NEW_API_WITHDRAWAL_ENABLED:false}
+    # 每个自然日最多提取当日口径下真实盈利的 50%，同时受绝对日限额约束。
+    profit-rate: ${NEW_API_WITHDRAWAL_PROFIT_RATE:0.50}
+    daily-limit: ${NEW_API_WITHDRAWAL_DAILY_LIMIT:100.00}
+    min-amount: ${NEW_API_WITHDRAWAL_MIN_AMOUNT:1.00}
+    zone-id: ${NEW_API_WITHDRAWAL_ZONE_ID:Asia/Shanghai}
+    # 累进边际税档：累计毛额上限:税率；最后的 * 表示无上限。
+    tax-brackets: ${NEW_API_WITHDRAWAL_TAX_BRACKETS:20:0.05,50:0.10,100:0.15,*:0.20}
 
 # 交易配置
 trading:

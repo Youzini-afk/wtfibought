@@ -64,6 +64,7 @@ public enum LedgerBizType {
     // ===== 主站额度桥接 =====
     EXTERNAL_DEPOSIT("主站额度转入"),
     EXTERNAL_WITHDRAWAL("盈利转回主站"),
+    EXTERNAL_WITHDRAWAL_REFUND("提现失败退回"),
 
     // ===== 杠杆 =====
     MARGIN_LOAN("杠杆借款"),

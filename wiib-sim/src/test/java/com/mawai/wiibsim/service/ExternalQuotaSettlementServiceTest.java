@@ -56,11 +56,53 @@ class ExternalQuotaSettlementServiceTest {
         verify(transferMapper, never()).completeClaim(any(), any(), any());
     }
 
+    @Test
+    void completedWithdrawalOnlyAdvancesStatusBecauseGrossWasAlreadyReserved() {
+        ExternalQuotaTransfer transfer = withdrawal(7L, "50.00");
+        when(transferMapper.claimPending("op-withdrawal-1")).thenReturn(2L);
+        when(transferMapper.selectById(2L)).thenReturn(transfer);
+        when(transferMapper.completeClaim(eq(2L), eq(1_000_000L), any(LocalDateTime.class))).thenReturn(1);
+
+        assertThat(service.settleWithdrawal("op-withdrawal-1", 1_000_000L)).isTrue();
+
+        verify(userMapper, never()).atomicUpdateBalance(any(), any());
+        verify(transferMapper).completeClaim(eq(2L), eq(1_000_000L), any(LocalDateTime.class));
+    }
+
+    @Test
+    void terminalWithdrawalFailureRefundsGrossExactlyOnce() {
+        ExternalQuotaTransfer transfer = withdrawal(7L, "50.00");
+        when(transferMapper.claimPending("op-withdrawal-1")).thenReturn(2L).thenReturn(null);
+        when(transferMapper.selectById(2L)).thenReturn(transfer);
+        when(userMapper.atomicUpdateBalance(7L, new BigDecimal("50.00")))
+                .thenReturn(new BigDecimal("150.00"));
+        when(transferMapper.failClaim(2L, "failed", "remote_rejected", "主站拒绝"))
+                .thenReturn(1);
+
+        assertThat(service.refundWithdrawal(
+                "op-withdrawal-1", "failed", "remote_rejected", "主站拒绝")).isTrue();
+        assertThat(service.refundWithdrawal(
+                "op-withdrawal-1", "failed", "remote_rejected", "主站拒绝")).isFalse();
+
+        verify(userMapper).atomicUpdateBalance(7L, new BigDecimal("50.00"));
+        verify(transferMapper).failClaim(2L, "failed", "remote_rejected", "主站拒绝");
+    }
+
     private ExternalQuotaTransfer deposit(long userId, String amount) {
         ExternalQuotaTransfer transfer = new ExternalQuotaTransfer();
         transfer.setId(1L);
         transfer.setOperationId("op-deposit-1");
         transfer.setDirection("DEPOSIT");
+        transfer.setUserId(userId);
+        transfer.setAmount(new BigDecimal(amount));
+        return transfer;
+    }
+
+    private ExternalQuotaTransfer withdrawal(long userId, String amount) {
+        ExternalQuotaTransfer transfer = new ExternalQuotaTransfer();
+        transfer.setId(2L);
+        transfer.setOperationId("op-withdrawal-1");
+        transfer.setDirection("WITHDRAWAL");
         transfer.setUserId(userId);
         transfer.setAmount(new BigDecimal(amount));
         return transfer;

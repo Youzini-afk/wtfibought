@@ -8,6 +8,7 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Data
@@ -21,6 +22,10 @@ public class ExternalQuotaTransfer {
     private Long newApiUserId;
     private String direction;
     private BigDecimal amount;
+    private BigDecimal fee;
+    private BigDecimal netAmount;
+    private BigDecimal effectiveTaxRate;
+    private LocalDate businessDate;
     private Long quotaAmount;
     private String status;
     private String remoteStatus;

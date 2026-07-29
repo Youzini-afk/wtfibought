@@ -8,6 +8,8 @@ import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import org.apache.ibatis.annotations.Update;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 @Mapper
@@ -33,6 +35,14 @@ public interface ExternalQuotaTransferMapper extends BaseMapper<ExternalQuotaTra
 
     @Update("UPDATE external_quota_transfer SET status = 'FAILED', remote_status = #{remoteStatus}, " +
             "error_code = #{errorCode}, error_message = #{errorMessage}, completed_at = NOW(), updated_at = NOW() " +
+            "WHERE id = #{id} AND status = 'APPLYING'")
+    int failClaim(@Param("id") Long id,
+                  @Param("remoteStatus") String remoteStatus,
+                  @Param("errorCode") String errorCode,
+                  @Param("errorMessage") String errorMessage);
+
+    @Update("UPDATE external_quota_transfer SET status = 'FAILED', remote_status = #{remoteStatus}, " +
+            "error_code = #{errorCode}, error_message = #{errorMessage}, completed_at = NOW(), updated_at = NOW() " +
             "WHERE operation_id = #{operationId} AND status = 'PENDING'")
     int markFailed(@Param("operationId") String operationId,
                    @Param("remoteStatus") String remoteStatus,
@@ -45,4 +55,16 @@ public interface ExternalQuotaTransferMapper extends BaseMapper<ExternalQuotaTra
     int scheduleRetry(@Param("operationId") String operationId,
                       @Param("errorMessage") String errorMessage,
                       @Param("nextRetryAt") LocalDateTime nextRetryAt);
+
+    /** 当天已经预留的提现毛额；失败且已退款的记录不再占用额度。 */
+    @Select("SELECT COALESCE(SUM(amount), 0) FROM external_quota_transfer " +
+            "WHERE user_id = #{userId} AND direction = 'WITHDRAWAL' AND business_date = #{businessDate} " +
+            "AND status IN ('PENDING', 'APPLYING', 'COMPLETED')")
+    BigDecimal sumReservedWithdrawals(@Param("userId") long userId,
+                                      @Param("businessDate") LocalDate businessDate);
+
+    @Select("SELECT COUNT(*) FROM external_quota_transfer " +
+            "WHERE user_id = #{userId} AND direction = 'WITHDRAWAL' " +
+            "AND status IN ('PENDING', 'APPLYING')")
+    long countOpenWithdrawals(@Param("userId") long userId);
 }

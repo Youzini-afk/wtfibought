@@ -37,6 +37,7 @@ class NewApiIntegrationServiceTest {
     @Mock UserService userService;
     @Mock ExternalQuotaTransferMapper transferMapper;
     @Mock ExternalQuotaSettlementService settlementService;
+    @Mock ExternalWithdrawalService withdrawalService;
 
     private NewApiIntegrationService service;
 
@@ -44,7 +45,8 @@ class NewApiIntegrationServiceTest {
     void setUp() {
         when(config.isUsable()).thenReturn(true);
         when(config.getQuotaPerUnit()).thenReturn(new BigDecimal("500000"));
-        service = new NewApiIntegrationService(config, client, userService, transferMapper, settlementService);
+        service = new NewApiIntegrationService(
+                config, client, userService, transferMapper, settlementService, withdrawalService);
     }
 
     @Test
@@ -108,6 +110,39 @@ class NewApiIntegrationServiceTest {
         verify(transferMapper).markFailed(
                 transfer.getOperationId(), "failed", "insufficient_quota", "主站额度不足");
         verify(settlementService, never()).settleDeposit(any(), anyLong());
+    }
+
+    @Test
+    void withdrawalUsesRemoteCreditAndOnlyCompletesLocalReservation() {
+        ExternalQuotaTransfer transfer = pendingTransfer("withdrawal-operation-1");
+        transfer.setDirection("WITHDRAWAL");
+        transfer.setAmount(new BigDecimal("10.00"));
+        transfer.setQuotaAmount(4_750_000L);
+        when(client.status(transfer.getOperationId())).thenReturn(Optional.empty());
+        when(client.credit(transfer.getOperationId(), 42L, 4_750_000L)).thenReturn(new NewApiQuotaResult(
+                transfer.getOperationId(), 42L, "credit", 4_750_000L,
+                "completed", "", 9_750_000L, true));
+
+        service.reconcileOne(transfer);
+
+        verify(client).credit(transfer.getOperationId(), 42L, 4_750_000L);
+        verify(client, never()).debit(any(), anyLong(), anyLong());
+        verify(settlementService).settleWithdrawal(transfer.getOperationId(), 9_750_000L);
+    }
+
+    @Test
+    void terminalWithdrawalFailureRefundsLocalGrossReservation() {
+        ExternalQuotaTransfer transfer = pendingTransfer("withdrawal-operation-2");
+        transfer.setDirection("WITHDRAWAL");
+        when(client.status(transfer.getOperationId())).thenReturn(Optional.of(new NewApiQuotaResult(
+                transfer.getOperationId(), 42L, "credit", 500000L,
+                "failed", "user_not_found", 0L, false)));
+
+        service.reconcileOne(transfer);
+
+        verify(settlementService).refundWithdrawal(
+                transfer.getOperationId(), "failed", "user_not_found", "主站账户不存在");
+        verify(transferMapper, never()).markFailed(any(), any(), any(), any());
     }
 
     @Test

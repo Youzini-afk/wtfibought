@@ -7,6 +7,7 @@ import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.config.NewApiIntegrationConfig;
 import com.mawai.wiibsim.dto.ExternalQuotaTransferDTO;
+import com.mawai.wiibsim.dto.ExternalWithdrawalPreviewDTO;
 import com.mawai.wiibsim.dto.NewApiIdentity;
 import com.mawai.wiibsim.dto.NewApiQuotaResult;
 import com.mawai.wiibsim.mapper.ExternalQuotaTransferMapper;
@@ -18,9 +19,9 @@ import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,15 +30,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class NewApiIntegrationService {
     private static final String DIRECTION_DEPOSIT = "DEPOSIT";
+    private static final String DIRECTION_WITHDRAWAL = "WITHDRAWAL";
     private static final String STATUS_PENDING = "PENDING";
-    private static final String STATUS_COMPLETED = "COMPLETED";
-    private static final String STATUS_FAILED = "FAILED";
 
     private final NewApiIntegrationConfig config;
     private final NewApiClient client;
     private final UserService userService;
     private final ExternalQuotaTransferMapper transferMapper;
     private final ExternalQuotaSettlementService settlementService;
+    private final ExternalWithdrawalService withdrawalService;
 
     public boolean isEnabled() {
         return config.isUsable();
@@ -45,6 +46,10 @@ public class NewApiIntegrationService {
 
     public String authorizeUrl() {
         return isEnabled() ? config.authorizeUrl() : "";
+    }
+
+    public boolean isWithdrawalEnabled() {
+        return isEnabled() && config.isWithdrawalEnabled();
     }
 
     public User resolveSsoUser(String code) {
@@ -95,6 +100,10 @@ public class NewApiIntegrationService {
         transfer.setNewApiUserId(user.getNewApiUserId());
         transfer.setDirection(DIRECTION_DEPOSIT);
         transfer.setAmount(amount);
+        transfer.setFee(BigDecimal.ZERO);
+        transfer.setNetAmount(amount);
+        transfer.setEffectiveTaxRate(BigDecimal.ZERO);
+        transfer.setBusinessDate(LocalDate.now());
         transfer.setQuotaAmount(quotaAmount);
         transfer.setStatus(STATUS_PENDING);
         transfer.setRemoteStatus("pending");
@@ -102,6 +111,16 @@ public class NewApiIntegrationService {
         transfer.setNextRetryAt(LocalDateTime.now());
         transferMapper.insert(transfer);
 
+        reconcileOne(transfer);
+        return toDTO(loadByOperationId(transfer.getOperationId()));
+    }
+
+    public ExternalWithdrawalPreviewDTO withdrawalPreview(long userId, BigDecimal requestedAmount) {
+        return withdrawalService.preview(userId, requestedAmount);
+    }
+
+    public ExternalQuotaTransferDTO withdraw(long userId, BigDecimal requestedAmount) {
+        ExternalQuotaTransfer transfer = withdrawalService.reserve(userId, requestedAmount);
         reconcileOne(transfer);
         return toDTO(loadByOperationId(transfer.getOperationId()));
     }
@@ -116,13 +135,13 @@ public class NewApiIntegrationService {
     }
 
     @Scheduled(fixedDelayString = "${new-api.reconcile-interval-ms:30000}")
-    public void reconcilePendingDeposits() {
+    public void reconcilePendingTransfers() {
         if (!isEnabled()) return;
         LocalDateTime now = LocalDateTime.now();
         List<ExternalQuotaTransfer> pending = transferMapper.selectList(
                 new LambdaQueryWrapper<ExternalQuotaTransfer>()
                         .eq(ExternalQuotaTransfer::getStatus, STATUS_PENDING)
-                        .eq(ExternalQuotaTransfer::getDirection, DIRECTION_DEPOSIT)
+                        .in(ExternalQuotaTransfer::getDirection, DIRECTION_DEPOSIT, DIRECTION_WITHDRAWAL)
                         .and(q -> q.isNull(ExternalQuotaTransfer::getNextRetryAt)
                                 .or().le(ExternalQuotaTransfer::getNextRetryAt, now))
                         .orderByAsc(ExternalQuotaTransfer::getId)
@@ -133,24 +152,44 @@ public class NewApiIntegrationService {
 
     void reconcileOne(ExternalQuotaTransfer transfer) {
         try {
+            boolean withdrawal = DIRECTION_WITHDRAWAL.equals(transfer.getDirection());
+            if (!withdrawal && !DIRECTION_DEPOSIT.equals(transfer.getDirection())) {
+                throw new IllegalStateException("unknown external quota transfer direction");
+            }
             Optional<NewApiQuotaResult> remote = client.status(transfer.getOperationId());
-            NewApiQuotaResult result = remote.orElseGet(() -> client.debit(
-                    transfer.getOperationId(), transfer.getNewApiUserId(), transfer.getQuotaAmount()));
-            validateRemoteResult(transfer, result);
+            NewApiQuotaResult result = remote.orElseGet(() -> withdrawal
+                    ? client.credit(transfer.getOperationId(), transfer.getNewApiUserId(), transfer.getQuotaAmount())
+                    : client.debit(transfer.getOperationId(), transfer.getNewApiUserId(), transfer.getQuotaAmount()));
+            validateRemoteResult(transfer, result, withdrawal ? "credit" : "debit");
             if (result.completed()) {
-                settlementService.settleDeposit(transfer.getOperationId(), result.quotaAfter());
+                if (withdrawal) {
+                    settlementService.settleWithdrawal(transfer.getOperationId(), result.quotaAfter());
+                } else {
+                    settlementService.settleDeposit(transfer.getOperationId(), result.quotaAfter());
+                }
                 return;
             }
             if (result.failed()) {
-                transferMapper.markFailed(transfer.getOperationId(), result.status(), result.errorCode(),
+                settleTerminalFailure(transfer, result.status(), result.errorCode(),
                         remoteFailureMessage(result.errorCode()));
                 return;
             }
             scheduleRetry(transfer, "主站额度操作仍在处理中");
         } catch (NewApiRemoteException e) {
-            scheduleRetry(transfer, safeError(e.getMessage()));
+            if (e.isRetryable()) {
+                scheduleRetry(transfer, "主站通信暂时异常");
+            } else {
+                log.warn("主站拒绝外部额度操作 operationId={} status={} message={}",
+                        transfer.getOperationId(), e.getStatusCode(), e.getMessage());
+                try {
+                    settleTerminalFailure(transfer, "failed", "remote_rejected", "主站拒绝了本次额度操作");
+                } catch (Exception settlementError) {
+                    log.error("外部额度失败补偿暂时未完成 operationId={}", transfer.getOperationId(), settlementError);
+                    scheduleRetry(transfer, "本地失败补偿暂时未完成");
+                }
+            }
         } catch (Exception e) {
-            log.error("外部额度转入对账失败 operationId={}", transfer.getOperationId(), e);
+            log.error("外部额度对账失败 operationId={}", transfer.getOperationId(), e);
             scheduleRetry(transfer, "本地结算暂时失败");
         }
     }
@@ -170,13 +209,28 @@ public class NewApiIntegrationService {
         }
     }
 
-    private void validateRemoteResult(ExternalQuotaTransfer transfer, NewApiQuotaResult result) {
+    private void validateRemoteResult(ExternalQuotaTransfer transfer,
+                                      NewApiQuotaResult result,
+                                      String expectedKind) {
         if (result == null
                 || !transfer.getOperationId().equals(result.operationId())
                 || transfer.getNewApiUserId() != result.userId()
                 || transfer.getQuotaAmount() != result.amount()
-                || !"debit".equalsIgnoreCase(result.kind())) {
+                || !expectedKind.equalsIgnoreCase(result.kind())) {
             throw new IllegalStateException("New API quota response does not match the local transfer");
+        }
+    }
+
+    private void settleTerminalFailure(ExternalQuotaTransfer transfer,
+                                       String remoteStatus,
+                                       String errorCode,
+                                       String errorMessage) {
+        if (DIRECTION_WITHDRAWAL.equals(transfer.getDirection())) {
+            settlementService.refundWithdrawal(
+                    transfer.getOperationId(), remoteStatus, errorCode, errorMessage);
+        } else {
+            transferMapper.markFailed(
+                    transfer.getOperationId(), remoteStatus, errorCode, errorMessage);
         }
     }
 
@@ -243,7 +297,9 @@ public class NewApiIntegrationService {
 
     private ExternalQuotaTransferDTO toDTO(ExternalQuotaTransfer transfer) {
         return new ExternalQuotaTransferDTO(
-                transfer.getOperationId(), transfer.getDirection(), transfer.getAmount(), transfer.getQuotaAmount(),
+                transfer.getOperationId(), transfer.getDirection(), transfer.getAmount(), transfer.getFee(),
+                transfer.getNetAmount(), transfer.getEffectiveTaxRate(), transfer.getBusinessDate(),
+                transfer.getQuotaAmount(),
                 transfer.getStatus(), transfer.getErrorCode(), transfer.getErrorMessage(), transfer.getRemoteQuotaAfter(),
                 transfer.getCreatedAt(), transfer.getCompletedAt()
         );
@@ -253,7 +309,7 @@ public class NewApiIntegrationService {
         if ("insufficient_quota".equals(errorCode)) return "主站额度不足";
         if ("user_disabled".equals(errorCode)) return "主站账户已被停用";
         if ("user_not_found".equals(errorCode)) return "主站账户不存在";
-        return "主站拒绝了额度转入";
+        return "主站拒绝了本次额度操作";
     }
 
     private String safeError(String message) {

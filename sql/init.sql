@@ -816,6 +816,10 @@ CREATE TABLE IF NOT EXISTS external_quota_transfer (
     new_api_user_id    BIGINT NOT NULL,
     direction          VARCHAR(16) NOT NULL,
     amount             DECIMAL(18,2) NOT NULL,
+    fee                DECIMAL(18,2) NOT NULL DEFAULT 0,
+    net_amount         DECIMAL(18,2),
+    effective_tax_rate DECIMAL(10,8) NOT NULL DEFAULT 0,
+    business_date      DATE,
     quota_amount       BIGINT NOT NULL,
     status             VARCHAR(16) NOT NULL,
     remote_status      VARCHAR(16),
@@ -828,10 +832,17 @@ CREATE TABLE IF NOT EXISTS external_quota_transfer (
     created_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at         TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE external_quota_transfer ADD COLUMN IF NOT EXISTS fee DECIMAL(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE external_quota_transfer ADD COLUMN IF NOT EXISTS net_amount DECIMAL(18,2);
+ALTER TABLE external_quota_transfer ADD COLUMN IF NOT EXISTS effective_tax_rate DECIMAL(10,8) NOT NULL DEFAULT 0;
+ALTER TABLE external_quota_transfer ADD COLUMN IF NOT EXISTS business_date DATE;
+UPDATE external_quota_transfer SET net_amount = amount WHERE net_amount IS NULL;
 CREATE INDEX IF NOT EXISTS idx_external_quota_transfer_user
     ON external_quota_transfer(user_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_external_quota_transfer_reconcile
     ON external_quota_transfer(status, direction, next_retry_at, id);
+CREATE INDEX IF NOT EXISTS idx_external_quota_transfer_withdrawal_day
+    ON external_quota_transfer(user_id, direction, business_date, status);
 
 --新版本删掉这两列(待执行不进入commit)
 ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;

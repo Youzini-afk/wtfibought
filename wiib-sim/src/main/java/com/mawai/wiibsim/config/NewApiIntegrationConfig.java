@@ -35,6 +35,24 @@ public class NewApiIntegrationConfig extends BaseRestTemplateConfig {
     @Value("${new-api.read-timeout:8000}")
     private int readTimeout;
 
+    @Value("${new-api.withdrawal.enabled:false}")
+    private boolean withdrawalEnabled;
+
+    @Value("${new-api.withdrawal.profit-rate:0.50}")
+    private BigDecimal withdrawalProfitRate;
+
+    @Value("${new-api.withdrawal.daily-limit:100.00}")
+    private BigDecimal withdrawalDailyLimit;
+
+    @Value("${new-api.withdrawal.min-amount:1.00}")
+    private BigDecimal withdrawalMinAmount;
+
+    @Value("${new-api.withdrawal.zone-id:Asia/Shanghai}")
+    private String withdrawalZoneId;
+
+    @Value("${new-api.withdrawal.tax-brackets:20:0.05,50:0.10,100:0.15,*:0.20}")
+    private String withdrawalTaxBrackets;
+
     public boolean isUsable() {
         return enabled
                 && StringUtils.hasText(baseUrl)

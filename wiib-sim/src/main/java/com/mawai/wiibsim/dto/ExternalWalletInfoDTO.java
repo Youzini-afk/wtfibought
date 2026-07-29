@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 public record ExternalWalletInfoDTO(
         boolean enabled,
+        boolean withdrawalEnabled,
         boolean bound,
         Long newApiUserId,
         BigDecimal quotaPerUnit,
