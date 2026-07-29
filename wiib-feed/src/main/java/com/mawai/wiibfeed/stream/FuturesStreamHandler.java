@@ -25,8 +25,6 @@ import java.util.concurrent.ScheduledExecutorService;
 @RequiredArgsConstructor
 public class FuturesStreamHandler implements StreamHandler {
 
-    private static final String REDIS_MARK_PRICE_KEY_PREFIX = "market:markprice:";
-    private static final String REDIS_FUTURES_PRICE_KEY_PREFIX = "market:futures-price:";
     // 指数价，值格式 <price>|<写入ms>：quant RedisLiqSideData 算 premium=(最新价-指数价)/指数价 用，
     // 带时间戳让读方自判时效（超龄按缺数据 NaN），feed 不硬编码策略的时效参数
     private static final String REDIS_INDEX_PRICE_KEY_PREFIX = "market:indexprice:";
@@ -95,13 +93,14 @@ public class FuturesStreamHandler implements StreamHandler {
         int sIdx = raw.indexOf("\"s\":\"");
         if (sIdx < 0) return;
         String symbol = StreamParse.extractQuoted(raw, sIdx + 5);
+        int eIdx = raw.indexOf("\"E\":");
+        long ts = StreamParse.getEventTime(raw, eIdx, System.currentTimeMillis());
 
         if (isMarkPrice) {
             int pIdx = raw.indexOf("\"p\":\"", sIdx);
             if (pIdx < 0) return;
             String markPrice = StreamParse.extractQuoted(raw, pIdx + 5);
-            redisTemplate.opsForValue().set(REDIS_MARK_PRICE_KEY_PREFIX + symbol, markPrice);
-            cacheService.putMarkPrice(symbol, new BigDecimal(markPrice));
+            cacheService.putMarkPrice(symbol, new BigDecimal(markPrice), ts);
 
             // 指数价 i（markPrice 报文自带；REST 兜底伪消息也补了 i）——缺字段就不写，读方自然 NaN 降级
             int iIdx = raw.indexOf("\"i\":\"", sIdx);
@@ -111,22 +110,25 @@ public class FuturesStreamHandler implements StreamHandler {
                         indexPrice + "|" + System.currentTimeMillis());
             }
 
-            broadcastService.broadcastFuturesQuote(symbol, "{\"mp\":\"" + markPrice + "\",\"fws\":" + isFuturesConnected() + "}");
+            broadcastService.broadcastFuturesQuote(symbol, "{\"mp\":\"" + markPrice + "\",\"ts\":" + ts
+                    + ",\"fws\":" + isFuturesConnected() + "}");
 
             // markPrice 事件发 Redis：sim 侧消费做强平、quant 侧消费喂哨兵（解耦：currentPrice 由 sim 自己读 KV）
-            matchPricePublisher.publish("{\"symbol\":\"" + symbol + "\",\"type\":\"markprice\",\"price\":\"" + markPrice + "\"}");
+            matchPricePublisher.publish("{\"symbol\":\"" + symbol + "\",\"type\":\"markprice\",\"price\":\"" + markPrice
+                    + "\",\"ts\":" + ts + "}");
         } else {
             // miniTicker: "c" 是最新价
             int cIdx = raw.indexOf("\"c\":\"", sIdx);
             if (cIdx < 0) return;
             String price = StreamParse.extractQuoted(raw, cIdx + 5);
-            redisTemplate.opsForValue().set(REDIS_FUTURES_PRICE_KEY_PREFIX + symbol, price);
-            cacheService.putFuturesPrice(symbol, new BigDecimal(price));
+            cacheService.putFuturesPrice(symbol, new BigDecimal(price), ts);
 
-            broadcastService.broadcastFuturesQuote(symbol, "{\"fp\":\"" + price + "\",\"fws\":" + isFuturesConnected() + "}");
+            broadcastService.broadcastFuturesQuote(symbol, "{\"fp\":\"" + price + "\",\"ts\":" + ts
+                    + ",\"fws\":" + isFuturesConnected() + "}");
 
             // futures 价格事件发 Redis：sim 侧消费做合约限价单结算（解耦：不再进程内直调）
-            matchPricePublisher.publish("{\"symbol\":\"" + symbol + "\",\"type\":\"futures\",\"price\":\"" + price + "\"}");
+            matchPricePublisher.publish("{\"symbol\":\"" + symbol + "\",\"type\":\"futures\",\"price\":\"" + price
+                    + "\",\"ts\":" + ts + "}");
         }
     }
 

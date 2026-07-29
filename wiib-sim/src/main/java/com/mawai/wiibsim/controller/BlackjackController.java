@@ -2,9 +2,7 @@ package com.mawai.wiibsim.controller;
 
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.BlackjackBetRequest;
-import com.mawai.wiibcommon.dto.BlackjackConvertRequest;
 import com.mawai.wiibcommon.dto.BlackjackStatusDTO;
-import com.mawai.wiibcommon.dto.ConvertResultDTO;
 import com.mawai.wiibcommon.dto.GameStateDTO;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.service.BlackjackService;
@@ -70,10 +68,4 @@ public class BlackjackController {
         return Result.ok(blackjackService.forfeit(userId));
     }
 
-    @PostMapping("/convert")
-    @Operation(summary = "积分转出为资金")
-    public Result<ConvertResultDTO> convert(@CurrentUserId Long userId, @RequestBody BlackjackConvertRequest request) {
-        long amount = request != null && request.getAmount() != null ? request.getAmount() : 0L;
-        return Result.ok(blackjackService.convert(userId, amount));
-    }
 }

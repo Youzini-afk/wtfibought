@@ -1,11 +1,10 @@
 package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.config.BinanceProperties;
+import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.Message;
-import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 
 import java.math.BigDecimal;
@@ -23,11 +22,11 @@ class MatchPriceConsumerTest {
     private final FuturesLiquidationService liquidationService = mock(FuturesLiquidationService.class);
     private final FuturesSettlementService settlementService = mock(FuturesSettlementService.class);
     private final CrossLiquidationService crossLiquidationService = mock(CrossLiquidationService.class);
-    private final StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+    private final CacheService cacheService = mock(CacheService.class);
 
     private MatchPriceConsumer consumer() {
         return new MatchPriceConsumer(
-                mock(RedisMessageListenerContainer.class), redisTemplate, cryptoOrderService,
+                mock(RedisMessageListenerContainer.class), cacheService, cryptoOrderService,
                 liquidationService, settlementService, crossLiquidationService,
                 mock(BinanceRestClient.class), mock(BinanceProperties.class));
     }
@@ -52,11 +51,8 @@ class MatchPriceConsumerTest {
     }
 
     @Test
-    @SuppressWarnings("unchecked")
     void dispatchesMarkPriceToLiquidationWithCurrentPriceFromKv() {
-        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
-        when(redisTemplate.opsForValue()).thenReturn(valueOps);
-        when(valueOps.get("market:futures-price:BTCUSDT")).thenReturn("49950");
+        when(cacheService.getFuturesPrice("BTCUSDT")).thenReturn(new BigDecimal("49950"));
 
         consumer().onMessage(msg("{\"symbol\":\"BTCUSDT\",\"type\":\"markprice\",\"price\":\"50000\"}"), null);
         // 强平：markPrice 来自事件，currentPrice 从 KV 读

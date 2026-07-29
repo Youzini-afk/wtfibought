@@ -33,7 +33,10 @@ public final class BuffDrawUtil {
             temp.put(r, new java.util.ArrayList<>());
         }
         for (BuffType b : BuffType.values()) {
-            temp.get(b.getRarity()).add(b);
+            // CASH 常量保留用于兼容数据库中的历史记录，但不再进入新抽取池。
+            if (b.getCategory() == BuffType.Category.DISCOUNT) {
+                temp.get(b.getRarity()).add(b);
+            }
         }
         for (Rarity r : RARITIES) {
             BUFF_BY_RARITY.put(r, List.copyOf(temp.get(r)));

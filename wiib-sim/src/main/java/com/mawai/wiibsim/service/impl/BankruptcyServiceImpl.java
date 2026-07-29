@@ -53,7 +53,7 @@ public class BankruptcyServiceImpl implements BankruptcyService {
     private final AssetValuationService assetValuationService;
     private final UserLedgerMapper userLedgerMapper;
 
-    @Value("${trading.initial-balance:10000}")
+    @Value("${trading.initial-balance:0}")
     private BigDecimal initialBalance;
 
     @Override

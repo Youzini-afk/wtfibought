@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS "user" (
     avatar VARCHAR(256),
     password_hash VARCHAR(60),
     invite_code_id BIGINT,
-    balance DECIMAL(18,2) NOT NULL DEFAULT 10000.00,
+    balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     frozen_balance DECIMAL(18,2) NOT NULL DEFAULT 0,
     game_balance DECIMAL(18,2) NOT NULL DEFAULT 0,
     margin_loan_principal DECIMAL(18,2) NOT NULL DEFAULT 0,
@@ -110,7 +110,8 @@ COMMENT ON COLUMN user_buff.created_at IS '创建时间';
 CREATE TABLE IF NOT EXISTS blackjack_account (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL UNIQUE REFERENCES "user"(id),
-    chips BIGINT NOT NULL DEFAULT 200,
+    -- Legacy compatibility only. Blackjack now settles directly against user.game_balance.
+    chips BIGINT NOT NULL DEFAULT 0,
     today_converted BIGINT NOT NULL DEFAULT 0,
     last_convert_date DATE,
     last_reset_date DATE,
@@ -788,6 +789,10 @@ COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=�
 -- 排行榜用户详情页的公开开关。DEFAULT TRUE 让存量用户和新用户都是开着的（需求：默认开启）
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS profile_public BOOLEAN NOT NULL DEFAULT TRUE;
 COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持仓与交易历史。关掉只挡详情页，仍照常上排行榜（榜上只有总资产/收益率）';
+
+-- 额度经济接入：已有库重跑 init.sql 时也取消新用户/21点独立筹码的默认赠送。
+ALTER TABLE "user" ALTER COLUMN balance SET DEFAULT 0.00;
+ALTER TABLE blackjack_account ALTER COLUMN chips SET DEFAULT 0;
 
 --新版本删掉这两列(待执行不进入commit)
 ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;

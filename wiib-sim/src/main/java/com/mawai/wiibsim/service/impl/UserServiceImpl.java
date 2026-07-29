@@ -44,7 +44,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
     private final AssetValuationService assetValuationService;
     private final UserLedgerMapper userLedgerMapper;
 
-    @Value("${trading.initial-balance:10000}")
+    @Value("${trading.initial-balance:0}")
     private BigDecimal initialBalance;
 
     @Override
@@ -109,6 +109,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
      */
     @Override
     public void recordInitialGrant(Long userId, BigDecimal balance) {
+        if (balance == null || balance.signum() == 0) {
+            return;
+        }
         UserLedger entry = new UserLedger();
         entry.setUserId(userId);
         entry.setWallet(LedgerWallet.BALANCE);
@@ -171,8 +174,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                                BigDecimal marginLoanPrincipal,
                                BigDecimal marginInterestAccrued) {
         BigDecimal profit = totalAssets.subtract(initialBalance);
-        BigDecimal profitPct = profit.divide(initialBalance, 4, RoundingMode.HALF_UP)
-                .multiply(new BigDecimal("100"));
+        BigDecimal profitPct = initialBalance.signum() > 0
+                ? profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
+                : BigDecimal.ZERO;
 
         UserDTO dto = new UserDTO();
         dto.setId(user.getId());

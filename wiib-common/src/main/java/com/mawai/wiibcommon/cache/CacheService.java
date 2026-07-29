@@ -28,7 +28,14 @@ public class CacheService {
 
     // L1: 加密货币价格（spot/mark/futures 用 key 前缀区分）。put 刷新只在 feed 进程（WS tick），
     // sim/quant 读进程无人回填，必须短过期回源 Redis——否则拆进程后首读值永久冻结（曾致标记价/成交价死价）
-    private final Cache<String, BigDecimal> cryptoPriceCache = Caffeine.newBuilder()
+    private record TimedPrice(BigDecimal price, long timestampMs) {}
+
+    /** 行情超过该时长即不允许继续用于下单/估值。Feed 的 REST 兜底默认每 5 秒刷新。 */
+    static final long MARKET_PRICE_MAX_AGE_MS = 15_000L;
+    private static final long MARKET_PRICE_FUTURE_SKEW_MS = 5_000L;
+    private static final Duration MARKET_PRICE_TTL = Duration.ofSeconds(30);
+
+    private final Cache<String, TimedPrice> cryptoPriceCache = Caffeine.newBuilder()
             .maximumSize(50).expireAfterWrite(Duration.ofSeconds(1)).build();
 
     // prediction 缓存改 Redis 后端（feed 写 sim 读跨进程），窗口/盘口数据靠 TTL 自动清理
@@ -133,13 +140,7 @@ public class CacheService {
     // ==================== 加密货币价格 ====================
 
     public BigDecimal getCryptoPrice(String symbol) {
-        BigDecimal cached = cryptoPriceCache.getIfPresent("spot:" + symbol);
-        if (cached != null) return cached;
-        String val = stringRedisTemplate.opsForValue().get("market:price:" + symbol);
-        if (val == null) return null;
-        BigDecimal price = new BigDecimal(val);
-        cryptoPriceCache.put("spot:" + symbol, price);
-        return price;
+        return getFreshMarketPrice("spot:", "market:price:", symbol);
     }
 
     public Map<String, BigDecimal> getCryptoPrices(List<String> symbols) {
@@ -153,37 +154,74 @@ public class CacheService {
     }
 
     public BigDecimal getMarkPrice(String symbol) {
-        BigDecimal cached = cryptoPriceCache.getIfPresent("mark:" + symbol);
-        if (cached != null) return cached;
-        String val = stringRedisTemplate.opsForValue().get("market:markprice:" + symbol);
-        if (val != null) {
-            BigDecimal price = new BigDecimal(val);
-            cryptoPriceCache.put("mark:" + symbol, price);
-            return price;
-        }
+        BigDecimal price = getFreshMarketPrice("mark:", "market:markprice:", symbol);
+        if (price != null) return price;
         return getCryptoPrice(symbol);
     }
 
     public BigDecimal getFuturesPrice(String symbol) {
-        BigDecimal cached = cryptoPriceCache.getIfPresent("futures:" + symbol);
-        if (cached != null) return cached;
-        String val = stringRedisTemplate.opsForValue().get("market:futures-price:" + symbol);
-        if (val == null) return null;
-        BigDecimal price = new BigDecimal(val);
-        cryptoPriceCache.put("futures:" + symbol, price);
-        return price;
+        return getFreshMarketPrice("futures:", "market:futures-price:", symbol);
     }
 
     public void putCryptoPrice(String symbol, BigDecimal price) {
-        cryptoPriceCache.put("spot:" + symbol, price);
+        putCryptoPrice(symbol, price, System.currentTimeMillis());
+    }
+
+    public void putCryptoPrice(String symbol, BigDecimal price, long timestampMs) {
+        putMarketPrice("spot:", "market:price:", symbol, price, timestampMs);
     }
 
     public void putFuturesPrice(String symbol, BigDecimal price) {
-        cryptoPriceCache.put("futures:" + symbol, price);
+        putFuturesPrice(symbol, price, System.currentTimeMillis());
+    }
+
+    public void putFuturesPrice(String symbol, BigDecimal price, long timestampMs) {
+        putMarketPrice("futures:", "market:futures-price:", symbol, price, timestampMs);
     }
 
     public void putMarkPrice(String symbol, BigDecimal price) {
-        cryptoPriceCache.put("mark:" + symbol, price);
+        putMarkPrice(symbol, price, System.currentTimeMillis());
+    }
+
+    public void putMarkPrice(String symbol, BigDecimal price, long timestampMs) {
+        putMarketPrice("mark:", "market:markprice:", symbol, price, timestampMs);
+    }
+
+    private BigDecimal getFreshMarketPrice(String cachePrefix, String redisPrefix, String symbol) {
+        String cacheKey = cachePrefix + symbol;
+        TimedPrice cached = cryptoPriceCache.getIfPresent(cacheKey);
+        long now = System.currentTimeMillis();
+        if (cached != null && isFresh(cached.timestampMs(), now)) {
+            return cached.price();
+        }
+        if (cached != null) cryptoPriceCache.invalidate(cacheKey);
+
+        String priceValue = stringRedisTemplate.opsForValue().get(redisPrefix + symbol);
+        String timestampValue = stringRedisTemplate.opsForValue().get(redisPrefix + symbol + ":ts");
+        if (priceValue == null || timestampValue == null) return null;
+        try {
+            long timestampMs = Long.parseLong(timestampValue);
+            if (!isFresh(timestampMs, now)) return null;
+            TimedPrice quote = new TimedPrice(new BigDecimal(priceValue), timestampMs);
+            cryptoPriceCache.put(cacheKey, quote);
+            return quote.price();
+        } catch (NumberFormatException ex) {
+            log.warn("无效行情缓存 symbol={} value={} ts={}", symbol, priceValue, timestampValue);
+            return null;
+        }
+    }
+
+    private void putMarketPrice(String cachePrefix, String redisPrefix, String symbol,
+                                BigDecimal price, long timestampMs) {
+        TimedPrice quote = new TimedPrice(price, timestampMs);
+        cryptoPriceCache.put(cachePrefix + symbol, quote);
+        stringRedisTemplate.opsForValue().set(redisPrefix + symbol, price.toPlainString(), MARKET_PRICE_TTL);
+        stringRedisTemplate.opsForValue().set(redisPrefix + symbol + ":ts", String.valueOf(timestampMs), MARKET_PRICE_TTL);
+    }
+
+    private static boolean isFresh(long timestampMs, long nowMs) {
+        long age = nowMs - timestampMs;
+        return age >= -MARKET_PRICE_FUTURE_SKEW_MS && age <= MARKET_PRICE_MAX_AGE_MS;
     }
 
     // ==================== 通用缓存 ====================

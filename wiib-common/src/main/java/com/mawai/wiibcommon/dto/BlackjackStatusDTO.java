@@ -2,20 +2,13 @@ package com.mawai.wiibcommon.dto;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
+
 @Data
 public class BlackjackStatusDTO {
 
-    /** 当前可用积分余额。 */
-    private long chips;
-
-    /** 今日已转出的积分（仅统计当天）。 */
-    private long todayConverted;
-
-    /** 当前可转出的积分（通常为 chips - 初始保底积分，下限 0）。 */
-    private long convertable;
-
-    /** 今日积分转出上限。 */
-    private long todayConvertLimit;
+    /** 当前可用游戏钱包余额。 */
+    private BigDecimal chips;
 
     /** 历史总局数。 */
     private long totalHands;

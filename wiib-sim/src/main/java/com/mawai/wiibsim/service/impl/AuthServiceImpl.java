@@ -58,7 +58,7 @@ public class AuthServiceImpl implements AuthService {
         this.inviteCodeMapper = inviteCodeMapper;
     }
 
-    @Value("${trading.initial-balance:10000}")
+    @Value("${trading.initial-balance:0}")
     private BigDecimal initialBalance;
 
     @Value("${auth.password-login.enabled:false}")
@@ -105,7 +105,7 @@ public class AuthServiceImpl implements AuthService {
             // 3. 查找或创建用户
             User user = userService.findByLinuxDoId(linuxDoId);
             if (user == null) {
-                // 首次登录，创建用户并赠送初始资金
+                // 首次登录只创建账户，默认资金为 0；资金由 New API 额度转入。
                 user = new User();
                 user.setLinuxDoId(linuxDoId);
                 user.setUsername(username);
@@ -113,8 +113,7 @@ public class AuthServiceImpl implements AuthService {
                 user.setBalance(initialBalance);
                 try {
                     userService.save(user);
-                    // 建号走 INSERT，记账切面（只切 atomic* 资金方法）抓不到，必须显式补这一笔，
-                    // 否则新用户一落库就是 SUM(delta)=0 而 balance=10000
+                    // 非零兼容配置仍补期初账；默认 0 不产生虚假的赠送流水。
                     userService.recordInitialGrant(user.getId(), initialBalance);
                 } catch (DuplicateKeyException e) {
                     // 本意是"并发回调抢先创建，重查后继续登录"（那一笔 INITIAL_GRANT 由抢先者记了，不重复记）。
@@ -227,7 +226,7 @@ public class AuthServiceImpl implements AuthService {
         } catch (DuplicateKeyException e) {
             throw new BizException("用户名已存在");
         }
-        // 同 OAuth 首登：建号是 INSERT，切面抓不到，初始资金得自己补记
+        // 非零兼容配置仍补期初账；默认 0 不产生虚假的赠送流水。
         userService.recordInitialGrant(user.getId(), initialBalance);
         StpUtil.login(user.getId());
         log.info("邀请码注册成功: {} UserId={} inviteCodeId={}", name, user.getId(), codeId);

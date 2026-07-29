@@ -72,7 +72,7 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
                 tradfi == null ? Set.of() : Set.copyOf(tradfi));
     }
 
-    @org.springframework.beans.factory.annotation.Value("${trading.initial-balance:10000}")
+    @org.springframework.beans.factory.annotation.Value("${trading.initial-balance:0}")
     private BigDecimal initialBalance;
 
     private final Cache<Long, AssetSnapshotDTO> realtimeCache = Caffeine.newBuilder()
@@ -338,7 +338,9 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
                 .subtract(marginInterest);
 
         BigDecimal profit = totalAssets.subtract(initialBalance);
-        BigDecimal profitPct = profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"));
+        BigDecimal profitPct = initialBalance.signum() > 0
+                ? profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
+                : BigDecimal.ZERO;
 
         UserAssetSnapshot snapshot = new UserAssetSnapshot();
         snapshot.setUserId(userId);

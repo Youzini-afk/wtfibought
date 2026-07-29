@@ -1,7 +1,6 @@
 package com.mawai.wiibsim.service;
 
 import com.mawai.wiibcommon.dto.BlackjackStatusDTO;
-import com.mawai.wiibcommon.dto.ConvertResultDTO;
 import com.mawai.wiibcommon.dto.GameStateDTO;
 
 public interface BlackjackService {
@@ -22,5 +21,4 @@ public interface BlackjackService {
 
     GameStateDTO forfeit(Long userId);
 
-    ConvertResultDTO convert(Long userId, long amount);
 }

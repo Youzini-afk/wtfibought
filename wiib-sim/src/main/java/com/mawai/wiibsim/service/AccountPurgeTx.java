@@ -36,7 +36,7 @@ public class AccountPurgeTx {
     private final UserLedgerMapper userLedgerMapper;
     private final UserService userService;
 
-    @Value("${trading.initial-balance:10000}")
+    @Value("${trading.initial-balance:0}")
     BigDecimal initialBalance;
 
     /**

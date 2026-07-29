@@ -102,4 +102,42 @@ class CacheServiceTest {
         assertThat(history).hasSize(1);
         assertThat(history.get(0)).containsEntry("time", 1700000000000L).containsEntry("price", "95000.5");
     }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void marketPriceWritesValueAndTimestampWithTtl() {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        CacheService cache = withRedis(valueOps);
+
+        cache.putCryptoPrice("BTCUSDT", new BigDecimal("50000.25"), 1700000000000L);
+
+        verify(valueOps).set(eq("market:price:BTCUSDT"), eq("50000.25"), any(Duration.class));
+        verify(valueOps).set(eq("market:price:BTCUSDT:ts"), eq("1700000000000"), any(Duration.class));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void marketPriceRejectsMissingOrStaleTimestamp() {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        CacheService cache = withRedis(valueOps);
+        when(valueOps.get("market:price:BTCUSDT")).thenReturn("50000");
+
+        assertThat(cache.getCryptoPrice("BTCUSDT")).isNull();
+
+        when(valueOps.get("market:price:BTCUSDT:ts"))
+                .thenReturn(String.valueOf(System.currentTimeMillis() - CacheService.MARKET_PRICE_MAX_AGE_MS - 1000));
+        assertThat(cache.getCryptoPrice("BTCUSDT")).isNull();
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void marketPriceAcceptsFreshTimestamp() {
+        ValueOperations<String, String> valueOps = mock(ValueOperations.class);
+        CacheService cache = withRedis(valueOps);
+        when(valueOps.get("market:futures-price:BTCUSDT")).thenReturn("49950");
+        when(valueOps.get("market:futures-price:BTCUSDT:ts"))
+                .thenReturn(String.valueOf(System.currentTimeMillis()));
+
+        assertThat(cache.getFuturesPrice("BTCUSDT")).isEqualByComparingTo("49950");
+    }
 }

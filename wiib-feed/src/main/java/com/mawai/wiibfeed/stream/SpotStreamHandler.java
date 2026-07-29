@@ -7,7 +7,6 @@ import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibfeed.WsConnection;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -23,10 +22,7 @@ import java.util.concurrent.ScheduledExecutorService;
 @RequiredArgsConstructor
 public class SpotStreamHandler implements StreamHandler {
 
-    private static final String REDIS_KEY_PREFIX = "market:price:";
-
     private final BinanceProperties props;
-    private final StringRedisTemplate redisTemplate;
     private final CacheService cacheService;
     private final MarketBroadcaster broadcastService;
     private final BinanceRestClient restClient;
@@ -85,15 +81,15 @@ public class SpotStreamHandler implements StreamHandler {
         int eIdx = raw.indexOf("\"E\":");
         long ts = StreamParse.getEventTime(raw, eIdx, System.currentTimeMillis());
 
-        redisTemplate.opsForValue().set(REDIS_KEY_PREFIX + symbol, price);
         BigDecimal bd = new BigDecimal(price);
-        cacheService.putCryptoPrice(symbol, bd);
+        cacheService.putCryptoPrice(symbol, bd, ts);
         String msg = "{\"price\":\"" + price + "\",\"ts\":" + ts
                 + ",\"ws\":" + isConnected() + "}";
         broadcastService.broadcastCryptoQuote(symbol, msg);
 
         // 价格事件发 Redis，sim 侧 MatchPriceConsumer 订阅后触发现货限价单撮合（解耦：不再进程内直调）
-        matchPricePublisher.publish("{\"symbol\":\"" + symbol + "\",\"type\":\"spot\",\"price\":\"" + price + "\"}");
+        matchPricePublisher.publish("{\"symbol\":\"" + symbol + "\",\"type\":\"spot\",\"price\":\"" + price
+                + "\",\"ts\":" + ts + "}");
     }
 
     // ── REST兜底：WS断开期间切REST轮询保证价格不中断 ──

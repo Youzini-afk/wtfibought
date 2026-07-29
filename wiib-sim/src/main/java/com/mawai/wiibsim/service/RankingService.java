@@ -53,7 +53,7 @@ public class RankingService {
     /** 单页封顶，同 force-orders / 全站成交那条口径 */
     private static final int MAX_PAGE_SIZE = 100;
 
-    @Value("${trading.initial-balance:10000}")
+    @Value("${trading.initial-balance:0}")
     private BigDecimal initialBalance;
 
     public List<RankingDTO> getRanking() {

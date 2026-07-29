@@ -66,9 +66,6 @@ export interface BuffStatus {
 // ========== Blackjack相关类型 ==========
 export interface BlackjackStatus {
   chips: number;
-  todayConverted: number;
-  convertable: number;
-  todayConvertLimit: number;
   totalHands: number;
   totalWon: number;
   totalLost: number;
@@ -103,14 +100,6 @@ export interface HandResult {
   result: 'WIN' | 'LOSE' | 'PUSH' | 'BLACKJACK';
   payout: number;
   net: number;
-}
-
-export interface ConvertResult {
-  chips: number;
-  balance: number;
-  todayConverted: number;
-  /** 转出后仍可转出的积分，后端算好返回，前端不再自己减保底值 */
-  convertable: number;
 }
 
 // ========== 矿工游戏类型 ==========

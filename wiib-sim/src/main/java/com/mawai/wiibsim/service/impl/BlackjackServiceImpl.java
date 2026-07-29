@@ -3,12 +3,10 @@ package com.mawai.wiibsim.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.mawai.wiibcommon.dto.*;
 import com.mawai.wiibcommon.entity.BlackjackAccount;
-import com.mawai.wiibcommon.entity.BlackjackConvertLog;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
-import com.mawai.wiibsim.ledger.Ledger;
+import com.mawai.wiibsim.ledger.LedgerCtx;
 import com.mawai.wiibsim.mapper.BlackjackAccountMapper;
-import com.mawai.wiibsim.mapper.BlackjackConvertLogMapper;
 import com.mawai.wiibsim.service.BlackjackService;
 import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibsim.service.UserService;
@@ -26,7 +24,9 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 
-import static com.mawai.wiibcommon.enums.LedgerBizType.BLACKJACK_CONVERT;
+import static com.mawai.wiibcommon.enums.LedgerBizType.BLACKJACK_BET;
+import static com.mawai.wiibcommon.enums.LedgerBizType.BLACKJACK_MIGRATION;
+import static com.mawai.wiibcommon.enums.LedgerBizType.BLACKJACK_PAYOUT;
 
 /**
  * Blackjack 服务实现。
@@ -42,15 +42,10 @@ import static com.mawai.wiibcommon.enums.LedgerBizType.BLACKJACK_CONVERT;
 public class BlackjackServiceImpl implements BlackjackService {
 
     private final BlackjackAccountMapper accountMapper;
-    private final BlackjackConvertLogMapper convertLogMapper;
     private final CacheService cacheService;
     private final UserService userService;
     private final GameLockExecutor gameLock;
 
-    /** 用户初始积分，同时也是每日保底重置目标值。 */
-    private static final long INITIAL_CHIPS = 200L;
-    /** 每日最多可从 Blackjack 转出的积分上限。 */
-    private static final long DAILY_CONVERT_LIMIT = 500L;
     /** 允许的下注档位，只收这四个值，前端筹码与之一一对应。 */
     private static final Set<Long> BET_TIERS = Set.of(50L, 100L, 500L, 1000L);
     /** 一局牌靴使用的副数（当前为单副牌）。 */
@@ -148,19 +143,12 @@ public class BlackjackServiceImpl implements BlackjackService {
 
     @Override
     public BlackjackStatusDTO getStatus(Long userId) {
-        return gameLock.executeInLock(LK, userId, () -> {
+        return gameLock.executeInLockTx(LK, userId, () -> {
             BlackjackAccount account = getOrCreateAccount(userId);
 
-            // 仅在无活动牌局时执行每日重置，避免跨天中途套利。
-            if (getSession(userId) == null) {
-                checkDailyReset(account);
-            }
-
             BlackjackStatusDTO dto = new BlackjackStatusDTO();
-            dto.setChips(account.getChips());
-            dto.setTodayConverted(getTodayConverted(account));
-            dto.setConvertable(convertableOf(account));
-            dto.setTodayConvertLimit(DAILY_CONVERT_LIMIT);
+            BigDecimal balance = gameBalance(userId);
+            dto.setChips(balance);
             dto.setTotalHands(account.getTotalHands());
             dto.setTotalWon(account.getTotalWon());
             dto.setTotalLost(account.getTotalLost());
@@ -169,7 +157,7 @@ public class BlackjackServiceImpl implements BlackjackService {
 
             BlackjackSession session = getSession(userId);
             if (session != null) {
-                dto.setActiveGame(buildGameState(session, account.getChips()));
+                dto.setActiveGame(buildGameState(session, balance));
             }
             return dto;
         });
@@ -189,15 +177,10 @@ public class BlackjackServiceImpl implements BlackjackService {
             }
 
             BlackjackAccount account = getOrCreateAccount(userId);
-            checkDailyReset(account);
-
-            if (account.getChips() < amount) {
+            if (gameBalance(userId).compareTo(BigDecimal.valueOf(amount)) < 0) {
                 throw new BizException(ErrorCode.BJ_CHIPS_NOT_ENOUGH);
             }
-
-            account.setChips(account.getChips() - amount);
-            account.setUpdatedAt(LocalDateTime.now());
-            accountMapper.updateById(account);
+            debitGameBalance(userId, amount);
 
             BlackjackSession session = new BlackjackSession();
             session.setShoe(createShoe());
@@ -226,14 +209,14 @@ public class BlackjackServiceImpl implements BlackjackService {
 
             if (playerBJ && dealerBJ) {
                 session.setPhase(PHASE_SETTLED);
-                account.setChips(account.getChips() + amount);
+                payoutGameBalance(userId, amount);
                 account.setTotalHands(account.getTotalHands() + 1);
                 account.setUpdatedAt(LocalDateTime.now());
                 accountMapper.updateById(account);
 
                 GameStateDTO state = buildSettledState(
                         session,
-                        account.getChips(),
+                        gameBalance(userId),
                         List.of(makeResult(0, "PUSH", amount, 0))
                 );
                 deleteSession(userId);
@@ -245,7 +228,7 @@ public class BlackjackServiceImpl implements BlackjackService {
                 if (cardRank(dealerUpCard).equals("A")) {
                     // 玩家自然BJ且庄家明牌A：只允许买保险/停牌，不可继续普通动作。
                     saveSession(userId, session);
-                    return buildGameState(session, account.getChips());
+                    return buildGameState(session, gameBalance(userId));
                 }
 
                 session.setPhase(PHASE_SETTLED);
@@ -259,7 +242,7 @@ public class BlackjackServiceImpl implements BlackjackService {
                     net = granted;
                 }
 
-                account.setChips(account.getChips() + payout);
+                payoutGameBalance(userId, payout);
                 account.setTotalHands(account.getTotalHands() + 1);
                 if (net > 0) {
                     account.setTotalWon(account.getTotalWon() + net);
@@ -270,7 +253,7 @@ public class BlackjackServiceImpl implements BlackjackService {
 
                 GameStateDTO state = buildSettledState(
                         session,
-                        account.getChips(),
+                        gameBalance(userId),
                         List.of(makeResult(0, "BLACKJACK", payout, net))
                 );
                 deleteSession(userId);
@@ -290,7 +273,7 @@ public class BlackjackServiceImpl implements BlackjackService {
                 adjustPoolLoss(-bet);
                 GameStateDTO state = buildSettledState(
                         session,
-                        account.getChips(),
+                        gameBalance(userId),
                         List.of(makeResult(0, "LOSE", 0, -bet))
                 );
                 deleteSession(userId);
@@ -298,7 +281,7 @@ public class BlackjackServiceImpl implements BlackjackService {
             }
 
             saveSession(userId, session);
-            return buildGameState(session, account.getChips());
+            return buildGameState(session, gameBalance(userId));
         });
     }
 
@@ -325,8 +308,7 @@ public class BlackjackServiceImpl implements BlackjackService {
             }
 
             saveSession(userId, session);
-            BlackjackAccount account = getAccount(userId);
-            return buildGameState(session, account.getChips());
+            return buildGameState(session, gameBalance(userId));
         });
     }
 
@@ -359,15 +341,11 @@ public class BlackjackServiceImpl implements BlackjackService {
                 throw new BizException(ErrorCode.BJ_ACTION_NOT_ALLOWED);
             }
 
-            BlackjackAccount account = getAccount(userId);
             long extraBet = hand.getBet();
-            if (account.getChips() < extraBet) {
+            if (gameBalance(userId).compareTo(BigDecimal.valueOf(extraBet)) < 0) {
                 throw new BizException(ErrorCode.BJ_CHIPS_NOT_ENOUGH);
             }
-
-            account.setChips(account.getChips() - extraBet);
-            account.setUpdatedAt(LocalDateTime.now());
-            accountMapper.updateById(account);
+            debitGameBalance(userId, extraBet);
 
             hand.setBet(hand.getBet() + extraBet);
             hand.setDoubled(true);
@@ -402,15 +380,11 @@ public class BlackjackServiceImpl implements BlackjackService {
                 throw new BizException(ErrorCode.BJ_ACTION_NOT_ALLOWED);
             }
 
-            BlackjackAccount account = getAccount(userId);
             long extraBet = session.getBetPerHand();
-            if (account.getChips() < extraBet) {
+            if (gameBalance(userId).compareTo(BigDecimal.valueOf(extraBet)) < 0) {
                 throw new BizException(ErrorCode.BJ_CHIPS_NOT_ENOUGH);
             }
-
-            account.setChips(account.getChips() - extraBet);
-            account.setUpdatedAt(LocalDateTime.now());
-            accountMapper.updateById(account);
+            debitGameBalance(userId, extraBet);
 
             String card1 = hand.getCards().get(0);
             String card2 = hand.getCards().get(1);
@@ -430,7 +404,7 @@ public class BlackjackServiceImpl implements BlackjackService {
             dealCard(session, hand2.getCards());
 
             saveSession(userId, session);
-            return buildGameState(session, account.getChips());
+            return buildGameState(session, gameBalance(userId));
         });
     }
 
@@ -457,15 +431,11 @@ public class BlackjackServiceImpl implements BlackjackService {
                 throw new BizException(ErrorCode.BJ_ACTION_NOT_ALLOWED);
             }
 
-            BlackjackAccount account = getAccount(userId);
             long insuranceCost = session.getBetPerHand() / 2;
-            if (account.getChips() < insuranceCost) {
+            if (gameBalance(userId).compareTo(BigDecimal.valueOf(insuranceCost)) < 0) {
                 throw new BizException(ErrorCode.BJ_CHIPS_NOT_ENOUGH);
             }
-
-            account.setChips(account.getChips() - insuranceCost);
-            account.setUpdatedAt(LocalDateTime.now());
-            accountMapper.updateById(account);
+            debitGameBalance(userId, insuranceCost);
 
             session.setInsuranceTaken(true);
             session.setInsuranceBet(insuranceCost);
@@ -476,7 +446,7 @@ public class BlackjackServiceImpl implements BlackjackService {
             }
 
             saveSession(userId, session);
-            return buildGameState(session, account.getChips());
+            return buildGameState(session, gameBalance(userId));
         });
     }
 
@@ -502,7 +472,7 @@ public class BlackjackServiceImpl implements BlackjackService {
 
             GameStateDTO state = new GameStateDTO();
             state.setPhase(PHASE_SETTLED);
-            state.setChips(account.getChips());
+            state.setChips(gameBalance(userId));
             state.setActions(List.of(ACTION_BET));
             state.setPlayerHands(List.of());
             state.setDealerCards(List.of());
@@ -514,63 +484,6 @@ public class BlackjackServiceImpl implements BlackjackService {
         });
     }
 
-    @Override
-    @Ledger(BLACKJACK_CONVERT)
-    public ConvertResultDTO convert(Long userId, long amount) {
-        // 全类唯一动 user.game_balance 的地方（筹码在 blackjack_account，不是账本钱包）。
-        // blackjack_account 是读-改-写全行覆写，无 CAS 无 @Version，全靠这把锁串行——重入就能造出钱
-        return gameLock.executeInLockTx(LK, userId, () -> {
-            if (amount <= 0) {
-                throw new BizException(ErrorCode.PARAM_ERROR);
-            }
-            if (getSession(userId) != null) {
-                throw new BizException(ErrorCode.BJ_GAME_IN_PROGRESS);
-            }
-
-            BlackjackAccount account = getOrCreateAccount(userId);
-            checkDailyReset(account);
-
-            long convertable = convertableOf(account);
-            if (amount > convertable) {
-                throw new BizException(ErrorCode.BJ_CONVERT_INSUFFICIENT);
-            }
-
-            long todayConverted = getTodayConverted(account);
-            if (todayConverted + amount > DAILY_CONVERT_LIMIT) {
-                throw new BizException(ErrorCode.BJ_CONVERT_LIMIT);
-            }
-
-            long chipsBefore = account.getChips();
-            BigDecimal balanceBefore = userService.getGameBalance(userId);
-
-            account.setChips(account.getChips() - amount);
-            account.setTodayConverted(todayConverted + amount);
-            account.setLastConvertDate(LocalDate.now());
-            account.setUpdatedAt(LocalDateTime.now());
-            accountMapper.updateById(account);
-
-            // 筹码兑现进游戏钱包（21点是游戏，赢利属游戏资金；想交易需再手动划转）
-            userService.updateGameBalance(userId, BigDecimal.valueOf(amount));
-
-            BlackjackConvertLog logEntry = new BlackjackConvertLog();
-            logEntry.setUserId(userId);
-            logEntry.setAmount(amount);
-            logEntry.setChipsBefore(chipsBefore);
-            logEntry.setChipsAfter(account.getChips());
-            logEntry.setBalanceBefore(balanceBefore);
-            logEntry.setBalanceAfter(balanceBefore.add(BigDecimal.valueOf(amount)));
-            logEntry.setCreatedAt(LocalDateTime.now());
-            convertLogMapper.insert(logEntry);
-
-            ConvertResultDTO result = new ConvertResultDTO();
-            result.setChips(account.getChips());
-            result.setBalance(userService.getGameBalance(userId).doubleValue());
-            result.setTodayConverted(account.getTodayConverted());
-            result.setConvertable(convertableOf(account));
-            return result;
-        });
-    }
-
     // ==================== 游戏引擎内部 ====================
 
     // 当前手结束后：还有未行动的手则切过去，否则进庄家回合
@@ -579,8 +492,7 @@ public class BlackjackServiceImpl implements BlackjackService {
         if (nextActive >= 0) {
             session.setActiveHandIndex(nextActive);
             saveSession(userId, session);
-            BlackjackAccount account = getAccount(userId);
-            return buildGameState(session, account.getChips());
+            return buildGameState(session, gameBalance(userId));
         }
         return dealerTurnAndSettle(userId, session);
     }
@@ -685,7 +597,7 @@ public class BlackjackServiceImpl implements BlackjackService {
             adjustPoolLoss(totalNet);
         }
 
-        account.setChips(account.getChips() + totalPayout);
+        payoutGameBalance(userId, totalPayout);
         account.setTotalHands(account.getTotalHands() + 1);
         if (totalNet > 0) {
             account.setTotalWon(account.getTotalWon() + totalNet);
@@ -696,7 +608,7 @@ public class BlackjackServiceImpl implements BlackjackService {
         account.setUpdatedAt(LocalDateTime.now());
         accountMapper.updateById(account);
 
-        GameStateDTO state = buildSettledState(session, account.getChips(), results);
+        GameStateDTO state = buildSettledState(session, gameBalance(userId), results);
         deleteSession(userId);
         return state;
     }
@@ -813,12 +725,14 @@ public class BlackjackServiceImpl implements BlackjackService {
                 new LambdaQueryWrapper<BlackjackAccount>().eq(BlackjackAccount::getUserId, userId)
         );
         if (account != null) {
+            migrateLegacyChips(userId, account);
             return account;
         }
 
         BlackjackAccount newAccount = new BlackjackAccount();
         newAccount.setUserId(userId);
-        newAccount.setChips(INITIAL_CHIPS);
+        // chips/todayConverted columns are retained only so existing installations can migrate in place.
+        newAccount.setChips(0L);
         newAccount.setTodayConverted(0L);
         newAccount.setTotalHands(0L);
         newAccount.setTotalWon(0L);
@@ -842,38 +756,51 @@ public class BlackjackServiceImpl implements BlackjackService {
         }
     }
 
-    private void checkDailyReset(BlackjackAccount account) {
-        LocalDate today = LocalDate.now();
-        if (account.getLastResetDate() != null && account.getLastResetDate().equals(today)) {
+    /**
+     * Blackjack 与其它小游戏共用同一个游戏钱包；blackjack_account.chips 只保留作旧库兼容。
+     */
+    private BigDecimal gameBalance(Long userId) {
+        BigDecimal balance = userService.getGameBalance(userId);
+        return balance != null ? balance : BigDecimal.ZERO;
+    }
+
+    /**
+     * 旧版每天赠送 200 保底积分。迁移时只保留超过保底的净赢部分，并在同一事务中清零旧字段，
+     * 因而重复访问不会重复入账。
+     */
+    private void migrateLegacyChips(Long userId, BlackjackAccount account) {
+        long legacyChips = account.getChips() != null ? account.getChips() : 0L;
+        if (legacyChips <= 0) {
             return;
         }
-        boolean needReset = account.getChips() < INITIAL_CHIPS;
-        if (needReset) {
-            account.setChips(INITIAL_CHIPS);
-            log.info("用户{}积分每日重置为{}", account.getUserId(), INITIAL_CHIPS);
-        }
-        account.setLastResetDate(today);
+        long earned = Math.max(0L, legacyChips - 200L);
+        account.setChips(0L);
         account.setUpdatedAt(LocalDateTime.now());
         accountMapper.updateById(account);
-    }
-
-    /** 保底积分不可转出，超出部分才算可转出额。 */
-    private long convertableOf(BlackjackAccount account) {
-        return Math.max(0, account.getChips() - INITIAL_CHIPS);
-    }
-
-    private long getTodayConverted(BlackjackAccount account) {
-        LocalDate today = LocalDate.now();
-        if (account.getLastConvertDate() == null || !account.getLastConvertDate().equals(today)) {
-            return 0;
+        if (earned > 0) {
+            LedgerCtx.mark(BLACKJACK_MIGRATION);
+            userService.updateGameBalance(userId, BigDecimal.valueOf(earned));
+            log.info("迁移用户{}的Blackjack旧积分，旧积分={}，净赢转入游戏钱包={}", userId, legacyChips, earned);
         }
-        return account.getTodayConverted();
+    }
+
+    private void debitGameBalance(Long userId, long amount) {
+        LedgerCtx.mark(BLACKJACK_BET);
+        userService.updateGameBalance(userId, BigDecimal.valueOf(amount).negate());
+    }
+
+    private void payoutGameBalance(Long userId, long amount) {
+        if (amount <= 0) {
+            return;
+        }
+        LedgerCtx.mark(BLACKJACK_PAYOUT);
+        userService.updateGameBalance(userId, BigDecimal.valueOf(amount));
     }
 
     // ==================== DTO 构建 ====================
 
     // 玩家操作阶段隐藏庄家暗牌
-    private GameStateDTO buildGameState(BlackjackSession session, long chips) {
+    private GameStateDTO buildGameState(BlackjackSession session, BigDecimal chips) {
         GameStateDTO dto = new GameStateDTO();
         dto.setPhase(session.getPhase());
         dto.setActiveHandIndex(session.getActiveHandIndex());
@@ -895,7 +822,7 @@ public class BlackjackServiceImpl implements BlackjackService {
         return dto;
     }
 
-    private GameStateDTO buildSettledState(BlackjackSession session, long chips, List<HandResultDTO> results) {
+    private GameStateDTO buildSettledState(BlackjackSession session, BigDecimal chips, List<HandResultDTO> results) {
         GameStateDTO dto = new GameStateDTO();
         dto.setPhase(PHASE_SETTLED);
         dto.setActiveHandIndex(0);

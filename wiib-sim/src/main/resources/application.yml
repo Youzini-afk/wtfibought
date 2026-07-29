@@ -69,8 +69,8 @@ auth:
 # 交易配置
 trading:
   # 合约 AI 主决策周期：M1/M3/M5/M15/H1（影响 K 线采集 / 指标计算 / 回测聚合系数）
-  # 新用户初始余额
-  initial-balance: 10000
+  # 新用户/自助重置/破产恢复不再赠送资金；资金只从 New API 额度转入
+  initial-balance: ${INITIAL_BALANCE:0}
   # 手续费率（0.05%）
   commission-rate: 0.0005
   # 全站成交页的假名盐。改了会把所有人假名整体重排（纯展示，不动数据），

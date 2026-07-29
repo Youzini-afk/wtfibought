@@ -2,6 +2,7 @@ package com.mawai.wiibcommon.dto;
 
 import lombok.Data;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Data
@@ -22,8 +23,8 @@ public class GameStateDTO {
     /** 庄家当前点数；玩家回合时通常为 null。 */
     private Integer dealerScore;
 
-    /** 当前用户积分余额。 */
-    private long chips;
+    /** 当前用户游戏钱包余额。 */
+    private BigDecimal chips;
 
     /** 已购买保险金额；未购买时为 null。 */
     private Long insurance;

@@ -3,6 +3,7 @@ package com.mawai.wiibsim.service;
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.config.BinanceProperties;
+import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibcommon.market.MarketStreamChannels;
 import jakarta.annotation.PostConstruct;
@@ -10,7 +11,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.connection.MessageListener;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.stereotype.Component;
@@ -32,11 +32,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class MatchPriceConsumer implements MessageListener {
 
-    // 强平要 markPrice + currentPrice，后者从此 KV 读（与 BinanceWsClient 原逻辑一致）
-    private static final String FUTURES_PRICE_KEY_PREFIX = "market:futures-price:";
-
     private final RedisMessageListenerContainer listenerContainer;
-    private final StringRedisTemplate redisTemplate;
+    private final CacheService cacheService;
     private final CryptoOrderService cryptoOrderService;
     private final FuturesLiquidationService futuresLiquidationService;
     private final FuturesSettlementService futuresSettlementService;
@@ -108,8 +105,8 @@ public class MatchPriceConsumer implements MessageListener {
                 case "futures" -> futuresSettlementService.onPriceUpdate(symbol, new BigDecimal(obj.getString("price")));
                 case "markprice" -> {
                     BigDecimal mp = new BigDecimal(obj.getString("price"));
-                    String cp = redisTemplate.opsForValue().get(FUTURES_PRICE_KEY_PREFIX + symbol);
-                    futuresLiquidationService.checkOnPriceUpdate(symbol, mp, cp != null ? new BigDecimal(cp) : mp);
+                    BigDecimal cp = cacheService.getFuturesPrice(symbol);
+                    futuresLiquidationService.checkOnPriceUpdate(symbol, mp, cp != null ? cp : mp);
                     crossLiquidationService.onPriceTick(symbol);
                 }
                 case "spot-recover" -> cryptoOrderService.recoverLimitOrders(symbol,

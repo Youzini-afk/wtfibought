@@ -6,7 +6,7 @@ import {Card, CardContent, CardHeader, CardTitle} from '../components/ui/card';
 import {Dialog, DialogContent, DialogFooter, DialogHeader} from '../components/ui/dialog';
 import {PlayingCard} from '../components/blackjack/PlayingCard';
 import {Skeleton} from '../components/ui/skeleton';
-import {ArrowLeftRight, CopyPlus, Hand, RotateCcw, Shield, Spade, Split, Square} from 'lucide-react';
+import {CopyPlus, Hand, RotateCcw, Shield, Spade, Split, Square} from 'lucide-react';
 import {cn} from '../lib/utils';
 import type {BlackjackStatus, GameState, HandResult} from '../types';
 
@@ -33,8 +33,6 @@ export function Blackjack() {
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
   const [betAmount, setBetAmount] = useState(100);
-  const [convertAmount, setConvertAmount] = useState('');
-  const [convertOpen, setConvertOpen] = useState(false);
   const [resumeOpen, setResumeOpen] = useState(false);
 
   const fetchStatus = useCallback(async () => {
@@ -90,22 +88,6 @@ export function Blackjack() {
     }
   };
 
-  const handleConvert = async () => {
-    const amt = parseInt(convertAmount);
-    if (!amt || amt <= 0) return;
-    try {
-      const result = await blackjackApi.convert(amt);
-      toast(`成功转出 ${amt.toLocaleString()} 积分至游戏钱包`, 'success');
-      setConvertOpen(false);
-      setConvertAmount('');
-      if (status) {
-        setStatus({ ...status, chips: result.chips, todayConverted: result.todayConverted, convertable: result.convertable });
-      }
-    } catch (e: unknown) {
-      toast((e as Error).message || '转出失败', 'error');
-    }
-  };
-
   if (loading) {
     return (
       <div className="max-w-2xl mx-auto p-4 space-y-4">
@@ -117,7 +99,6 @@ export function Blackjack() {
 
   const chips = game ? game.chips : (status?.chips ?? 0);
   const isSettled = game?.phase === 'SETTLED';
-  const isPlaying = game && !isSettled;
   const poolExhausted = (status?.dailyPool ?? 1) <= 0;
 
   return (
@@ -126,19 +107,19 @@ export function Blackjack() {
         <h3 className="text-base font-bold text-red-800 dark:text-red-400 mb-2">郑重声明与风险提示</h3>
         <ul className="list-disc list-inside text-sm text-red-900 dark:text-red-200/90 space-y-1 leading-relaxed">
           <li>本小游戏不涉及任何赌博行为，不涉及任何现实资金下注或交易。</li>
-          <li>仅用于为用户提供一个每日资金获取途径的趣味化体验，所有结算均为站内机制。</li>
+          <li>仅使用站内游戏钱包进行娱乐，所有结算均为站内机制。</li>
           <li>赌博可能导致成瘾、债务风险、家庭关系破裂及心理健康问题，请远离任何现实赌博活动。</li>
         </ul>
       </div>
 
-      {/* 顶栏：手机上积分+战绩+转出钮允许换行 */}
+      {/* 顶栏 */}
       <div className="flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="flex items-center gap-3">
           <div className="p-2 rounded-xl bg-emerald-500/20">
             <Spade className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
-            <div className="text-xs text-muted-foreground">积分</div>
+            <div className="text-xs text-muted-foreground">游戏余额</div>
             <div className="text-xl font-bold tabular-nums">{chips.toLocaleString()}</div>
           </div>
           {status && (
@@ -155,12 +136,6 @@ export function Blackjack() {
             <div className="text-xs text-muted-foreground text-right space-y-0.5 mr-2">
               <div>{status.totalHands}局 | 赢{status.totalWon.toLocaleString()} | 输{status.totalLost.toLocaleString()}</div>
             </div>
-          )}
-          {status && status.convertable > 0 && !isPlaying && (
-            <Button variant="outline" size="sm" onClick={() => setConvertOpen(true)}>
-              <ArrowLeftRight className="w-3.5 h-3.5" />
-              转出
-            </Button>
           )}
         </div>
       </div>
@@ -430,49 +405,6 @@ export function Blackjack() {
         </DialogFooter>
       </Dialog>
 
-      {/* 转出弹窗 */}
-      <Dialog open={convertOpen} onClose={() => setConvertOpen(false)}>
-        <DialogHeader>
-          <h2 className="text-lg font-bold">积分转出</h2>
-        </DialogHeader>
-        <DialogContent>
-          <div className="space-y-3">
-            <div className="text-sm text-muted-foreground space-y-1">
-              <p>可转出: <span className="font-bold text-foreground">{(status?.convertable ?? 0).toLocaleString()}</span></p>
-              <p>今日已转: {(status?.todayConverted ?? 0).toLocaleString()} / {(status?.todayConvertLimit ?? 500).toLocaleString()}</p>
-              <p>转出后计入游戏钱包</p>
-            </div>
-            <input
-              type="number"
-              value={convertAmount}
-              onChange={e => setConvertAmount(e.target.value)}
-              placeholder="输入转出金额"
-              className="w-full px-3 py-2 rounded-md bg-input border border-border text-sm"
-              min={1}
-              max={Math.min(status?.convertable ?? 0, (status?.todayConvertLimit ?? 500) - (status?.todayConverted ?? 0))}
-            />
-            <div className="flex gap-2">
-              {[100, 200, 500].map(v => (
-                <Button key={v} variant="outline" size="sm" onClick={() => setConvertAmount(String(v))} className="flex-1">
-                  {v >= 1000 ? `${v / 1000}K` : v}
-                </Button>
-              ))}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setConvertAmount(String(Math.min(status?.convertable ?? 0, (status?.todayConvertLimit ?? 500) - (status?.todayConverted ?? 0))))}
-                className="flex-1"
-              >
-                MAX
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-        <DialogFooter>
-          <Button variant="ghost" size="sm" onClick={() => setConvertOpen(false)}>取消</Button>
-          <Button size="sm" onClick={handleConvert} disabled={!convertAmount || parseInt(convertAmount) <= 0}>确认转出</Button>
-        </DialogFooter>
-      </Dialog>
     </div>
   );
 }

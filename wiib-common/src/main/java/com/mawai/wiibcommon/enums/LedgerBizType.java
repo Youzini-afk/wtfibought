@@ -52,7 +52,10 @@ public enum LedgerBizType {
     PREDICTION_SELL("预测市场卖出"),
     PREDICTION_SETTLE("预测市场结算"),
     PREDICTION_REFUND("预测市场退款"),
-    BLACKJACK_CONVERT("21点积分转出"),
+    BLACKJACK_BET("21点下注"),
+    BLACKJACK_PAYOUT("21点派彩"),
+    BLACKJACK_MIGRATION("21点旧积分迁移"),
+    BLACKJACK_CONVERT("21点积分转出（历史）"),
 
     // ===== 钱包划转 =====
     WALLET_TRANSFER_OUT("划转转出"),
