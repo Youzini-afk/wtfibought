@@ -20,6 +20,9 @@ public class UserAssetSnapshot {
 
     private BigDecimal totalAssets;
 
+    /** 快照时的收益基准：兼容初始资金 + 当前周期受保护本金 */
+    private BigDecimal capitalBase;
+
     private BigDecimal profit;
 
     private BigDecimal profitPct;

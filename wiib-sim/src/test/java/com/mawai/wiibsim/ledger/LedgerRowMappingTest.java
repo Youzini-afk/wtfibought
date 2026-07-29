@@ -36,6 +36,17 @@ class LedgerRowMappingTest {
     }
 
     @Test
+    void 外部转入只为余额钱包产出一行且本金字段不重复记账() {
+        var rows = LedgerRowMapping.rowsOf("atomicApplyExternalDeposit",
+                new Object[]{UID, new BigDecimal("25")}, new BigDecimal("125"));
+
+        assertThat(rows).hasSize(1);
+        assertThat(rows.getFirst().wallet()).isEqualTo(BALANCE);
+        assertThat(rows.getFirst().delta()).isEqualByComparingTo("25");
+        assertThat(rows.getFirst().balanceAfter()).isEqualByComparingTo("125");
+    }
+
+    @Test
     void 冻结产出两行且两行相加为零() {
         var rows = LedgerRowMapping.rowsOf("atomicFreezeBalance",
                 new Object[]{UID, new BigDecimal("400")},

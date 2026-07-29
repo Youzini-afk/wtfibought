@@ -31,6 +31,7 @@ public final class LedgerRowMapping {
      */
     public static final Set<String> HANDLED_METHODS = Set.of(
             "atomicUpdateBalance",
+            "atomicApplyExternalDeposit",
             "atomicSettleBalance",
             "atomicUpdateGameBalance",
             "atomicAddMarginLoanPrincipal",
@@ -58,7 +59,7 @@ public final class LedgerRowMapping {
 
         return switch (method) {
             // 单钱包：delta 即入参，balanceAfter 即返回值
-            case "atomicUpdateBalance", "atomicSettleBalance" ->
+            case "atomicUpdateBalance", "atomicApplyExternalDeposit", "atomicSettleBalance" ->
                     List.of(new Row(BALANCE, amount, (BigDecimal) ret));
 
             case "atomicUpdateGameBalance" ->

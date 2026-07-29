@@ -6,5 +6,8 @@ public record ExternalWalletInfoDTO(
         boolean enabled,
         boolean bound,
         Long newApiUserId,
-        BigDecimal quotaPerUnit
+        BigDecimal quotaPerUnit,
+        BigDecimal balance,
+        BigDecimal gameBalance,
+        BigDecimal protectedPrincipal
 ) {}

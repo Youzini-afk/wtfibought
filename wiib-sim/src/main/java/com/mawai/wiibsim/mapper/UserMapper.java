@@ -80,6 +80,7 @@ public interface UserMapper extends BaseMapper<User> {
             "balance = #{initialBalance}, " +
             "frozen_balance = 0, " +
             "game_balance = 0, " +
+            "protected_principal = 0, " +
             "margin_loan_principal = 0, " +
             "margin_interest_accrued = 0, " +
             "margin_interest_last_date = NULL, " +
@@ -112,6 +113,16 @@ public interface UserMapper extends BaseMapper<User> {
             "WHERE id = #{userId} AND balance + #{amount} >= 0 " +
             "RETURNING balance")
     BigDecimal atomicUpdateBalance(@Param("userId") Long userId, @Param("amount") BigDecimal amount);
+
+    /**
+     * 外部额度成功转入的唯一资金入口：余额和受保护本金在同一条 SQL 中同步增加。
+     * 返回变动后余额；amount 必须为正，null=用户不存在或金额非法。
+     */
+    @Options(flushCache = Options.FlushCachePolicy.TRUE, useCache = false)
+    @Select("UPDATE \"user\" SET balance = balance + #{amount}, " +
+            "protected_principal = protected_principal + #{amount}, updated_at = NOW() " +
+            "WHERE id = #{userId} AND #{amount} > 0 RETURNING balance")
+    BigDecimal atomicApplyExternalDeposit(@Param("userId") Long userId, @Param("amount") BigDecimal amount);
 
     /**
      * 原子冻结余额：可用减少，冻结增加。返回两个钱包的变动后新值；null=可用不足。
@@ -255,6 +266,7 @@ public interface UserMapper extends BaseMapper<User> {
             "balance = 0, " +
             "frozen_balance = 0, " +
             "game_balance = 0, " +
+            "protected_principal = 0, " +
             "margin_loan_principal = 0, " +
             "margin_interest_accrued = 0, " +
             "margin_interest_last_date = #{today}, " +
@@ -267,7 +279,7 @@ public interface UserMapper extends BaseMapper<User> {
     /** 破产恢复（交易日09:00） */
     @Update("UPDATE \"user\" SET " +
             "is_bankrupt = FALSE, " +
-            "balance = #{initialBalance}, " +
+            "balance = CASE WHEN protected_principal > 0 THEN balance ELSE #{initialBalance} END, " +
             "frozen_balance = 0, " +
             "game_balance = 0, " +
             "margin_loan_principal = 0, " +

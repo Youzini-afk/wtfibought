@@ -21,6 +21,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 @Tag(name = "主站额度钱包")
@@ -41,7 +42,10 @@ public class ExternalWalletController {
                 integrationService.isEnabled(),
                 newApiUserId != null && newApiUserId > 0,
                 newApiUserId,
-                config.getQuotaPerUnit()));
+                config.getQuotaPerUnit(),
+                nz(user.getBalance()),
+                nz(user.getGameBalance()),
+                nz(user.getProtectedPrincipal())));
     }
 
     @PostMapping("/deposit")
@@ -60,5 +64,9 @@ public class ExternalWalletController {
         User user = userService.getById(StpUtil.getLoginIdAsLong());
         if (user == null) throw new BizException(ErrorCode.USER_NOT_FOUND);
         return user;
+    }
+
+    private BigDecimal nz(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 }

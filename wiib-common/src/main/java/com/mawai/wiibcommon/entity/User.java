@@ -51,6 +51,13 @@ public class User {
     @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal gameBalance;
 
+    /**
+     * 当前经济周期的受保护本金。只在外部额度成功转入时增加；钱包内部划转、
+     * 交易盈亏和盈利提现都不改变它。重置/破产进入新周期时清零。
+     */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private BigDecimal protectedPrincipal;
+
     /** 杠杆借款本金 */
     @TableField(updateStrategy = FieldStrategy.NEVER)
     private BigDecimal marginLoanPrincipal;

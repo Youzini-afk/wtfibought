@@ -164,8 +164,8 @@ public class RankingService {
     /**
      * 榜单排序维度。
      * <p>
-     * 【为什么没有"收益率"这一档】初始资金全站是同一个常数，
-     * 收益率 =(总资产−初始资金)/初始资金 与总资产是同一个序，加进来就是同一张榜换个名字。
+     * 【为什么没有"收益率"这一档】用户外部转入本金不同后，收益率不再与总资产同序；
+     * 但默认榜仍按资产规模展示，纯交易能力由 TRADING_PROFIT 单独表达，避免再增加一张相近榜单。
      * <p>
      * 【为什么没有"游戏钱包/余额钱包"】那是现金构成，不是成绩。
      */
@@ -242,10 +242,7 @@ public class RankingService {
     }
 
     private RankingDTO getRankingDTO(User user, BigDecimal totalAssets, BigDecimal tradingProfit) {
-        BigDecimal profit = totalAssets.subtract(initialBalance);
-        BigDecimal profitPct = initialBalance.compareTo(BigDecimal.ZERO) > 0
-                ? profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
-                : BigDecimal.ZERO;
+        BigDecimal profitPct = EconomyMath.profitPct(totalAssets, user, initialBalance);
 
         RankingDTO dto = new RankingDTO();
         dto.setUserId(user.getId());

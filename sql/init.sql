@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS "user" (
     balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     frozen_balance DECIMAL(18,2) NOT NULL DEFAULT 0,
     game_balance DECIMAL(18,2) NOT NULL DEFAULT 0,
+    protected_principal DECIMAL(18,2) NOT NULL DEFAULT 0,
     margin_loan_principal DECIMAL(18,2) NOT NULL DEFAULT 0,
     margin_interest_accrued DECIMAL(18,2) NOT NULL DEFAULT 0,
     margin_interest_last_date DATE,
@@ -42,6 +43,7 @@ COMMENT ON COLUMN "user".invite_code_id IS '注册用的邀请码ID（可追溯�
 COMMENT ON COLUMN "user".balance IS '余额钱包（交易：现货/B股/合约/杠杆，全仓保证金池）';
 COMMENT ON COLUMN "user".frozen_balance IS '冻结余额（限价买单冻结，属余额钱包）';
 COMMENT ON COLUMN "user".game_balance IS '游戏钱包（Mines/扑克/21点/预测市场，与全仓风险隔离）';
+COMMENT ON COLUMN "user".protected_principal IS '当前经济周期受保护本金，仅成功外部转入增加，重置或破产清零';
 COMMENT ON COLUMN "user".margin_loan_principal IS '杠杆借款本金';
 COMMENT ON COLUMN "user".margin_interest_accrued IS '杠杆应计利息（未支付）';
 COMMENT ON COLUMN "user".margin_interest_last_date IS '杠杆计息上次日期（用于补记）';
@@ -445,6 +447,7 @@ CREATE TABLE IF NOT EXISTS user_asset_snapshot (
     user_id BIGINT NOT NULL,
     snapshot_date DATE NOT NULL,
     total_assets DECIMAL(18,2) NOT NULL,
+    capital_base DECIMAL(18,2) NOT NULL DEFAULT 0,
     profit DECIMAL(18,2) NOT NULL,
     profit_pct DECIMAL(10,4) NOT NULL,
     -- 五分类盈亏：bStock / crypto(现货+合约) / 大宗商品(金油) / 预测 / 游戏
@@ -800,6 +803,10 @@ ALTER TABLE blackjack_account ALTER COLUMN chips SET DEFAULT 0;
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS new_api_user_id BIGINT;
 CREATE UNIQUE INDEX IF NOT EXISTS uk_user_new_api_user_id
     ON "user"(new_api_user_id) WHERE new_api_user_id IS NOT NULL;
+
+-- 当前经济周期的受保护本金。它不参与资产求和，只作为盈利与提现的扣减基准。
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS protected_principal DECIMAL(18,2) NOT NULL DEFAULT 0;
+ALTER TABLE user_asset_snapshot ADD COLUMN IF NOT EXISTS capital_base DECIMAL(18,2) NOT NULL DEFAULT 0;
 
 -- 主站额度桥接本地事务表：operation_id 与 New API 幂等操作号一一对应。
 CREATE TABLE IF NOT EXISTS external_quota_transfer (

@@ -12,6 +12,9 @@ public class AssetSnapshotDTO {
 
     private BigDecimal totalAssets;
 
+    /** 当前快照的收益本金基准 */
+    private BigDecimal capitalBase;
+
     private BigDecimal profit;
 
     private BigDecimal profitPct;

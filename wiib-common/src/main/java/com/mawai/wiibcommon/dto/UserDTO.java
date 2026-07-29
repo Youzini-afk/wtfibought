@@ -27,6 +27,9 @@ public class UserDTO {
     /** 游戏钱包 */
     private BigDecimal gameBalance;
 
+    /** 当前经济周期不可提现的外部转入本金 */
+    private BigDecimal protectedPrincipal;
+
     /** 持仓总市值 */
     private BigDecimal positionMarketValue;
 

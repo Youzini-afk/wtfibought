@@ -180,10 +180,8 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
                                BigDecimal pendingSettlement,
                                BigDecimal marginLoanPrincipal,
                                BigDecimal marginInterestAccrued) {
-        BigDecimal profit = totalAssets.subtract(initialBalance);
-        BigDecimal profitPct = initialBalance.signum() > 0
-                ? profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
-                : BigDecimal.ZERO;
+        BigDecimal profit = EconomyMath.profit(totalAssets, user, initialBalance);
+        BigDecimal profitPct = EconomyMath.profitPct(totalAssets, user, initialBalance);
 
         UserDTO dto = new UserDTO();
         dto.setId(user.getId());
@@ -192,6 +190,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         dto.setBalance(user.getBalance());
         dto.setFrozenBalance(frozenBalance);
         dto.setGameBalance(user.getGameBalance() != null ? user.getGameBalance() : BigDecimal.ZERO);
+        dto.setProtectedPrincipal(EconomyMath.protectedPrincipal(user));
         dto.setPositionMarketValue(positionMarketValue);
         dto.setPendingSettlement(pendingSettlement);
         dto.setMarginLoanPrincipal(marginLoanPrincipal);

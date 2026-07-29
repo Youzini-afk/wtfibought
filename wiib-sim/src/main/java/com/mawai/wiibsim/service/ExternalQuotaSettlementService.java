@@ -33,7 +33,7 @@ public class ExternalQuotaSettlementService {
         if (transfer == null || !"DEPOSIT".equals(transfer.getDirection())) {
             throw new IllegalStateException("claimed external deposit is missing or invalid");
         }
-        BigDecimal balanceAfter = userMapper.atomicUpdateBalance(transfer.getUserId(), transfer.getAmount());
+        BigDecimal balanceAfter = userMapper.atomicApplyExternalDeposit(transfer.getUserId(), transfer.getAmount());
         if (balanceAfter == null) {
             throw new IllegalStateException("external deposit user does not exist");
         }

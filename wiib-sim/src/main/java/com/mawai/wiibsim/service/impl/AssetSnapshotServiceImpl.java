@@ -337,15 +337,15 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
                 .subtract(marginLoan)
                 .subtract(marginInterest);
 
-        BigDecimal profit = totalAssets.subtract(initialBalance);
-        BigDecimal profitPct = initialBalance.signum() > 0
-                ? profit.divide(initialBalance, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100"))
-                : BigDecimal.ZERO;
+        BigDecimal capitalBase = EconomyMath.capitalBase(user, initialBalance);
+        BigDecimal profit = EconomyMath.profit(totalAssets, user, initialBalance);
+        BigDecimal profitPct = EconomyMath.profitPct(totalAssets, user, initialBalance);
 
         UserAssetSnapshot snapshot = new UserAssetSnapshot();
         snapshot.setUserId(userId);
         snapshot.setSnapshotDate(date);
         snapshot.setTotalAssets(totalAssets);
+        snapshot.setCapitalBase(capitalBase);
         snapshot.setProfit(profit);
         snapshot.setProfitPct(profitPct);
         snapshot.setBstockProfit(bstockProfit.setScale(2, RoundingMode.HALF_UP));
@@ -365,6 +365,7 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         AssetSnapshotDTO dto = new AssetSnapshotDTO();
         dto.setDate(cur.getSnapshotDate());
         dto.setTotalAssets(cur.getTotalAssets());
+        dto.setCapitalBase(cur.getCapitalBase());
         dto.setProfit(cur.getProfit());
         dto.setProfitPct(cur.getProfitPct());
         dto.setBstockProfit(cur.getBstockProfit());
@@ -374,7 +375,8 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         dto.setGameProfit(cur.getGameProfit());
 
         if (prev != null) {
-            dto.setDailyProfit(cur.getTotalAssets().subtract(prev.getTotalAssets()));
+            // profit 已扣除了各时点累计外部本金，因此转入不会伪装成日盈利。
+            dto.setDailyProfit(cur.getProfit().subtract(prev.getProfit()));
             BigDecimal prevTotal = prev.getTotalAssets();
             dto.setDailyProfitPct(prevTotal.signum() == 0 ? BigDecimal.ZERO
                     : dto.getDailyProfit().divide(prevTotal, 4, RoundingMode.HALF_UP).multiply(new BigDecimal("100")));
