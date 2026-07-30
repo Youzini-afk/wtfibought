@@ -22,7 +22,7 @@ export function Intro() {
       <Card>
         <CardContent className="pt-5 space-y-3 text-sm leading-relaxed">
           <h2 className="font-bold text-base text-primary">欢迎</h2>
-          <p className="text-muted-foreground">虚拟股票交易模拟器，体验"如果当初买了会怎样"。所有数据均为模拟。</p>
+          <p className="text-muted-foreground">虚拟股票交易模拟器，所有数据均为模拟。</p>
           <div className="bg-primary/8 p-3 rounded-xl border-2 border-primary/20">
             <p className="text-primary/80 text-xs font-medium">仅供娱乐，不构成投资建议。杠杆有风险，可能爆仓。</p>
           </div>
