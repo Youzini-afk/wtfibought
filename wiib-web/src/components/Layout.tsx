@@ -12,7 +12,7 @@ import { cn } from '../lib/utils';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
-  Brain, Gem, Globe,
+  Brain, Gem, Globe, ShieldCheck,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
@@ -122,6 +122,18 @@ export function Layout({ children }: Props) {
                 两边都不显示，否则每次刷新都要闪一下"登录"再变回用户名 */}
             {user ? (
               <div className="flex items-center gap-2">
+                {user.id === 1 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 gap-1.5 px-2 text-primary hover:text-primary"
+                    onClick={() => navigate('/admin')}
+                    title="进入管理后台"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span className="hidden xl:inline">管理后台</span>
+                  </Button>
+                )}
                 <span className="text-xs font-semibold text-muted-foreground hidden lg:inline">{user.username}</span>
                 <NotificationBell />
                 <Button variant="ghost" size="icon" className="w-8 h-8" onClick={handleLogout}>
