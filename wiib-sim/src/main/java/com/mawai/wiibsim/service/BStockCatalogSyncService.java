@@ -96,7 +96,7 @@ public class BStockCatalogSyncService {
             return new BStockCatalogSyncResult(0, 0, 0, 0, 0, true, now);
         }
         try {
-            ensureMissingAliases(now);
+            ensureCurrentAliases(now);
             List<RwaAsset> directAssets = fetchDirectAssets();
             if (directAssets.isEmpty()) throw new IllegalStateException("Binance RWA 清单未返回任何直连 bStock");
 
@@ -202,12 +202,18 @@ public class BStockCatalogSyncService {
         }
     }
 
-    /** 外部目录不可用也先完成本地身份初始化，避免首屏回退真实名称。 */
-    private void ensureMissingAliases(LocalDateTime now) {
-        List<BStock> missing = bStockMapper.selectList(
+    /** 外部目录不可用也先初始化/升级自动别名；人工锁定的名字永远不动。 */
+    void ensureCurrentAliases(LocalDateTime now) {
+        List<BStock> pending = bStockMapper.selectList(
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<BStock>()
-                        .and(w -> w.isNull(BStock::getDisplayName).or().eq(BStock::getDisplayName, "")));
-        for (BStock stock : missing) {
+                        .and(w -> w.isNull(BStock::getAliasLocked).or().eq(BStock::getAliasLocked, false))
+                        .and(w -> w.isNull(BStock::getAliasSource).or().ne(BStock::getAliasSource, "MANUAL"))
+                        .and(w -> w.isNull(BStock::getDisplayName)
+                                .or().eq(BStock::getDisplayName, "")
+                                .or().isNull(BStock::getAliasVersion)
+                                .or().lt(BStock::getAliasVersion, BStockAliasGenerator.VERSION)));
+        for (BStock stock : pending) {
+            if (Boolean.TRUE.equals(stock.getAliasLocked()) || "MANUAL".equals(stock.getAliasSource())) continue;
             BStockAliasGenerator.Alias alias = aliasGenerator.generate(stock.getTicker(), stock.getName(), stock.getIndustry());
             BStock patch = new BStock();
             applyAlias(patch, alias);
@@ -216,7 +222,12 @@ public class BStockCatalogSyncService {
             patch.setUpdatedAt(now);
             bStockMapper.update(patch, new LambdaUpdateWrapper<BStock>()
                     .eq(BStock::getId, stock.getId())
-                    .and(w -> w.isNull(BStock::getDisplayName).or().eq(BStock::getDisplayName, "")));
+                    .and(w -> w.isNull(BStock::getAliasLocked).or().eq(BStock::getAliasLocked, false))
+                    .and(w -> w.isNull(BStock::getAliasSource).or().ne(BStock::getAliasSource, "MANUAL"))
+                    .and(w -> w.isNull(BStock::getDisplayName)
+                            .or().eq(BStock::getDisplayName, "")
+                            .or().isNull(BStock::getAliasVersion)
+                            .or().lt(BStock::getAliasVersion, BStockAliasGenerator.VERSION)));
         }
     }
 

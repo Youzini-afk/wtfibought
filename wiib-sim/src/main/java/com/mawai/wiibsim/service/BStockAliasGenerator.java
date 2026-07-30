@@ -3,9 +3,9 @@ package com.mawai.wiibsim.service;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.CRC32;
 
 /**
@@ -17,8 +17,18 @@ import java.util.zip.CRC32;
 @Component
 public class BStockAliasGenerator {
 
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
     private static final String CODE_ALPHABET = "ZXQVKJMWYF";
+    private static final Set<String> FUND_TICKERS = Set.of(
+            "DRAM", "EWY", "KORU", "QQQ", "SKHY", "SMH", "SOXL", "SOXS", "SPY", "TQQQ"
+    );
+
+    private static final String[] FICTION_PREFIXES = {
+            "星穹", "雾港", "月背", "橘猫", "蓝鲸", "赤兔", "云雀", "黑曜",
+            "白塔", "银狐", "铜锣", "松果", "萤火", "回声", "泡泡", "漩涡",
+            "北斗", "南瓜", "纸鸢", "银河", "零号", "奇点", "风车", "深蓝",
+            "琥珀", "乌托", "荒原", "幻岛", "夜航", "雨巷", "火花", "冰川"
+    };
 
     /** 少量标志性名字负责定调，不承担目录覆盖；未知新股仍走通用规则。 */
     private static final Map<String, String> ICONIC_NAMES = Map.ofEntries(
@@ -29,66 +39,52 @@ public class BStockAliasGenerator {
             Map.entry("MSFT", "薇软"),
             Map.entry("AMZN", "亚码逊"),
             Map.entry("BABA", "阿狸巴巴"),
+            Map.entry("ARM", "胳膊芯"),
+            Map.entry("AVGO", "博不通"),
+            Map.entry("GS", "高剩集团"),
+            Map.entry("HOOD", "罗宾帽"),
+            Map.entry("IBM", "蓝色大象"),
+            Map.entry("INTC", "因特慢"),
+            Map.entry("META", "元它宇宙"),
+            Map.entry("MRVL", "迈威尔奇"),
+            Map.entry("PLTR", "帕兰提灯"),
+            Map.entry("PYPL", "拍拍钱包"),
+            Map.entry("TSM", "苔积电"),
+            Map.entry("WDC", "西部数砖"),
             Map.entry("ORCL", "假骨文"),
             Map.entry("QCOM", "糕通"),
             Map.entry("DELL", "呆尔"),
             Map.entry("MU", "美光科幻"),
             Map.entry("SNDK", "闪递"),
             Map.entry("SPCX", "太空叉"),
-            Map.entry("QQQ", "纳指100影子ETF"),
-            Map.entry("SPY", "标普500影子ETF"),
-            Map.entry("SOXL", "半导体3x影子ETF"),
-            Map.entry("SOXS", "半导体3x反向影子ETF"),
-            Map.entry("TQQQ", "纳指3x影子ETF")
+            Map.entry("QQQ", "纳响100"),
+            Map.entry("SPY", "标漂500"),
+            Map.entry("SOXL", "芯潮三倍多"),
+            Map.entry("SOXS", "芯潮三倍空"),
+            Map.entry("TQQQ", "纳响三倍多")
     );
-
-    /** 有中文公司名时只换一个字；匹配不到则轻量追加“影”，不乱改金融术语。 */
-    private static final Map<Character, Character> ONE_CHAR_PUNS = new LinkedHashMap<>();
-
-    static {
-        ONE_CHAR_PUNS.put('果', '锅');
-        ONE_CHAR_PUNS.put('谷', '咕');
-        ONE_CHAR_PUNS.put('微', '薇');
-        ONE_CHAR_PUNS.put('光', '慌');
-        ONE_CHAR_PUNS.put('通', '桶');
-        ONE_CHAR_PUNS.put('甲', '假');
-        ONE_CHAR_PUNS.put('斯', '撕');
-        ONE_CHAR_PUNS.put('马', '码');
-        ONE_CHAR_PUNS.put('里', '狸');
-        ONE_CHAR_PUNS.put('戴', '呆');
-        ONE_CHAR_PUNS.put('星', '猩');
-        ONE_CHAR_PUNS.put('盛', '剩');
-        ONE_CHAR_PUNS.put('台', '苔');
-        ONE_CHAR_PUNS.put('联', '莲');
-        ONE_CHAR_PUNS.put('云', '芸');
-    }
 
     public Alias generate(String ticker, String realName, String industry) {
         String normalizedTicker = normalizeTicker(ticker);
         String displayCode = generateCode(normalizedTicker);
         String displayName = ICONIC_NAMES.get(normalizedTicker);
+        MarketTheme theme = MarketTheme.from(normalizedTicker, industry);
         if (displayName == null) {
-            displayName = lightlyFictionalize(realName, displayCode);
+            // 通用路径绝不复用真实公司名。未来新增股票也会稳定落入足够大的架空名字空间。
+            displayName = proceduralName(normalizedTicker, theme);
         }
-        String category = industry == null || industry.isBlank() ? "市场" : industry.trim();
-        String lore = "来自平行行情宇宙的" + category + "标的；价格与交易规则仍按真实行情计算。";
+        String lore = "在平行行情宇宙登记的" + theme.label + "标的；名称与故事均为架空，价格只借用现实市场波动。";
         return new Alias(displayName, displayCode, truncate(lore, 255), VERSION);
     }
 
-    private String lightlyFictionalize(String realName, String displayCode) {
-        String name = realName == null ? "" : realName.trim();
-        if (name.isEmpty()) return displayCode + "影";
-
-        for (Map.Entry<Character, Character> entry : ONE_CHAR_PUNS.entrySet()) {
-            int index = name.indexOf(entry.getKey());
-            if (index >= 0) {
-                return truncate(name.substring(0, index) + entry.getValue() + name.substring(index + 1), 64);
-            }
-        }
-        if (name.toUpperCase(Locale.ROOT).endsWith("ETF")) {
-            return truncate(name.substring(0, name.length() - 3) + "影子ETF", 64);
-        }
-        return truncate(name + "影", 64);
+    private String proceduralName(String ticker, MarketTheme theme) {
+        long value = stableValue("alias-name-v2|" + ticker);
+        String prefix = FICTION_PREFIXES[(int) (value % FICTION_PREFIXES.length)];
+        value /= FICTION_PREFIXES.length;
+        String root = theme.roots[(int) (value % theme.roots.length)];
+        value /= theme.roots.length;
+        String form = theme.forms[(int) (value % theme.forms.length)];
+        return truncate(prefix + root + form, 64);
     }
 
     private String generateCode(String ticker) {
@@ -108,6 +104,76 @@ public class BStockAliasGenerator {
 
     private String truncate(String value, int max) {
         return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    private long stableValue(String value) {
+        CRC32 crc = new CRC32();
+        crc.update(value.getBytes(StandardCharsets.UTF_8));
+        return crc.getValue();
+    }
+
+    private enum MarketTheme {
+        TECHNOLOGY("科技", new String[]{
+                "算力", "晶格", "云端", "矩阵", "光栅", "芯火", "数据", "智械", "量子", "代码", "网格", "像素"
+        }, new String[]{
+                "实验室", "科技", "工坊", "研究所", "动力", "系统", "网络", "智造"
+        }),
+        FINANCE("金融", new String[]{
+                "金流", "银潮", "账本", "票据", "利息", "复利", "钱币", "汇率", "铜板", "金桥", "信用", "资产"
+        }, new String[]{
+                "金库", "银号", "钱庄", "财团", "票号", "账房", "交易所", "钱包"
+        }),
+        CONSUMER("消费", new String[]{
+                "日用", "百味", "好物", "橱窗", "买手", "零售", "货架", "糖果", "衣橱", "烟火", "市集", "订单"
+        }, new String[]{
+                "商店", "百货", "集市", "商社", "工坊", "超市", "便利屋", "商栈"
+        }),
+        COMMUNICATION("通信", new String[]{
+                "讯号", "电波", "声场", "频段", "光纤", "铃声", "广播", "信使", "天线", "云邮", "频道", "话音"
+        }, new String[]{
+                "通讯社", "讯塔", "广播站", "信使局", "话务所", "信标", "电波局", "云邮"
+        }),
+        INDUSTRIAL("工业", new String[]{
+                "齿轮", "蒸汽", "铆钉", "动力", "机巧", "重装", "航线", "炉火", "工程", "轨道", "机械", "运载"
+        }, new String[]{
+                "重工", "工程局", "机造", "动力厂", "航运社", "齿轮厂", "工业", "制造所"
+        }),
+        FUND("指数", new String[]{
+                "指数", "权重", "波段", "多空", "复利", "篮子", "罗盘", "净值", "曲线", "因子", "趋势", "量潮"
+        }, new String[]{
+                "基金", "指数局", "风向标", "放大器", "组合", "观察站", "策略社", "研究所"
+        }),
+        MARKET("市场", new String[]{
+                "未来", "幻想", "平行", "漂移", "概率", "时光", "星轨", "流星", "潮汐", "秘密", "边界", "引力"
+        }, new String[]{
+                "商会", "公社", "研究所", "联盟", "事务局", "观察站", "控股", "实验室"
+        });
+
+        private final String label;
+        private final String[] roots;
+        private final String[] forms;
+
+        MarketTheme(String label, String[] roots, String[] forms) {
+            this.label = label;
+            this.roots = roots;
+            this.forms = forms;
+        }
+
+        private static MarketTheme from(String ticker, String industry) {
+            String value = industry == null ? "" : industry.trim().toLowerCase(Locale.ROOT);
+            if (FUND_TICKERS.contains(ticker) || containsAny(value, "etf", "fund", "index", "基金", "指数")) return FUND;
+            if (containsAny(value, "financial", "finance", "bank", "金融", "金库", "银行")) return FINANCE;
+            if (containsAny(value, "communication", "telecom", "media", "通信", "通讯", "媒体")) return COMMUNICATION;
+            if (containsAny(value, "consumer", "retail", "消费", "零售", "电商")) return CONSUMER;
+            if (containsAny(value, "industrial", "aerospace", "manufactur", "工业", "航空", "制造")) return INDUSTRIAL;
+            if (containsAny(value, "technology", "semiconductor", "software", "tech", "半导体", "科技", "软件", "数据")) return TECHNOLOGY;
+            return MARKET;
+        }
+
+        private static boolean containsAny(String value, String... needles) {
+            for (String needle : needles) if (value.contains(needle)) return true;
+            return false;
+        }
     }
 
     public record Alias(String displayName, String displayCode, String displayLore, int version) {}
