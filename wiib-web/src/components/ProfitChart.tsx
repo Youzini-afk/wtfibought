@@ -13,7 +13,7 @@ const CUMULATIVE_CONFIG = [
   { key: 'profit', name: '总收益', color: '#635bff' },
   { key: 'cryptoProfit', name: '加密货币', color: '#f97316' },
   { key: 'commodityProfit', name: '大宗商品', color: '#eab308' },
-  { key: 'bstockProfit', name: 'bStock', color: '#0ea5e9' },
+  { key: 'bstockProfit', name: '影子股票', color: '#0ea5e9' },
   { key: 'predictionProfit', name: '预测', color: '#a855f7' },
   { key: 'gameProfit', name: '游戏', color: '#ef4444' },
 ] as const;
@@ -22,7 +22,7 @@ const DAILY_CONFIG = [
   { key: 'dailyProfit', name: '日收益', color: '#635bff' },
   { key: 'dailyCryptoProfit', name: '加密货币', color: '#f97316' },
   { key: 'dailyCommodityProfit', name: '大宗商品', color: '#eab308' },
-  { key: 'dailyBstockProfit', name: 'bStock', color: '#0ea5e9' },
+  { key: 'dailyBstockProfit', name: '影子股票', color: '#0ea5e9' },
   { key: 'dailyPredictionProfit', name: '预测', color: '#a855f7' },
   { key: 'dailyGameProfit', name: '游戏', color: '#ef4444' },
 ] as const;

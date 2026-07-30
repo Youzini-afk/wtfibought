@@ -11,6 +11,7 @@ import { useToast } from '../components/ui/use-toast';
 import { FeedStreamHealthCard } from '../components/FeedStreamHealthCard';
 import { MonitorCarousel } from '../components/MonitorCarousel';
 import { NewApiSettingsCard } from '../components/NewApiSettingsCard';
+import { ShadowStockAdminCard } from '../components/ShadowStockAdminCard';
 import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-react';
 
 const FUNCTION_LABELS: Record<string, string> = {
@@ -334,6 +335,9 @@ export function Admin() {
               })}
             </CardContent>
           </Card>
+
+          {/* 影子股票目录、别名与生命周期 */}
+          <ShadowStockAdminCard />
 
           {/* WTFiB 侧 New API SSO、额度换算与提现规则 */}
           <NewApiSettingsCard />

@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.controller;
 
 import com.mawai.wiibcommon.dto.BStockDTO;
+import com.mawai.wiibcommon.dto.BStockAliasDTO;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibsim.service.BStockService;
 import com.mawai.wiibsim.service.KlineCacheService;
@@ -28,6 +29,12 @@ public class BStockController {
     @Operation(summary = "全部上架 bStock（含实时价 + 24h 涨跌）")
     public Result<List<BStockDTO>> list() {
         return Result.ok(bStockService.listAll());
+    }
+
+    @GetMapping("/aliases")
+    @Operation(summary = "影子股票全局展示映射（含历史退役标的，不含真实身份）")
+    public Result<List<BStockAliasDTO>> aliases() {
+        return Result.ok(bStockService.listAliases());
     }
 
     @GetMapping("/price")

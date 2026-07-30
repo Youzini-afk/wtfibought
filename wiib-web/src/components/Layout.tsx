@@ -1,6 +1,6 @@
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useClickOutside } from '../hooks/useClickOutside';
-import { useState, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useUserStore } from '../stores/userStore';
 import { useTheme } from '../hooks/useTheme';
 import { useSystemHealth, type HealthLevel } from '../hooks/useSystemHealth';
@@ -9,6 +9,7 @@ import { NotificationBell } from './NotificationBell';
 import { TickerStrip } from './TickerStrip';
 import { OfflineBanner } from './OfflineBanner';
 import { cn } from '../lib/utils';
+import { bstockApi } from '../api';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
@@ -60,6 +61,11 @@ export function Layout({ children }: Props) {
   const location = useLocation();
   const { user, token, logout } = useUserStore();
   const { toggleTheme, isDark } = useTheme();
+
+  // 成交、账单和用户资料接口只有真实 symbol；全局预载安全展示映射，包含历史退役标的。
+  useEffect(() => {
+    void bstockApi.aliases().catch(() => { /* 页面仍会使用稳定影子编号，绝不回退真实代码 */ });
+  }, []);
 
   const handleLogout = async () => { await logout(); navigate('/login'); };
   const isMarketActive = MARKET_PATHS.some(p => location.pathname === p || location.pathname.startsWith(p + '/'));
@@ -228,7 +234,7 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
         // z-50 不能省：NumberFlow 的 transform 会创建层叠上下文，副条数字会盖到面板上
         <div className="absolute top-full left-0 mt-1 w-44 rounded-lg pt-card shadow-lg py-1 z-50 animate-in fade-in slide-in-from-top-2">
           {[
-            { to: '/bstock', icon: <List className="w-4 h-4" />, label: '股票' },
+            { to: '/bstock', icon: <List className="w-4 h-4" />, label: '影子股票' },
             { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: '币种' },
             { to: '/commodity', icon: <Gem className="w-4 h-4" />, label: '大宗商品' },
             { to: '/tradfi', icon: <Globe className="w-4 h-4" />, label: 'TradFi 合约' },

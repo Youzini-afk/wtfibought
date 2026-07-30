@@ -237,7 +237,7 @@ export function Home() {
               </div>
               <div className="flex gap-6 md:gap-8 shrink-0">
                 {[
-                  { num: '10+', label: '股票' },
+                  { num: '50+', label: '影子股票' },
                   { num: '6', label: '币种' },
                   { num: '24/7', label: 'BTC行情' },
                 ].map(s => (
@@ -255,7 +255,7 @@ export function Home() {
       {/* ====== 快捷入口：压成一行小件（含每日福利，点开弹窗） ====== */}
       <div className="flex flex-wrap gap-2">
         {[
-          { icon: List, label: '股票', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
+          { icon: List, label: '影子股票', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
           { icon: DollarSign, label: 'Crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400' },
           { icon: Target, label: '预测', to: '/prediction', ic: 'text-primary' },
           { icon: Brain, label: 'AI', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },

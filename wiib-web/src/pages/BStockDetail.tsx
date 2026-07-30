@@ -8,11 +8,12 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/skeleton';
+import { Badge } from '../components/ui/badge';
 import { CandleChart } from '../components/CandleChart';
 import { FuturesActionButton } from '../components/FuturesActionButton';
 import { useQuantityAnimation } from '../components/coin/useQuantityAnimation';
 import { cn, fmtNum } from '../lib/utils';
-import { ChevronLeft, Wallet, Globe, Landmark } from 'lucide-react';
+import { ChevronLeft, Wallet, Globe, Landmark, TriangleAlert } from 'lucide-react';
 import type { BStock, CryptoPosition } from '../types';
 
 const COMMISSION_RATE = 0.001;
@@ -81,6 +82,13 @@ function BStockDetail({ symbol }: { symbol: string }) {
   const held = position?.quantity ?? 0;
   const chg = info?.changePct ?? 0;
   const up = chg >= 0;
+  const sideAllowed = side === 'BUY' ? Boolean(info?.buyAllowed) : Boolean(info?.sellAllowed);
+  const statusLabel = !info ? null
+    : info.sourceStatus !== 'TRADING' ? '数据源暂停'
+      : info.catalogStatus === 'RETIRED' ? '已退役 · 仅平仓'
+        : info.catalogStatus === 'CANDIDATE' ? '候选标的'
+          : info.catalogStatus === 'PAUSED' ? '暂停买入'
+            : null;
 
   const setPct = (pct: number) => {
     if (livePrice <= 0) return;
@@ -91,6 +99,10 @@ function BStockDetail({ symbol }: { symbol: string }) {
   };
 
   const submit = async () => {
+    if (!sideAllowed) {
+      toast(side === 'BUY' ? '该影子股票当前暂停买入' : '当前数据源不可用，暂不能卖出', 'error');
+      return;
+    }
     if (qtyNum <= 0) { toast('请输入数量', 'error'); return; }
     if (side === 'SELL' && qtyNum > held) { toast('持仓不足', 'error'); return; }
     setSubmitting(true);
@@ -121,15 +133,20 @@ function BStockDetail({ symbol }: { symbol: string }) {
         <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => navigate('/bstock')}>
           <ChevronLeft className="w-5 h-5" />
         </Button>
-        <div className="w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 flex items-center justify-center shrink-0 text-[11px] font-bold text-primary">
-          {info?.ticker?.slice(0, 4) ?? <Landmark className="w-5 h-5" />}
-        </div>
+        {info?.sourceIconUrl ? (
+          <img src={info.sourceIconUrl} alt="" className="w-10 h-10 rounded-xl border bg-white object-contain p-1 shrink-0" />
+        ) : (
+          <div className="w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 flex items-center justify-center shrink-0 text-[11px] font-bold text-primary">
+            {info?.displayCode?.slice(0, 4) ?? <Landmark className="w-5 h-5" />}
+          </div>
+        )}
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="text-lg font-extrabold tracking-tight truncate">{info?.name ?? symbol}</span>
-            <span className="text-xs text-muted-foreground shrink-0">{info?.ticker}</span>
+            <span className="text-lg font-extrabold tracking-tight truncate">{info?.displayName ?? info?.name ?? symbol}</span>
+            <span className="text-xs text-muted-foreground shrink-0">{info?.displayCode ?? info?.ticker}</span>
+            {statusLabel && <Badge variant="warning" className="text-[9px]">{statusLabel}</Badge>}
           </div>
-          <div className="text-xs text-muted-foreground">{info?.industry ?? '代币化美股'} · 24/7 · 瞬时结算</div>
+          <div className="text-xs text-muted-foreground">{info?.industry ?? '影子股票'} · 24/7 · 瞬时结算</div>
         </div>
         <div className="text-right shrink-0">
           <div className={cn("text-xl font-extrabold tabular-nums tracking-tight transition-colors", livePrice ? (up ? "text-green-400" : "text-red-400") : "")}>
@@ -158,12 +175,12 @@ function BStockDetail({ symbol }: { symbol: string }) {
               </span>
             </div>
             <div className="h-[360px] sm:h-[430px] p-2">
-              {/* bstock 无后端K线广播：现货价格流驱动最后一根实时跳动 */}
+              {/* feed 按数据库目录动态订阅影子股票 5m K线；其他周期仍由现货 tick 衔接。 */}
               <CandleChart
                 symbol={symbol}
                 interval={CHART_TABS[chartTab].interval}
                 klinesFn={bstockApi.klines}
-                streamLive={false}
+                streamLive
                 tick={tick?.price != null && tick?.ts != null ? { price: tick.price, ts: tick.ts } : null}
               />
             </div>
@@ -174,7 +191,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
             <CardContent className="p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-semibold">
-                  <Landmark className="w-4 h-4 text-primary" /> 公司信息
+                  <Landmark className="w-4 h-4 text-primary" /> 现实原型
                 </div>
                 {info?.homepage && (
                   <a href={info.homepage} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline inline-flex items-center gap-1">
@@ -201,6 +218,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
                       </div>
                     ))}
                   </div>
+                  {info.displayLore && <p className="text-xs leading-relaxed text-primary/80">{info.displayLore}</p>}
                   {info.description && <p className="text-xs leading-relaxed text-muted-foreground">{info.description}</p>}
                   {info.multiplier != null && info.multiplier !== 1 && (
                     <p className="text-[11px] text-muted-foreground/70">乘数 {info.multiplier.toFixed(4)}（含分红再投，价已反映）</p>
@@ -235,6 +253,15 @@ function BStockDetail({ symbol }: { symbol: string }) {
                   </button>
                 ))}
               </div>
+
+              {info && !sideAllowed && (
+                <div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">
+                  <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0" />
+                  <span>{side === 'BUY'
+                    ? (info.catalogStatus === 'RETIRED' ? '该标的已退出公开目录；已有持仓仍可切到“卖出”平仓。' : '当前目录或数据源暂停买入；已有持仓仍可切到“卖出”处理。')
+                    : '当前行情源不可用，为避免按陈旧价格成交，暂不能卖出。'}</span>
+                </div>
+              )}
 
               {/* 余额 / 持仓 */}
               <div className="flex items-center justify-between text-xs font-bold text-muted-foreground">
@@ -293,11 +320,11 @@ function BStockDetail({ symbol }: { symbol: string }) {
               <div className="mt-auto space-y-2 pt-1">
                 <FuturesActionButton
                   onClick={submit}
-                  disabled={submitting || qtyNum <= 0 || livePrice <= 0}
+                  disabled={submitting || qtyNum <= 0 || livePrice <= 0 || !sideAllowed}
                   loading={submitting}
                   success={actionSuccess}
                   side={side}
-                  label={info?.ticker ?? ''}
+                  label={info?.displayCode ?? info?.ticker ?? ''}
                 />
                 <p className="text-[10px] text-center text-muted-foreground/60">现货 · 瞬时结算 · 无 T+1</p>
               </div>

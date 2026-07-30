@@ -3,7 +3,9 @@ import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnMa
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { NewApiAdminSettings, UpdateNewApiAdminSettings } from '../types';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
+import type { BStockAdminItem, BStockCatalogStatus, BStockCatalogSyncResult, UpdateBStockAdminRequest } from '../types';
+import { registerBStockAliases } from '../lib/orderSide';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, BStockAlias, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -220,6 +222,17 @@ export const adminApi = {
   getNewApiSettings: () => api.get<unknown, NewApiAdminSettings>('/admin/new-api-settings'),
   updateNewApiSettings: (settings: UpdateNewApiAdminSettings) =>
     api.put<unknown, NewApiAdminSettings>('/admin/new-api-settings', settings),
+  // 影子股票目录：真实 symbol 与展示身份分离，只有管理员可见来源字段
+  listBStocks: (params: { status?: BStockCatalogStatus; keyword?: string; pageNum?: number; pageSize?: number } = {}) =>
+    api.get<unknown, PageResult<BStockAdminItem>>('/admin/bstock', { params }),
+  updateBStock: (id: number, data: UpdateBStockAdminRequest) =>
+    api.put<unknown, BStockAdminItem>(`/admin/bstock/${id}`, data),
+  batchBStockStatus: (ids: number[], catalogStatus: BStockCatalogStatus) =>
+    api.post<unknown, number>('/admin/bstock/batch-status', { ids, catalogStatus }),
+  regenerateBStockAlias: (id: number) =>
+    api.post<unknown, BStockAdminItem>(`/admin/bstock/${id}/regenerate-alias`),
+  syncBStockCatalog: () =>
+    api.post<unknown, BStockCatalogSyncResult>('/admin/bstock/sync'),
 };
 
 // ========== Buff接口 ==========
@@ -318,8 +331,21 @@ export const cryptoOrderApi = {
 // ========== bStock（代币化美股）接口 ==========
 // 行情走真实 Binance 现货；交易复用现货引擎（仅现货：市价/限价买卖 + 杠杆借款）
 export const bstockApi = {
-  list: () => api.get<unknown, BStock[]>('/bstock/list'),
-  detail: (symbol: string) => api.get<unknown, BStock>(`/bstock/${symbol}`),
+  aliases: async () => {
+    const aliases = await api.get<unknown, BStockAlias[]>('/bstock/aliases');
+    registerBStockAliases(aliases);
+    return aliases;
+  },
+  list: async () => {
+    const stocks = await api.get<unknown, BStock[]>('/bstock/list');
+    registerBStockAliases(stocks);
+    return stocks;
+  },
+  detail: async (symbol: string) => {
+    const stock = await api.get<unknown, BStock>(`/bstock/${symbol}`);
+    registerBStockAliases([stock]);
+    return stock;
+  },
   price: (symbol: string) => api.get<unknown, number>('/bstock/price', { params: { symbol } }),
   klines: rawKlines('/api/bstock/klines'),
   buy: (data: CryptoOrderRequest) => api.post<unknown, CryptoOrder>('/bstock/order/buy', data),

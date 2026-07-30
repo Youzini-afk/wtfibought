@@ -40,7 +40,7 @@ export function HomeMarketSection() {
   // 价格和涨跌由 BStockMarketRow 自己走 Spot 流实时刷，不需要轮询
   useEffect(() => {
     bstockApi.list()
-      .then(list => setTopStocks([...list].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 2)))
+      .then(list => setTopStocks(list.filter(stock => stock.buyAllowed).sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 2)))
       .catch(() => {});
   }, []);
 
@@ -51,7 +51,7 @@ export function HomeMarketSection() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
       <div className="@container pt-card rounded-lg overflow-hidden">
-        <CategoryHeader icon={Landmark} title="股票" subtitle="代币化美股" iconColor="text-blue-500" to="/bstock" />
+        <CategoryHeader icon={Landmark} title="影子股票" subtitle="平行行情标的" iconColor="text-blue-500" to="/bstock" />
         {topStocks.length
           ? topStocks.map(s => <BStockMarketRow key={s.symbol} stock={s} />)
           : Array.from({ length: 2 }).map((_, i) => <Skeleton key={i} className="h-[52px] m-2" />)}

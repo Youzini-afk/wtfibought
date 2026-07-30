@@ -10,7 +10,7 @@ import { TabButton } from '../components/TabButton';
 import { PositionHistoryList } from '../components/PositionHistoryList';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
-import { orderSideView, tradeHref, tradeSymbolName } from '../lib/orderSide';
+import { orderSideView, tradeHref, tradeSymbolName, useBStockAliasVersion } from '../lib/orderSide';
 import {
   ArrowLeft, Briefcase, ChevronLeft, ChevronRight, EyeOff, Trophy, Bot, History, Receipt,
 } from 'lucide-react';
@@ -101,6 +101,7 @@ function PositionCard({ title, positions, onOpen }: {
 }
 
 export function UserProfile() {
+  useBStockAliasVersion();
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);

@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Bot, ChevronDown, ChevronLeft, ChevronRight, History } from 'lucide-react';
 import { cn, fmtDateTime, fmtDuration, fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
-import { orderSideView, tradeSymbolName } from '../lib/orderSide';
+import { orderSideView, tradeSymbolName, useBStockAliasVersion } from '../lib/orderSide';
 import { Skeleton } from './ui/skeleton';
 import { Button } from './ui/button';
 import { EmptyState } from './EmptyState';
@@ -206,6 +206,7 @@ export function PositionHistoryList({ records, page, pages, loading, onPage, emp
   onPage: (p: number) => void;
   emptyText?: string;
 }) {
+  useBStockAliasVersion();
   if (loading) {
     return (
       <div className="p-4 space-y-2.5">

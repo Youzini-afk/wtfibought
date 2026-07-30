@@ -7,7 +7,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/EmptyState';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
-import { orderSideView, tradeHref, tradeSymbolName } from '../lib/orderSide';
+import { orderSideView, tradeHref, tradeSymbolName, useBStockAliasVersion } from '../lib/orderSide';
 import { Activity, Bot, ChevronLeft, ChevronRight, RefreshCw, Shield } from 'lucide-react';
 import type { PageResult, PublicTrade } from '../types';
 
@@ -52,6 +52,7 @@ function SideTag({ orderSide }: { orderSide: string }) {
 }
 
 export function Trades() {
+  useBStockAliasVersion();
   const navigate = useNavigate();
 
   const [symbol, setSymbol] = useState<string | undefined>(undefined);

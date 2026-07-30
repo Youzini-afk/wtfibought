@@ -37,7 +37,7 @@ export function Intro() {
           <h2 className="font-bold text-base text-primary">交易规则</h2>
 
           <section>
-            <h3 className="font-bold mb-1">现货 · 代币化美股（bStock）</h3>
+            <h3 className="font-bold mb-1">现货 · 影子股票</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
               <li>真实 Binance 现货行情，NVDA / TSLA / QQQ 等，24/7 全天候</li>
               <li>市价 / 限价单，市价买入可加 1-10 倍杠杆（借款日息 0.05%）</li>

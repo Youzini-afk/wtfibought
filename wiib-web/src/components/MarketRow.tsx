@@ -122,12 +122,14 @@ export function BStockMarketRow({ stock }: { stock: BStock }) {
   return (
     <MarketRow
       icon={(
-        <span className="w-6 h-6 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[8px] font-bold text-muted-foreground tracking-tight">
-          {stock.ticker?.slice(0, 4)}
-        </span>
+        stock.sourceIconUrl
+          ? <img src={stock.sourceIconUrl} alt="" className="w-6 h-6 rounded-md border bg-white object-contain p-0.5 shrink-0" />
+          : <span className="w-6 h-6 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[8px] font-bold text-muted-foreground tracking-tight">
+              {(stock.displayCode || stock.ticker)?.slice(0, 4)}
+            </span>
       )}
-      name={stock.name}
-      sub={`${stock.ticker} · 美股`}
+      name={stock.displayName || stock.name}
+      sub={`${stock.displayCode || stock.ticker} · 影子股票`}
       price={price == null ? null : `$${Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
       pct={pct}
       spark={spark}

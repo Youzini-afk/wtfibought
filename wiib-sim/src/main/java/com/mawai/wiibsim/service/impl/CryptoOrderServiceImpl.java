@@ -109,6 +109,11 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     @Ledger(SPOT_BUY)
     public CryptoOrderResponse buy(Long userId, CryptoOrderRequest request) {
         validateRequest(request);
+        // 目录行锁一直持有到本事务提交，与后台暂停/退役形成确定先后顺序；
+        // 同时放在核心现货服务，避免通用 crypto 接口绕过 bStock 专属控制器。
+        if (!bStockService.lockAndCheckBuyAllowed(request.getSymbol())) {
+            throw new BizException(ErrorCode.BSTOCK_BUY_UNAVAILABLE);
+        }
         User user = getAndValidateUser(userId);
         BigDecimal price = getCryptoPrice(request.getSymbol());
         // 交易过滤器（对齐Binance exchangeInfo）：步长对齐 + 名义额≥minNotional（限价按挂单价估）
@@ -171,6 +176,10 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     @Transactional(rollbackFor = Exception.class)
     public CryptoOrderResponse sell(Long userId, CryptoOrderRequest request) {
         validateRequest(request);
+        // PAUSED/RETIRED 仍可平仓；只有上游行情不可用时阻止用残留价格成交。
+        if (!bStockService.lockAndCheckSellAllowed(request.getSymbol())) {
+            throw new BizException(ErrorCode.BSTOCK_SELL_UNAVAILABLE);
+        }
         getAndValidateUser(userId);
 
         CryptoPosition position = cryptoPositionService.findByUserAndSymbol(userId, request.getSymbol());
@@ -228,6 +237,82 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
 
         order.setStatus(OrderStatus.CANCELLED.getCode());
         return buildResponse(order);
+    }
+
+    @Override
+    public int cancelPendingBuys(String symbol) {
+        List<CryptoOrder> pending = lambdaQuery()
+                .eq(CryptoOrder::getSymbol, symbol)
+                .eq(CryptoOrder::getOrderSide, OrderSide.BUY.getCode())
+                .eq(CryptoOrder::getStatus, OrderStatus.PENDING.getCode())
+                .list();
+        int cancelled = 0;
+        for (CryptoOrder order : pending) {
+            String lockKey = "crypto:order:execute:" + order.getId();
+            String lockValue = redisLockUtil.tryLock(lockKey, 30);
+            if (lockValue == null) continue;
+            try {
+                if (SpringUtils.getAopProxy(this).doSystemCancelPendingBuy(order.getId())) cancelled++;
+            } catch (Exception e) {
+                log.warn("系统撤销影子股票待买单失败 symbol={} orderId={}: {}",
+                        symbol, order.getId(), e.getMessage());
+            } finally {
+                redisLockUtil.unlock(lockKey, lockValue);
+            }
+        }
+        return cancelled;
+    }
+
+    @Override
+    public int cancelPendingSells(String symbol) {
+        List<CryptoOrder> pending = lambdaQuery()
+                .eq(CryptoOrder::getSymbol, symbol)
+                .eq(CryptoOrder::getOrderSide, OrderSide.SELL.getCode())
+                .eq(CryptoOrder::getStatus, OrderStatus.PENDING.getCode())
+                .list();
+        int cancelled = 0;
+        for (CryptoOrder order : pending) {
+            String lockKey = "crypto:order:execute:" + order.getId();
+            String lockValue = redisLockUtil.tryLock(lockKey, 30);
+            if (lockValue == null) continue;
+            try {
+                if (SpringUtils.getAopProxy(this).doSystemCancelPendingSell(order.getId())) cancelled++;
+            } catch (Exception e) {
+                log.warn("系统撤销影子股票待卖单失败 symbol={} orderId={}: {}",
+                        symbol, order.getId(), e.getMessage());
+            } finally {
+                redisLockUtil.unlock(lockKey, lockValue);
+            }
+        }
+        return cancelled;
+    }
+
+    /** 生命周期处置不受用户破产状态影响，否则冻结余额可能永久留存。 */
+    @Transactional(rollbackFor = Exception.class)
+    @Ledger(SPOT_LIMIT_UNFREEZE)
+    protected boolean doSystemCancelPendingBuy(Long orderId) {
+        CryptoOrder order = baseMapper.selectById(orderId);
+        if (order == null
+                || !OrderSide.BUY.getCode().equals(order.getOrderSide())
+                || !OrderStatus.PENDING.getCode().equals(order.getStatus())) return false;
+        int affected = baseMapper.casUpdateStatus(orderId, OrderStatus.PENDING.getCode(), OrderStatus.CANCELLED.getCode());
+        if (affected == 0) return false;
+        removeFromLimitZSet(order);
+        userService.unfreezeBalance(order.getUserId(), order.getFrozenAmount());
+        return true;
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    protected boolean doSystemCancelPendingSell(Long orderId) {
+        CryptoOrder order = baseMapper.selectById(orderId);
+        if (order == null
+                || !OrderSide.SELL.getCode().equals(order.getOrderSide())
+                || !OrderStatus.PENDING.getCode().equals(order.getStatus())) return false;
+        int affected = baseMapper.casUpdateStatus(orderId, OrderStatus.PENDING.getCode(), OrderStatus.CANCELLED.getCode());
+        if (affected == 0) return false;
+        removeFromLimitZSet(order);
+        cryptoPositionService.unfreezePosition(order.getUserId(), order.getSymbol(), order.getQuantity());
+        return true;
     }
 
     // ==================== 查询 ====================
@@ -384,6 +469,26 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     protected boolean processTriggeredOrder(CryptoOrder order) {
         if (!OrderStatus.TRIGGERED.getCode().equals(order.getStatus())) return false;
 
+        // 管理员暂停或上游失联与限价单触发可能并发。已进入 TRIGGERED 的买单在这里做
+        // 最终闸并原路退还冻结余额；卖单不拦，避免锁死已有持仓。
+        boolean isBuy = OrderSide.BUY.getCode().equals(order.getOrderSide());
+        boolean isSell = OrderSide.SELL.getCode().equals(order.getOrderSide());
+        if (isBuy && !bStockService.lockAndCheckBuyAllowed(order.getSymbol())) {
+            int cancelled = baseMapper.casUpdateStatus(order.getId(), OrderStatus.TRIGGERED.getCode(), OrderStatus.CANCELLED.getCode());
+            if (cancelled > 0 && order.getFrozenAmount() != null) {
+                LedgerCtx.mark(SPOT_LIMIT_UNFREEZE, "CRYPTO_ORDER", order.getId());
+                userService.unfreezeBalance(order.getUserId(), order.getFrozenAmount());
+            }
+            return false;
+        }
+        if (isSell && !bStockService.lockAndCheckSellAllowed(order.getSymbol())) {
+            int cancelled = baseMapper.casUpdateStatus(order.getId(), OrderStatus.TRIGGERED.getCode(), OrderStatus.CANCELLED.getCode());
+            if (cancelled > 0) {
+                cryptoPositionService.unfreezePosition(order.getUserId(), order.getSymbol(), order.getQuantity());
+            }
+            return false;
+        }
+
         User user = userService.getById(order.getUserId());
         if (user != null && Boolean.TRUE.equals(user.getIsBankrupt())) {
             baseMapper.casUpdateStatus(order.getId(), OrderStatus.TRIGGERED.getCode(), OrderStatus.CANCELLED.getCode());
@@ -396,7 +501,6 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         BigDecimal amount = executePrice.multiply(order.getQuantity()).setScale(2, RoundingMode.HALF_UP);
         BigDecimal commission = tradingConfig.calculateCryptoCommission(amount);
 
-        boolean isSell = OrderSide.SELL.getCode().equals(order.getOrderSide());
         boolean instant = isSell && bStockService.isBStockSymbol(order.getSymbol());  // bStock 卖出瞬时结算
         int affected = (isSell && !instant)
                 ? baseMapper.casUpdateToSettling(order.getId(), executePrice, amount, commission)
@@ -446,8 +550,10 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         // 卖单：limitPrice <= currentPrice → 触发
         Set<String> sellHits = stringRedisTemplate.opsForZSet().rangeByScore(sellKey, 0, price.doubleValue());
 
-        boolean noBuy = buyHits == null || buyHits.isEmpty();
-        boolean noSell = sellHits == null || sellHits.isEmpty();
+        boolean buyPaused = bStockService.isBStockSymbol(symbol) && !bStockService.isBStockBuyAllowed(symbol);
+        boolean sellUnavailable = bStockService.isBStockSymbol(symbol) && !bStockService.isBStockSellAllowed(symbol);
+        boolean noBuy = buyPaused || buyHits == null || buyHits.isEmpty();
+        boolean noSell = sellUnavailable || sellHits == null || sellHits.isEmpty();
         if (noBuy && noSell) return;
 
         if (!noBuy) {
@@ -490,8 +596,10 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         Set<ZSetOperations.TypedTuple<String>> sellHits = stringRedisTemplate.opsForZSet()
                 .rangeByScoreWithScores(sellKey, 0, periodHigh.doubleValue());
 
-        boolean noBuy = buyHits == null || buyHits.isEmpty();
-        boolean noSell = sellHits == null || sellHits.isEmpty();
+        boolean buyPaused = bStockService.isBStockSymbol(symbol) && !bStockService.isBStockBuyAllowed(symbol);
+        boolean sellUnavailable = bStockService.isBStockSymbol(symbol) && !bStockService.isBStockSellAllowed(symbol);
+        boolean noBuy = buyPaused || buyHits == null || buyHits.isEmpty();
+        boolean noSell = sellUnavailable || sellHits == null || sellHits.isEmpty();
         if (noBuy && noSell) return;
 
         int count = 0;

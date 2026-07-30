@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSnapshot, CategoryAverages, BStock } from '../types';
 import { formatCoinPrice, getCoin } from '../lib/coinConfig';
+import { tradeSymbolName } from '../lib/orderSide';
 
 interface CryptoRow extends CryptoPosition {
   currentPrice: number;
@@ -131,15 +132,20 @@ export function Portfolio() {
   // 现货持仓：crypto_position 里混着 crypto 与 bStock，按 bstock 列表符号拆分
   const loadSpotPositions = useCallback(async () => {
     try {
-      const [cps, blist] = await Promise.all([
+      const [cps, blist, bpositions] = await Promise.all([
         cryptoOrderApi.positions(),
         bstockApi.list().catch(() => [] as BStock[]),
+        bstockApi.positions().catch(() => [] as CryptoPosition[]),
       ]);
       const bmap = new Map<string, BStock>((blist ?? []).map(b => [b.symbol, b]));
       const all = cps ?? [];
+      const bstockSymbols = new Set((bpositions ?? []).map(position => position.symbol));
+      const missingMetadata = [...bstockSymbols].filter(symbol => !bmap.has(symbol));
+      const recovered = await Promise.all(missingMetadata.map(symbol => bstockApi.detail(symbol).catch(() => null)));
+      for (const stock of recovered) if (stock) bmap.set(stock.symbol, stock);
 
       // 纯 crypto：逐只取现价
-      const cryptoCps = all.filter(cp => !bmap.has(cp.symbol));
+      const cryptoCps = all.filter(cp => !bstockSymbols.has(cp.symbol));
       const crows = await Promise.all(cryptoCps.map(async (cp) => {
         let currentPrice = 0;
         try {
@@ -155,15 +161,15 @@ export function Portfolio() {
       setCryptoRows(crows);
 
       // bStock：现价/名称取自 bstock 列表（已含实时价）
-      const brows: BStockRow[] = all.filter(cp => bmap.has(cp.symbol)).map(cp => {
+      const brows: BStockRow[] = (bpositions ?? []).map(cp => {
         const b = bmap.get(cp.symbol)!;
-        const currentPrice = b.price ?? 0;
+        const currentPrice = b?.price ?? 0;
         const marketValue = currentPrice * cp.quantity;
         const costValue = cp.avgCost * cp.quantity;
         const profit = marketValue - costValue;
         const profitPct = costValue > 0 ? (profit / costValue) * 100 : 0;
-        return { ...cp, name: b.name, ticker: b.ticker, currentPrice, marketValue, profit, profitPct };
-      });
+        return { ...cp, name: b?.displayName || tradeSymbolName(cp.symbol), ticker: b?.displayCode || 'SHDW', currentPrice, marketValue, profit, profitPct };
+      }).filter(row => Boolean(row.name));
       setBstockRows(brows);
     } catch {
       setCryptoRows([]);
@@ -263,7 +269,7 @@ export function Portfolio() {
   const holdingsTotal = cryptoTotal + bstockTotal + futuresTotal;
   const holdingsProfit = cryptoProfit + bstockProfit + futuresProfit;
   const holdingsItems = [
-    { label: 'bStock', value: bstockTotal },
+    { label: '影子股票', value: bstockTotal },
     { label: '币种', value: cryptoTotal },
     { label: '合约', value: futuresTotal },
   ];
@@ -406,7 +412,7 @@ export function Portfolio() {
                           {[
                             { label: '加密', value: realtimeSnapshot.dailyCryptoProfit },
                             { label: '大宗商品', value: realtimeSnapshot.dailyCommodityProfit },
-                            { label: 'bStock', value: realtimeSnapshot.dailyBstockProfit },
+                            { label: '影子股票', value: realtimeSnapshot.dailyBstockProfit },
                             { label: '预测', value: realtimeSnapshot.dailyPredictionProfit },
                             { label: '游戏', value: realtimeSnapshot.dailyGameProfit },
                           ].filter(item => item.value !== 0).map(item => (
@@ -663,7 +669,7 @@ export function Portfolio() {
               </Card>
             )}
 
-            {/* bStock 股票持仓 */}
+            {/* 影子股票持仓 */}
             {hasBstock && (
               <Card className="overflow-hidden">
                 <div className="px-4 py-3 flex items-center justify-between border-b border-border/40 bg-gradient-to-r from-primary/[0.06] to-transparent">
@@ -672,8 +678,8 @@ export function Portfolio() {
                       <Landmark className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <span className="text-sm font-semibold tracking-tight">股票持仓</span>
-                      <span className="text-[11px] text-muted-foreground ml-1.5">{bstockRows.length}只 · bStock</span>
+                      <span className="text-sm font-semibold tracking-tight">影子股票持仓</span>
+                      <span className="text-[11px] text-muted-foreground ml-1.5">{bstockRows.length} 支</span>
                     </div>
                   </div>
                   <div className="text-right">

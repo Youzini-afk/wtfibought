@@ -171,6 +171,9 @@ export interface BStock {
   symbol: string;        // NVDABUSDT
   ticker: string;        // NVDA
   name: string;          // 英伟达
+  displayName: string;   // 英伟呆（影子市场稳定展示名）
+  displayCode: string;   // NVDX（仅展示，真实下单 symbol 不变）
+  displayLore?: string;
   nameEn?: string;
   industry?: string;
   description?: string;
@@ -182,6 +185,12 @@ export interface BStock {
   multiplier?: number;
   week52High?: number;
   week52Low?: number;
+  sourceIconUrl?: string;
+  catalogStatus: BStockCatalogStatus;
+  sourceStatus: string;
+  underlyingStatus?: string;
+  buyAllowed: boolean;
+  sellAllowed: boolean;
   // 实时
   price?: number;
   changePct?: number;
@@ -298,6 +307,64 @@ export interface WalletTransferPreview {
   equityAfter?: number;
   maintenanceMargin?: number;
   positions?: WalletTransferPreviewPosition[];
+}
+
+export interface BStockAlias {
+  symbol: string;
+  displayName: string;
+  displayCode: string;
+  catalogStatus: BStockCatalogStatus;
+}
+
+export type BStockCatalogStatus = 'CANDIDATE' | 'LISTED' | 'PAUSED' | 'RETIRED';
+
+export interface BStockAdminItem {
+  id: number;
+  symbol: string;
+  ticker: string;
+  name: string;
+  nameEn?: string;
+  displayName: string;
+  displayCode: string;
+  displayLore?: string;
+  aliasSource: 'RULE' | 'RULE_PENDING' | 'MANUAL';
+  aliasVersion: number;
+  aliasLocked: boolean;
+  industry?: string;
+  catalogStatus: BStockCatalogStatus;
+  sourceStatus: string;
+  underlyingStatus?: string;
+  sourceChainId?: string;
+  sourceContractAddress?: string;
+  sourceTokenSymbol?: string;
+  sourceIconUrl?: string;
+  missingSyncCount: number;
+  enabled: boolean;
+  sort: number;
+  buyAllowed: boolean;
+  firstSeenAt?: string;
+  lastSeenAt?: string;
+  lastSyncedAt?: string;
+  metadataSyncedAt?: string;
+  updatedAt?: string;
+}
+
+export interface UpdateBStockAdminRequest {
+  displayName?: string;
+  displayCode?: string;
+  displayLore?: string;
+  catalogStatus?: BStockCatalogStatus;
+  sort?: number;
+}
+
+export interface BStockCatalogSyncResult {
+  discovered: number;
+  inserted: number;
+  updated: number;
+  candidates: number;
+  metadataQueued: number;
+  alreadyRunning: boolean;
+  syncedAt: string;
 }
 
 // ==================== New API 主站额度钱包 ====================

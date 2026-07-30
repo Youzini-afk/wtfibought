@@ -67,6 +67,8 @@ public enum ErrorCode {
     CRYPTO_SYMBOL_INVALID(1602, "交易对无效"),
     TRADE_STEP_INVALID(1603, "数量不符合最小交易步长"),
     TRADE_MIN_NOTIONAL(1604, "下单金额低于最小名义额"),
+    BSTOCK_BUY_UNAVAILABLE(1605, "该影子股票当前暂停买入，已有持仓仍可卖出"),
+    BSTOCK_SELL_UNAVAILABLE(1606, "该影子股票行情暂不可用，请等待数据源恢复后再卖出"),
 
     // Mines错误码 1700+
     MINES_GAME_IN_PROGRESS(1701, "有未完成的矿工游戏"),

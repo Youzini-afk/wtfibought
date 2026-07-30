@@ -22,6 +22,24 @@ public class BStock {
     /** 真实股票代码，如 NVDA（展示用） */
     private String ticker;
 
+    /** 影子市场展示名；首次生成后持久化，不随同步漂移 */
+    private String displayName;
+
+    /** 影子市场展示代码；真实下单 symbol 始终不变 */
+    private String displayCode;
+
+    /** 一句轻量世界观文案 */
+    private String displayLore;
+
+    /** RULE / MANUAL；管理员编辑后标记为 MANUAL */
+    private String aliasSource;
+
+    /** 别名生成算法版本，便于以后显式重生而不是静默改名 */
+    private Integer aliasVersion;
+
+    /** 管理员锁定后，任何自动同步都不得覆盖展示身份 */
+    private Boolean aliasLocked;
+
     /** 中文名，如 英伟达 */
     private String name;
 
@@ -49,6 +67,27 @@ public class BStock {
 
     /** bStock 乘数（信息用，现货价已含分红再投） */
     private BigDecimal multiplier;
+
+    /** Binance RWA 元数据来源身份 */
+    private String sourceChainId;
+    private String sourceContractAddress;
+    private String sourceTokenSymbol;
+    private String sourceIconUrl;
+
+    /** CANDIDATE / LISTED / PAUSED / RETIRED */
+    private String catalogStatus;
+
+    /** Spot 交易源状态（TRADING / MISSING / HALTED 等） */
+    private String sourceStatus;
+
+    /** 标的底层市场状态，仅展示，不直接决定 24/7 bStock 是否可交易 */
+    private String underlyingStatus;
+
+    private Integer missingSyncCount;
+    private LocalDateTime firstSeenAt;
+    private LocalDateTime lastSeenAt;
+    private LocalDateTime lastSyncedAt;
+    private LocalDateTime metadataSyncedAt;
 
     /** 52周最高 */
     @TableField("week52_high")

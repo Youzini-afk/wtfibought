@@ -5,6 +5,7 @@ import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.cache.CacheService;
+import com.mawai.wiibcommon.dto.BStockAliasDTO;
 import com.mawai.wiibcommon.dto.BStockDTO;
 import com.mawai.wiibcommon.entity.BStock;
 import com.mawai.wiibcommon.enums.ErrorCode;
@@ -22,9 +23,8 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * bStock 读取服务实现。静态信息读 bstock 表；实时价来自 feed 写入的 Redis（{@code market:price:*}），
@@ -38,14 +38,14 @@ public class BStockServiceImpl extends ServiceImpl<BStockMapper, BStock> impleme
     private final CacheService cacheService;
     private final BinanceRestClient binanceRestClient;
 
-    // 10 只一次批量拉，缓存 15s：/list 高频调用不逐只打 Binance
+    // 当前目录一次批量拉（首发 56 支），缓存 15s：/list 高频调用不逐只打 Binance
     private static final String TICKER_CACHE_KEY = "bstock:ticker24h";
     private static final Duration TICKER_TTL = Duration.ofSeconds(15);
 
-    // bStock 符号集缓存（现货引擎判瞬时结算用）：符号极少变，5min TTL 足够
-    private static final long SYMBOL_CACHE_TTL_MS = 5 * 60 * 1000L;
-    private volatile Set<String> symbolCache;
-    private volatile long symbolCacheAt;
+    // 身份与开仓策略是两种语义；后台启停后会主动失效，30s TTL 只作为跨实例兜底。
+    private static final long POLICY_CACHE_TTL_MS = 30 * 1000L;
+    private volatile Map<String, CatalogPolicy> policyCache;
+    private volatile long policyCacheAt;
 
     @Override
     public List<BStockDTO> listAll() {
@@ -56,7 +56,7 @@ public class BStockServiceImpl extends ServiceImpl<BStockMapper, BStock> impleme
         if (stocks.isEmpty()) return Collections.emptyList();
 
         Map<String, JSONObject> tickers = loadTicker24h(stocks.stream().map(BStock::getSymbol).toList());
-        return stocks.stream().map(s -> toDTO(s, tickers.get(s.getSymbol()))).toList();
+        return stocks.stream().map(s -> toListDTO(s, tickers.get(s.getSymbol()))).toList();
     }
 
     @Override
@@ -109,6 +109,10 @@ public class BStockServiceImpl extends ServiceImpl<BStockMapper, BStock> impleme
     private BStockDTO toDTO(BStock s, JSONObject t) {
         BStockDTO d = new BStockDTO();
         BeanUtils.copyProperties(s, d);
+        if (d.getDisplayName() == null || d.getDisplayName().isBlank()) d.setDisplayName("影子标的");
+        if (d.getDisplayCode() == null || d.getDisplayCode().isBlank()) d.setDisplayCode("SHDW");
+        d.setBuyAllowed(isBuyAllowed(s));
+        d.setSellAllowed("TRADING".equals(normalizeSourceStatus(s)));
         if (t != null) {
             d.setPrice(t.getBigDecimal("lastPrice"));
             d.setChangePct(t.getBigDecimal("priceChangePercent"));
@@ -122,15 +126,103 @@ public class BStockServiceImpl extends ServiceImpl<BStockMapper, BStock> impleme
     }
 
     @Override
+    public List<BStockAliasDTO> listAliases() {
+        return lambdaQuery()
+                .ne(BStock::getCatalogStatus, "CANDIDATE")
+                .orderByAsc(BStock::getSort)
+                .list()
+                .stream()
+                .map(stock -> {
+                    BStockAliasDTO alias = new BStockAliasDTO();
+                    alias.setSymbol(stock.getSymbol());
+                    alias.setDisplayName(stock.getDisplayName() == null || stock.getDisplayName().isBlank()
+                            ? "影子标的" : stock.getDisplayName());
+                    alias.setDisplayCode(stock.getDisplayCode() == null || stock.getDisplayCode().isBlank()
+                            ? "SHDW" : stock.getDisplayCode());
+                    alias.setCatalogStatus(stock.getCatalogStatus());
+                    return alias;
+                })
+                .toList();
+    }
+
+    /** 列表高频刷新不重复下发 56 份长简介；详情页仍返回完整公司资料。 */
+    private BStockDTO toListDTO(BStock stock, JSONObject ticker) {
+        BStockDTO dto = toDTO(stock, ticker);
+        dto.setDescription(null);
+        dto.setCeo(null);
+        dto.setHomepage(null);
+        return dto;
+    }
+
+    @Override
     public boolean isBStockSymbol(String symbol) {
         if (symbol == null || symbol.isBlank()) return false;
-        Set<String> cache = symbolCache;
-        if (cache == null || System.currentTimeMillis() - symbolCacheAt > SYMBOL_CACHE_TTL_MS) {
-            cache = lambdaQuery().select(BStock::getSymbol).list()
-                    .stream().map(BStock::getSymbol).collect(Collectors.toSet());
-            symbolCache = cache;
-            symbolCacheAt = System.currentTimeMillis();
-        }
-        return cache.contains(symbol);
+        return loadPolicies().containsKey(normalizeSymbol(symbol));
     }
+
+    @Override
+    public boolean isBStockBuyAllowed(String symbol) {
+        if (symbol == null || symbol.isBlank()) return false;
+        CatalogPolicy policy = loadPolicies().get(normalizeSymbol(symbol));
+        return policy != null && "LISTED".equals(policy.catalogStatus()) && "TRADING".equals(policy.sourceStatus());
+    }
+
+    @Override
+    public boolean isBStockSellAllowed(String symbol) {
+        if (symbol == null || symbol.isBlank()) return false;
+        CatalogPolicy policy = loadPolicies().get(normalizeSymbol(symbol));
+        return policy != null && "TRADING".equals(policy.sourceStatus());
+    }
+
+    @Override
+    public boolean lockAndCheckBuyAllowed(String symbol) {
+        BStock stock = baseMapper.selectBySymbolForUpdate(normalizeSymbol(symbol));
+        return stock == null || isBuyAllowed(stock);
+    }
+
+    @Override
+    public boolean lockAndCheckSellAllowed(String symbol) {
+        BStock stock = baseMapper.selectBySymbolForUpdate(normalizeSymbol(symbol));
+        return stock == null || "TRADING".equals(normalizeSourceStatus(stock));
+    }
+
+    @Override
+    public void invalidateCatalogCache() {
+        policyCache = null;
+        policyCacheAt = 0L;
+    }
+
+    private Map<String, CatalogPolicy> loadPolicies() {
+        Map<String, CatalogPolicy> cache = policyCache;
+        if (cache == null || System.currentTimeMillis() - policyCacheAt > POLICY_CACHE_TTL_MS) {
+            Map<String, CatalogPolicy> fresh = new HashMap<>();
+            for (BStock stock : lambdaQuery()
+                    .select(BStock::getSymbol, BStock::getCatalogStatus, BStock::getSourceStatus, BStock::getEnabled)
+                    .list()) {
+                String catalog = stock.getCatalogStatus();
+                if (catalog == null || catalog.isBlank()) catalog = Boolean.FALSE.equals(stock.getEnabled()) ? "RETIRED" : "LISTED";
+                fresh.put(normalizeSymbol(stock.getSymbol()), new CatalogPolicy(catalog, normalizeSourceStatus(stock)));
+            }
+            policyCache = fresh;
+            policyCacheAt = System.currentTimeMillis();
+            cache = fresh;
+        }
+        return cache;
+    }
+
+    private boolean isBuyAllowed(BStock stock) {
+        String catalog = stock.getCatalogStatus();
+        if (catalog == null || catalog.isBlank()) catalog = Boolean.FALSE.equals(stock.getEnabled()) ? "RETIRED" : "LISTED";
+        return "LISTED".equals(catalog) && "TRADING".equals(normalizeSourceStatus(stock));
+    }
+
+    private String normalizeSourceStatus(BStock stock) {
+        return stock.getSourceStatus() == null || stock.getSourceStatus().isBlank() ? "TRADING" : stock.getSourceStatus();
+    }
+
+    private String normalizeSymbol(String symbol) {
+        return symbol == null ? "" : symbol.trim().toUpperCase(Locale.ROOT);
+    }
+
+    private record CatalogPolicy(String catalogStatus, String sourceStatus) {}
 }

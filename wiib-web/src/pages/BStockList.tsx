@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/skeleton';
+import { Badge } from '../components/ui/badge';
 import { useToast } from '../components/ui/use-toast';
 import { cn, fmtNum } from '../lib/utils';
 import { Landmark, RefreshCcw, Search, X, ArrowUpDown, ChevronRight } from 'lucide-react';
@@ -33,7 +34,7 @@ export function BStockList() {
   const load = useCallback((silent = false) => {
     bstockApi.list()
       .then(setStocks)
-      .catch(() => { if (!silent) toast('获取 bStock 列表失败', 'error', { description: '请稍后重试' }); })
+      .catch(() => { if (!silent) toast('获取影子股票列表失败', 'error', { description: '请稍后重试' }); })
       .finally(() => setLoaded(true));
   }, [toast]);
 
@@ -47,6 +48,8 @@ export function BStockList() {
     let r = [...stocks];
     const q = query.trim().toLowerCase();
     if (q) r = r.filter(s =>
+      s.displayName?.toLowerCase().includes(q) ||
+      s.displayCode?.toLowerCase().includes(q) ||
       s.name?.toLowerCase().includes(q) ||
       s.ticker?.toLowerCase().includes(q) ||
       s.industry?.toLowerCase().includes(q));
@@ -73,14 +76,14 @@ export function BStockList() {
               <div className="p-1.5 rounded-lg bg-primary/10">
                 <Landmark className="w-4 h-4 text-primary" />
               </div>
-              股票 · bStock
-              <span className="text-xs text-muted-foreground font-normal ml-2">代币化美股 · 共 {stocks.length} 支</span>
+              影子股票
+              <span className="text-xs text-muted-foreground font-normal ml-2">平行行情标的 · 共 {stocks.length} 支</span>
             </CardTitle>
 
             <div className="flex items-center gap-2">
               <div className="relative flex-1 sm:w-64">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索名称 / 代码 / 行业" className="pl-9 pr-9 h-9" />
+                <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索影子名 / 代码 / 行业" className="pl-9 pr-9 h-9" />
                 {query.trim() && (
                   <button type="button" onClick={() => setQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md hover:bg-surface-hover transition-colors" aria-label="清空搜索">
                     <X className="w-4 h-4 text-muted-foreground" />
@@ -128,13 +131,18 @@ export function BStockList() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="w-10 h-10 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[10px] font-bold text-muted-foreground tracking-tight">
-                        {s.ticker?.slice(0, 4)}
-                      </div>
+                      {s.sourceIconUrl ? (
+                        <img src={s.sourceIconUrl} alt="" className="w-10 h-10 rounded-md border border-border bg-white object-contain p-1 shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[10px] font-bold text-muted-foreground tracking-tight">
+                          {s.displayCode?.slice(0, 4) || s.ticker?.slice(0, 4)}
+                        </div>
+                      )}
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 mb-1">
-                          <span className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{s.name}</span>
-                          <span className="text-xs text-muted-foreground/70 shrink-0">{s.ticker}</span>
+                          <span className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{s.displayName || s.name}</span>
+                          <span className="text-xs text-muted-foreground/70 shrink-0">{s.displayCode || s.ticker}</span>
+                          {(!s.buyAllowed || s.catalogStatus === 'PAUSED') && <Badge variant="warning" className="text-[9px]">暂停买入</Badge>}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           {s.industry && <><span>{s.industry}</span><span className="text-border">·</span></>}
@@ -159,7 +167,7 @@ export function BStockList() {
           ) : (
             <div className="p-12 text-center text-muted-foreground flex flex-col items-center gap-2">
               <Search className="w-8 h-8 opacity-20" />
-              <p>{query.trim() ? '未找到相关股票' : '暂无数据'}</p>
+              <p>{query.trim() ? '未找到相关影子股票' : '暂无数据'}</p>
               {query.trim() && <Button variant="link" size="sm" onClick={() => setQuery('')}>清除搜索条件</Button>}
             </div>
           )}

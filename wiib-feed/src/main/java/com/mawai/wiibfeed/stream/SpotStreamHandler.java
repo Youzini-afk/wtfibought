@@ -5,12 +5,15 @@ import com.mawai.wiibcommon.cache.CacheService;
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibcommon.market.BinanceRestClient;
 import com.mawai.wiibfeed.WsConnection;
+import com.mawai.wiibfeed.BStockSubscriptionRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.net.http.WebSocket;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 
 /**
@@ -27,6 +30,7 @@ public class SpotStreamHandler implements StreamHandler {
     private final MarketBroadcaster broadcastService;
     private final BinanceRestClient restClient;
     private final MatchPricePublisher matchPricePublisher;
+    private final BStockSubscriptionRegistry bStockSubscriptions;
 
     private WsConnection conn;
     private RestFallbackPoller fallback;
@@ -47,8 +51,9 @@ public class SpotStreamHandler implements StreamHandler {
     @Override
     public String buildUrl() {
         // 现货端点结构与期货不同：无 /market /public 段，单流直接 base/{stream}，多流走 /stream?streams=
-        String streams = StreamUrls.joinStreams(props.getAllSpotSymbols(), "miniTicker");
-        if (props.getAllSpotSymbols().size() == 1) {
+        List<String> symbols = allSpotSymbols();
+        String streams = StreamUrls.joinStreams(symbols, "miniTicker");
+        if (symbols.size() == 1) {
             return props.getWsUrl() + "/" + streams;
         }
         return props.getWsUrl().replace("/ws", "/stream?streams=" + streams);
@@ -95,7 +100,7 @@ public class SpotStreamHandler implements StreamHandler {
     // ── REST兜底：WS断开期间切REST轮询保证价格不中断 ──
 
     private void pollOnce() {
-        for (String symbol : props.getAllSpotSymbols()) {
+        for (String symbol : allSpotSymbols()) {
             try {
                 String json = restClient.getTickerPrice(symbol);
                 updatePriceFromJson(symbol, json);
@@ -114,7 +119,7 @@ public class SpotStreamHandler implements StreamHandler {
 
     private void recoverMissedLimitOrders() {
         try {
-            for (String symbol : props.getAllSpotSymbols()) {
+            for (String symbol : allSpotSymbols()) {
                 BigDecimal[] lowHigh = restClient.getRecentHighLow(symbol);
                 if (lowHigh != null) {
                     // 发恢复事件，sim 侧按区间高低价补触发限价单（解耦：撮合不在 feed）
@@ -125,5 +130,11 @@ public class SpotStreamHandler implements StreamHandler {
         } catch (Exception e) {
             log.error("恢复现货限价单失败", e);
         }
+    }
+
+    private List<String> allSpotSymbols() {
+        LinkedHashSet<String> all = new LinkedHashSet<>(props.getSymbols() == null ? List.of() : props.getSymbols());
+        all.addAll(bStockSubscriptions.getSymbols());
+        return all.stream().toList();
     }
 }

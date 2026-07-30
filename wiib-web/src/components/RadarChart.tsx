@@ -11,7 +11,7 @@ interface Props {
 const INDICATORS = [
   { name: '加密货币', key: 'cryptoProfit' },
   { name: '大宗商品', key: 'commodityProfit' },
-  { name: 'bStock', key: 'bstockProfit' },
+  { name: '影子股票', key: 'bstockProfit' },
   { name: '预测', key: 'predictionProfit' },
   { name: '游戏', key: 'gameProfit' },
 ];

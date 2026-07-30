@@ -156,6 +156,23 @@ public class BinanceRestClient extends BaseRestTemplateConfig {
         }
     }
 
+    /**
+     * 现货 exchangeInfo 全量快照。影子股票目录用它与 RWA 清单做交集，避免未来清单里
+     * 混入尚未开放 Spot 的标的时，带无效 symbols 的批量请求整体返回 400。
+     */
+    public String getSpotExchangeInfo() {
+        URI uri = UriComponentsBuilder
+                .fromUriString(props.getRestBaseUrl() + "/api/v3/exchangeInfo")
+                .build().toUri();
+        try {
+            log.info("Binance REST spot exchangeInfo full snapshot");
+            return restTemplate.getForObject(uri, String.class);
+        } catch (Exception e) {
+            log.warn("获取现货exchangeInfo全量快照失败: {}", e.getMessage());
+            return null;
+        }
+    }
+
     /** premiumIndex 单次响应同时含 markPrice/indexPrice/lastFundingRate，mark 价与资金费率调用方共用。 */
     public String getPremiumIndex(String symbol) {
         String baseUrl = props.getFuturesRestBaseUrl();

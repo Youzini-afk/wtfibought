@@ -9,6 +9,12 @@ CREATE TABLE IF NOT EXISTS bstock (
     id             BIGSERIAL PRIMARY KEY,
     symbol         VARCHAR(20) NOT NULL UNIQUE,   -- Binance 现货符号，如 NVDABUSDT
     ticker         VARCHAR(10) NOT NULL,          -- 真实股票代码，如 NVDA
+    display_name   VARCHAR(64),                   -- 影子市场展示名（持久化稳定别名）
+    display_code   VARCHAR(16),                   -- 影子市场展示代码
+    display_lore   VARCHAR(255),                  -- 轻量世界观文案
+    alias_source   VARCHAR(16) NOT NULL DEFAULT 'RULE',
+    alias_version  INT NOT NULL DEFAULT 1,
+    alias_locked   BOOLEAN NOT NULL DEFAULT FALSE,
     name           VARCHAR(64) NOT NULL,          -- 中文名
     name_en        VARCHAR(64),                   -- 英文名
     industry       VARCHAR(32),                   -- 行业
@@ -19,6 +25,18 @@ CREATE TABLE IF NOT EXISTS bstock (
     pe_ratio       DECIMAL(12,2),                 -- 市盈率
     dividend_yield DECIMAL(8,4),                  -- 股息率
     multiplier     DECIMAL(24,18),                -- bStock 乘数（信息用，现货价已含分红再投）
+    source_chain_id VARCHAR(32),
+    source_contract_address VARCHAR(128),
+    source_token_symbol VARCHAR(32),
+    source_icon_url VARCHAR(512),
+    catalog_status VARCHAR(16) NOT NULL DEFAULT 'LISTED',
+    source_status  VARCHAR(32) NOT NULL DEFAULT 'TRADING',
+    underlying_status VARCHAR(64),
+    missing_sync_count INT NOT NULL DEFAULT 0,
+    first_seen_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at   TIMESTAMP,
+    last_synced_at TIMESTAMP,
+    metadata_synced_at TIMESTAMP,
     week52_high    DECIMAL(12,2),
     week52_low     DECIMAL(12,2),
     enabled        BOOLEAN NOT NULL DEFAULT TRUE, -- 是否上架

@@ -59,7 +59,7 @@ function useStockQuote(stock: BStock | undefined): Quote {
   const pct = price != null && base ? ((price - base) / base) * 100 : (stock?.changePct ?? null);
   return {
     key: symbol ?? '',
-    name: stock?.ticker ?? stock?.name ?? '',
+    name: stock?.displayCode ?? stock?.displayName ?? stock?.ticker ?? stock?.name ?? '',
     price, pct,
     to: `/bstock/${symbol}`,
     live: true,
@@ -110,7 +110,7 @@ export function TickerStrip() {
   const [stocks, setStocks] = useState<BStock[]>([]);
   useEffect(() => {
     bstockApi.list()
-      .then(list => setStocks([...list].sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 4)))
+      .then(list => setStocks(list.filter(stock => stock.buyAllowed).sort((a, b) => (b.marketCap ?? 0) - (a.marketCap ?? 0)).slice(0, 4)))
       .catch(() => {});
   }, []);
 

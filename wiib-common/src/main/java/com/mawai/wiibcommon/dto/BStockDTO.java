@@ -12,6 +12,9 @@ public class BStockDTO {
     private String symbol;      // NVDABUSDT
     private String ticker;      // NVDA
     private String name;        // 英伟达
+    private String displayName; // 英伟呆
+    private String displayCode; // NVDX
+    private String displayLore;
     private String nameEn;      // Nvidia Corp
     private String industry;
     private String description;
@@ -23,6 +26,12 @@ public class BStockDTO {
     private BigDecimal multiplier;
     private BigDecimal week52High;
     private BigDecimal week52Low;
+    private String sourceIconUrl;
+    private String catalogStatus;
+    private String sourceStatus;
+    private String underlyingStatus;
+    private Boolean buyAllowed;
+    private Boolean sellAllowed;
 
     // ── 实时（行情）──
     private BigDecimal price;       // 最新价

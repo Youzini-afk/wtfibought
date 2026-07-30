@@ -28,6 +28,12 @@ public interface CryptoOrderService extends IService<CryptoOrder> {
     /** 重启/重连后，根据期间高低价恢复触发限价单 */
     void recoverLimitOrders(String symbol, BigDecimal periodLow, BigDecimal periodHigh);
 
+    /** 目录暂停、退役或上游不可用时，主动撤销并解冻该标的全部待成交买单。 */
+    int cancelPendingBuys(String symbol);
+
+    /** 上游行情不可用时，撤销待成交卖单并解冻持仓；普通目录暂停不调用。 */
+    int cancelPendingSells(String symbol);
+
     /** 最新成交20条-匿名 */
     List<CryptoOrderResponse> getLatestOrders();
 }

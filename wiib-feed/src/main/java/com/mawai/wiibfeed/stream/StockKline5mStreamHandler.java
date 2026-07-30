@@ -1,6 +1,7 @@
 package com.mawai.wiibfeed.stream;
 
 import com.mawai.wiibcommon.config.BinanceProperties;
+import com.mawai.wiibfeed.BStockSubscriptionRegistry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
@@ -18,13 +19,14 @@ public class StockKline5mStreamHandler implements StreamHandler {
 
     private final BinanceProperties props;
     private final KlineStreamHandler klineHandler;
+    private final BStockSubscriptionRegistry bStockSubscriptions;
 
     @Override public String name() { return "StockKline5m"; }
     @Override public long maxIdleSeconds() { return 360; }
 
     @Override
     public String buildUrl() {
-        List<String> syms = props.getStockSymbols();
+        List<String> syms = bStockSubscriptions.getSymbols();
         if (syms == null || syms.isEmpty()) return "";   // 无 bStock 则不建连
         // 现货端点结构：单流 base/{stream}，多流 /stream?streams=（与 SpotStreamHandler 一致，非合约的 /market 段）
         String streams = StreamUrls.joinStreams(syms, "kline_5m");

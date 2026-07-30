@@ -32,19 +32,19 @@ export interface CoinCfg {
 
 export const COIN_MAP: Record<string, CoinCfg> = {
   BTCUSDT: {
-    symbol: 'BTCUSDT', name: 'BTC', pair: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSD', futuresTvSymbol: 'BINANCE:BTCUSDT.P',
+    symbol: 'BTCUSDT', name: '比特饼', pair: 'BTC / USDT', tvSymbol: 'BINANCE:BTCUSD', futuresTvSymbol: 'BINANCE:BTCUSDT.P',
     icon: Bitcoin,
     colorClass: 'text-orange-500', bgClass: 'bg-orange-500/10', hoverBgClass: 'hover:bg-orange-500/20', gradientClass: 'from-orange-500/5',
     chartColor: '#f97316', desc: '比特币 / USDT 模拟交易',
   },
   ETHUSDT: {
-    symbol: 'ETHUSDT', name: 'ETH', pair: 'ETH / USDT', tvSymbol: 'BINANCE:ETHUSD', futuresTvSymbol: 'BINANCE:ETHUSDT.P',
+    symbol: 'ETHUSDT', name: '以太方', pair: 'ETH / USDT', tvSymbol: 'BINANCE:ETHUSD', futuresTvSymbol: 'BINANCE:ETHUSDT.P',
     icon: Eth,
     colorClass: 'text-indigo-400', bgClass: 'bg-indigo-500/10', hoverBgClass: 'hover:bg-indigo-500/20', gradientClass: 'from-indigo-500/5',
     chartColor: '#818cf8', desc: '以太坊 / USDT 模拟交易',
   },
   DOGEUSDT: {
-    symbol: 'DOGEUSDT', name: 'DOGE', pair: 'DOGE / USDT', tvSymbol: 'BINANCE:DOGEUSDT', futuresTvSymbol: 'BINANCE:DOGEUSDT.P',
+    symbol: 'DOGEUSDT', name: '狗勾币', pair: 'DOGE / USDT', tvSymbol: 'BINANCE:DOGEUSDT', futuresTvSymbol: 'BINANCE:DOGEUSDT.P',
     priceDecimals: 5, icon: Doge,
     colorClass: 'text-amber-500', bgClass: 'bg-amber-500/10', hoverBgClass: 'hover:bg-amber-500/20', gradientClass: 'from-amber-500/5',
     chartColor: '#f59e0b', desc: '狗狗币 / USDT 模拟交易',
@@ -68,13 +68,13 @@ export const COIN_MAP: Record<string, CoinCfg> = {
     chartColor: '#f0b90b', desc: 'BNB / USDT 模拟交易',
   },
   XAUUSDT: {
-    symbol: 'XAUUSDT', name: '黄金', pair: 'XAU / USDT', tvSymbol: 'TVC:GOLD', futuresTvSymbol: 'BINANCE:XAUUSDT.P',
+    symbol: 'XAUUSDT', name: '黄金糕', pair: 'XAU / USDT', tvSymbol: 'TVC:GOLD', futuresTvSymbol: 'BINANCE:XAUUSDT.P',
     icon: Coins,
     colorClass: 'text-yellow-500', bgClass: 'bg-yellow-500/10', hoverBgClass: 'hover:bg-yellow-500/20', gradientClass: 'from-yellow-500/5',
     chartColor: '#eab308', desc: '黄金 / USDT · TradFi 永续合约', category: 'commodity', futuresOnly: true,
   },
   CLUSDT: {
-    symbol: 'CLUSDT', name: '原油', pair: 'CL / USDT', tvSymbol: 'TVC:USOIL', futuresTvSymbol: 'BINANCE:CLUSDT.P',
+    symbol: 'CLUSDT', name: '原油条', pair: 'CL / USDT', tvSymbol: 'TVC:USOIL', futuresTvSymbol: 'BINANCE:CLUSDT.P',
     icon: Fuel,
     colorClass: 'text-stone-500', bgClass: 'bg-stone-500/10', hoverBgClass: 'hover:bg-stone-500/20', gradientClass: 'from-stone-500/5',
     chartColor: '#78716c', desc: 'WTI 原油 / USDT · TradFi 永续合约', category: 'commodity', futuresOnly: true,

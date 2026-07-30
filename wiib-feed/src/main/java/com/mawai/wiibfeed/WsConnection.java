@@ -37,6 +37,8 @@ public class WsConnection {
     private final AtomicBoolean connected = new AtomicBoolean(false);
     private final AtomicBoolean connecting = new AtomicBoolean(false);
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
+    /** 订阅集恰好在握手期间变化时，握手完成后再切一次，避免丢掉动态目录更新。 */
+    private final AtomicBoolean reconnectRequested = new AtomicBoolean(false);
     private final AtomicInteger reconnectAttempt = new AtomicInteger(0);
     private volatile long lastMessageAt;
     /** 最近一次断线原因，仅进入管理员流健康快照；连接恢复后清空。 */
@@ -109,7 +111,23 @@ public class WsConnection {
         if (connected.get()) return;
         if (!connecting.compareAndSet(false, true)) return;
 
-        String url = urlBuilder.get();
+        String url;
+        try {
+            url = urlBuilder.get();
+            if (url == null || url.isBlank()) {
+                lastError = "当前没有订阅标的";
+                connecting.set(false);
+                reconnecting.set(false);
+                fireStatus();
+                return;
+            }
+        } catch (Exception e) {
+            lastError = "构建订阅地址失败：" + sanitize(e.getMessage());
+            connecting.set(false);
+            reconnecting.set(false);
+            fireStatus();
+            return;
+        }
         log.info("连接{} WS: {}", name, url);
         fireStatus(); // CONNECTING
 
@@ -129,6 +147,9 @@ public class WsConnection {
                     log.info("{} WS已连接", name);
                     fireStatus(); // CONNECTED
                     if (onConnected != null) onConnected.accept(ws);
+                    if (reconnectRequested.getAndSet(false)) {
+                        scheduler.execute(this::reconnectNow);
+                    }
                 })
                 .exceptionally(ex -> {
                     String detail = describeError(ex);
@@ -158,6 +179,10 @@ public class WsConnection {
     public void reconnectNow() {
         if (shutdown.get()) return;
         log.info("手动重试{} WS", name);
+        if (connecting.get()) {
+            reconnectRequested.set(true);
+            return;
+        }
         ScheduledFuture<?> pending = reconnectFuture;
         if (pending != null) pending.cancel(false);
         WebSocket old = wsRef.getAndSet(null);
