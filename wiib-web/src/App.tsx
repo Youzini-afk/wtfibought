@@ -31,6 +31,8 @@ import { Backtest } from './pages/Backtest';
 import { TestnetMonitor } from './pages/TestnetMonitor';
 import { ForceOrders } from './pages/ForceOrders';
 import { useUserStore } from './stores/userStore';
+import { useSiteSettingsStore } from './stores/siteSettingsStore';
+import type { PageVisibilityKey } from './types';
 
 declare global {
   interface Window {
@@ -48,6 +50,20 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const token = useUserStore(s => s.token);
   if (!token) return <Navigate to="/login" replace />;
   return <>{children}</>;
+}
+
+/** 页面关闭后不只隐藏导航，手工输入 URL 也统一回到始终可用的首页。 */
+function RequirePage({ page, children }: { page: PageVisibilityKey; children: ReactNode }) {
+  const ready = useSiteSettingsStore(state => state.visibilityReady);
+  const enabled = useSiteSettingsStore(state => state.settings.pageVisibility[page]);
+  if (!ready) return null;
+  if (!enabled) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+function RequireVisibilityReady({ children }: { children: ReactNode }) {
+  const ready = useSiteSettingsStore(state => state.visibilityReady);
+  return ready ? <>{children}</> : null;
 }
 
 function App() {
@@ -72,38 +88,40 @@ function App() {
           path="/*"
           element={
             <RequireAuth>
-              <Layout>
-                <Routes>
+              <RequireVisibilityReady>
+                <Layout>
+                  <Routes>
                   <Route path="/" element={<Home />} />
-                  <Route path="/bstock" element={<BStockList />} />
-                  <Route path="/bstock/:symbol" element={<BStockRoute />} />
-                  <Route path="/portfolio" element={<Portfolio />} />
-                  <Route path="/portfolio/history" element={<PositionHistory />} />
-                  <Route path="/ledger" element={<Ledger />} />
-                  <Route path="/trades" element={<Trades />} />
-                  <Route path="/coin" element={<CoinSelect />} />
-                  <Route path="/coin/:symbol" element={<CoinRoute />} />
-                  <Route path="/commodity" element={<CommoditySelect />} />
-                  <Route path="/tradfi" element={<TradFiSelect />} />
-                  <Route path="/ranking" element={<Ranking />} />
-                  <Route path="/user/:id" element={<UserProfile />} />
-                  <Route path="/comments" element={<Comments />} />
+                  <Route path="/bstock" element={<RequirePage page="market"><BStockList /></RequirePage>} />
+                  <Route path="/bstock/:symbol" element={<RequirePage page="market"><BStockRoute /></RequirePage>} />
+                  <Route path="/portfolio" element={<RequirePage page="portfolio"><Portfolio /></RequirePage>} />
+                  <Route path="/portfolio/history" element={<RequirePage page="portfolio"><PositionHistory /></RequirePage>} />
+                  <Route path="/ledger" element={<RequirePage page="ledger"><Ledger /></RequirePage>} />
+                  <Route path="/trades" element={<RequirePage page="ledger"><Trades /></RequirePage>} />
+                  <Route path="/coin" element={<RequirePage page="market"><CoinSelect /></RequirePage>} />
+                  <Route path="/coin/:symbol" element={<RequirePage page="market"><CoinRoute /></RequirePage>} />
+                  <Route path="/commodity" element={<RequirePage page="market"><CommoditySelect /></RequirePage>} />
+                  <Route path="/tradfi" element={<RequirePage page="market"><TradFiSelect /></RequirePage>} />
+                  <Route path="/ranking" element={<RequirePage page="ranking"><Ranking /></RequirePage>} />
+                  <Route path="/user/:id" element={<RequirePage page="ranking"><UserProfile /></RequirePage>} />
+                  <Route path="/comments" element={<RequirePage page="comments"><Comments /></RequirePage>} />
                   <Route path="/admin" element={<Admin />} />
-                  <Route path="/games" element={<Games />} />
+                  <Route path="/games" element={<RequirePage page="games"><Games /></RequirePage>} />
                   <Route path="/me" element={<Me />} />
-                  <Route path="/blackjack" element={<Blackjack />} />
-                  <Route path="/mines" element={<Mines />} />
-                  <Route path="/videopoker" element={<VideoPoker />} />
-                  <Route path="/prediction" element={<Prediction />} />
-                  <Route path="/ai" element={<AiAgent />} />
-                  <Route path="/scorecard" element={<Scorecard />} />
-                  <Route path="/strategies" element={<Strategies />} />
-                  <Route path="/backtest" element={<Backtest />} />
-                  <Route path="/testnet" element={<TestnetMonitor />} />
-                  <Route path="/force-orders" element={<ForceOrders />} />
+                  <Route path="/blackjack" element={<RequirePage page="games"><Blackjack /></RequirePage>} />
+                  <Route path="/mines" element={<RequirePage page="games"><Mines /></RequirePage>} />
+                  <Route path="/videopoker" element={<RequirePage page="games"><VideoPoker /></RequirePage>} />
+                  <Route path="/prediction" element={<RequirePage page="games"><Prediction /></RequirePage>} />
+                  <Route path="/ai" element={<RequirePage page="ai"><AiAgent /></RequirePage>} />
+                  <Route path="/scorecard" element={<RequirePage page="ai"><Scorecard /></RequirePage>} />
+                  <Route path="/strategies" element={<RequirePage page="strategies"><Strategies /></RequirePage>} />
+                  <Route path="/backtest" element={<RequirePage page="strategies"><Backtest /></RequirePage>} />
+                  <Route path="/testnet" element={<RequirePage page="testnet"><TestnetMonitor /></RequirePage>} />
+                  <Route path="/force-orders" element={<RequirePage page="testnet"><ForceOrders /></RequirePage>} />
                   <Route path="*" element={<Navigate to="/" replace />} />
-                </Routes>
-              </Layout>
+                  </Routes>
+                </Layout>
+              </RequireVisibilityReady>
             </RequireAuth>
           }
         />

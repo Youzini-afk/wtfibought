@@ -20,9 +20,10 @@ export interface TradeItem {
 interface Props {
   trades: TradeItem[];
   loading: boolean;
+  showMore?: boolean;
 }
 
-export function LatestTradesCard({ trades, loading }: Props) {
+export function LatestTradesCard({ trades, loading, showMore = true }: Props) {
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -34,13 +35,15 @@ export function LatestTradesCard({ trades, loading }: Props) {
             最新成交
           </CardTitle>
           {/* 这里只给最新 20 条，全量分页在 /trades（交易者匿名） */}
-          <Link
-            to="/trades"
-            className="inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
-          >
-            更多
-            <ChevronRight className="w-3.5 h-3.5" />
-          </Link>
+          {showMore && (
+            <Link
+              to="/trades"
+              className="inline-flex items-center gap-0.5 text-xs font-medium text-muted-foreground hover:text-primary transition-colors"
+            >
+              更多
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Link>
+          )}
         </div>
       </CardHeader>
       <CardContent className="p-0">

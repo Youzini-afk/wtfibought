@@ -864,17 +864,19 @@ CREATE TABLE IF NOT EXISTS new_api_runtime_config (
 COMMENT ON TABLE new_api_runtime_config IS 'WTFiB 管理端维护的 New API SSO、额度换算与盈利提现运行时配置（固定 id=1）';
 COMMENT ON COLUMN new_api_runtime_config.app_secret IS '服务间 HMAC 共享密钥；管理 API 只返回是否已配置';
 
--- 浏览器标签名称与 favicon。只影响网页标签；PWA 安装名称/图标仍由构建期 manifest 管理。
+-- 站点外观与前台页面可见性。PWA 安装名称/图标仍由构建期 manifest 管理。
 CREATE TABLE IF NOT EXISTS site_runtime_config (
-    id           SMALLINT PRIMARY KEY CHECK (id = 1),
-    site_name    VARCHAR(80) NOT NULL DEFAULT 'WhatIfIBought',
-    favicon_url  VARCHAR(512) NOT NULL DEFAULT '/favicon.ico',
-    updated_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id              SMALLINT PRIMARY KEY CHECK (id = 1),
+    site_name       VARCHAR(80) NOT NULL DEFAULT 'WhatIfIBought',
+    favicon_url     VARCHAR(512) NOT NULL DEFAULT '/favicon.ico',
+    page_visibility JSONB NOT NULL DEFAULT '{"market":true,"portfolio":true,"ledger":true,"ai":true,"ranking":true,"games":true,"testnet":true,"strategies":true,"comments":true}'::JSONB,
+    updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 INSERT INTO site_runtime_config (id, site_name, favicon_url)
 VALUES (1, 'WhatIfIBought', '/favicon.ico')
 ON CONFLICT (id) DO NOTHING;
-COMMENT ON TABLE site_runtime_config IS '浏览器标签名称与 favicon 运行时配置（固定 id=1）';
+COMMENT ON TABLE site_runtime_config IS '站点外观与前台页面可见性运行时配置（固定 id=1）';
+COMMENT ON COLUMN site_runtime_config.page_visibility IS '普通用户前台功能页可见性；缺失键按开启处理';
 
 --新版本删掉这两列(待执行不进入commit)
 ALTER TABLE crypto_order  DROP COLUMN IF EXISTS expire_at;

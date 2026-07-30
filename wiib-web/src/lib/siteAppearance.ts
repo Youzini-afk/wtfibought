@@ -1,4 +1,12 @@
 import type { SiteSettings } from '../types';
+import {
+  DEFAULT_SITE_SETTINGS,
+  hasCompletePageVisibility,
+  normalizeSiteSettings,
+} from './siteSettings';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
+
+export { DEFAULT_SITE_SETTINGS } from './siteSettings';
 
 declare global {
   interface Window {
@@ -8,26 +16,14 @@ declare global {
 }
 
 export const SITE_SETTINGS_STORAGE_KEY = 'wiib-site-settings';
-export const DEFAULT_SITE_SETTINGS: SiteSettings = {
-  siteName: 'WhatIfIBought',
-  faviconUrl: '/favicon.ico',
-  updatedAt: null,
-};
-
-function isUsable(settings: unknown): settings is SiteSettings {
-  if (!settings || typeof settings !== 'object') return false;
-  const value = settings as Partial<SiteSettings>;
-  return typeof value.siteName === 'string'
-    && value.siteName.trim().length > 0
-    && typeof value.faviconUrl === 'string'
-    && value.faviconUrl.trim().length > 0
-    && (value.updatedAt == null || typeof value.updatedAt === 'string');
-}
 
 function readCached(): SiteSettings | null {
   try {
     const cached = JSON.parse(localStorage.getItem(SITE_SETTINGS_STORAGE_KEY) || 'null') as unknown;
-    return isUsable(cached) ? cached : null;
+    // 老缓存没有页面模块表，不能先按“全部开启”渲染再闪回真实配置。
+    if (!cached || typeof cached !== 'object'
+      || !hasCompletePageVisibility((cached as Partial<SiteSettings>).pageVisibility)) return null;
+    return normalizeSiteSettings(cached);
   } catch {
     return null;
   }
@@ -53,15 +49,19 @@ function versionedIconUrl(faviconUrl: string, updatedAt: string | null): string 
 }
 
 /** 同时更新当前标签并缓存，下次 HTML head 解析阶段即可提前应用。 */
-export function applySiteSettings(settings: SiteSettings, persist = true) {
-  if (!isUsable(settings)) return;
-  const normalized: SiteSettings = {
-    siteName: settings.siteName.trim(),
-    faviconUrl: settings.faviconUrl.trim(),
-    updatedAt: settings.updatedAt || null,
-  };
+export function applySiteSettings(
+  settings: SiteSettings,
+  persist = true,
+  visibilityConfirmed = true,
+): SiteSettings | null {
+  const normalized = normalizeSiteSettings(settings);
+  if (!normalized) return null;
   // 启动 GET 可能在管理员保存前取到旧快照、却在保存后才返回；旧版本不得覆盖新缓存。
-  if (versionOf(normalized) < versionOf(readCached())) return;
+  const cached = readCached();
+  if (versionOf(normalized) < versionOf(cached)) {
+    if (cached) useSiteSettingsStore.getState().setSettings(cached, visibilityConfirmed);
+    return cached;
+  }
 
   document.title = normalized.siteName;
   window.__wiibSetSplashName?.(normalized.siteName);
@@ -79,11 +79,14 @@ export function applySiteSettings(settings: SiteSettings, persist = true) {
       localStorage.setItem(SITE_SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
     } catch { /* 无持久化权限时仍已更新当前标签 */ }
   }
+  useSiteSettingsStore.getState().setSettings(normalized, visibilityConfirmed);
+  return normalized;
 }
 
-export function applyCachedSiteSettings() {
+export function applyCachedSiteSettings(): SiteSettings | null {
   const cached = readCached();
-  if (cached) applySiteSettings(cached, false);
+  // 缓存只负责避免品牌闪烁；页面是否开放必须由本次公开 API 请求重新确认。
+  return cached ? applySiteSettings(cached, false, false) : null;
 }
 
 /** 管理后台保存后，让同一浏览器中已打开的其它 WTFiB 标签同步更新。 */
@@ -92,7 +95,7 @@ export function installSiteSettingsStorageSync() {
     if (event.key !== SITE_SETTINGS_STORAGE_KEY || !event.newValue) return;
     try {
       const settings = JSON.parse(event.newValue) as unknown;
-      if (isUsable(settings)) applySiteSettings(settings, false);
+      applySiteSettings(settings as SiteSettings, false, true);
     } catch { /* 忽略其它标签写入的损坏值 */ }
   });
 }

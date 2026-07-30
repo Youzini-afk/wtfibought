@@ -190,9 +190,10 @@ export const notificationApi = {
   readAll: () => api.post<unknown, void>('/notifications/read-all'),
 };
 
-// 登录页也需要读取，后端对该精确路径免登录；只返回网页名称与 favicon。
+// 登录页也需要读取，后端对该精确路径免登录；返回公开外观与页面可见性。
 export const siteSettingsApi = {
-  get: () => api.get<unknown, SiteSettings>('/site-settings'),
+  // 首屏会等待该结果决定页面入口；超时后前端按默认全开降级，不能无限白屏。
+  get: () => api.get<unknown, SiteSettings>('/site-settings', { timeout: 5000 }),
 };
 
 // ========== 管理接口 ==========
@@ -228,7 +229,7 @@ export const adminApi = {
   getNewApiSettings: () => api.get<unknown, NewApiAdminSettings>('/admin/new-api-settings'),
   updateNewApiSettings: (settings: UpdateNewApiAdminSettings) =>
     api.put<unknown, NewApiAdminSettings>('/admin/new-api-settings', settings),
-  // 浏览器标签名称与 favicon（不修改构建期 PWA manifest）
+  // 站点外观与前台页面可见性（不修改构建期 PWA manifest）
   getSiteSettings: () => api.get<unknown, SiteAdminSettings>('/admin/site-settings'),
   updateSiteSettings: (settings: UpdateSiteSettings) =>
     api.put<unknown, SiteAdminSettings>('/admin/site-settings', settings),

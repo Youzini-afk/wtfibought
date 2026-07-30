@@ -14,7 +14,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "站点外观管理")
+@Tag(name = "站点设置管理")
 @RestController
 @RequestMapping("/api/admin/site-settings")
 @RequiredArgsConstructor
@@ -24,13 +24,13 @@ public class SiteSettingsAdminController {
     private final SiteSettingsService settingsService;
 
     @GetMapping
-    @Operation(summary = "读取站点外观管理设置")
+    @Operation(summary = "读取站点外观与页面可见性设置")
     public Result<SiteAdminSettingsDTO> getSettings() {
         return Result.ok(settingsService.getAdminSettings());
     }
 
     @PutMapping
-    @Operation(summary = "保存浏览器标签名称和图标")
+    @Operation(summary = "保存站点外观或页面可见性")
     public Result<SiteAdminSettingsDTO> updateSettings(@RequestBody UpdateSiteSettingsRequest request) {
         return Result.ok(settingsService.updateSettings(request));
     }

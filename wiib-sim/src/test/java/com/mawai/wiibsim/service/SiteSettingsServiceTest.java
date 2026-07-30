@@ -10,9 +10,13 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
@@ -34,19 +38,21 @@ class SiteSettingsServiceTest {
 
         assertThat(publicSettings.siteName()).isEqualTo("WhatIfIBought");
         assertThat(publicSettings.faviconUrl()).isEqualTo("/favicon.ico");
+        assertThat(publicSettings.pageVisibility().ai()).isTrue();
+        assertThat(publicSettings.pageVisibility().market()).isTrue();
         assertThat(adminSettings.databaseConfigured()).isFalse();
     }
 
     @Test
     void partialUpdateKeepsUnspecifiedFieldAndTrimsInput() {
         SiteRuntimeConfig saved = entity("新站名", "/old.ico");
-        when(mapper.patch(eq("新站名"), isNull(), any())).thenReturn(1);
+        when(mapper.patch(eq("新站名"), isNull(), isNull(), any())).thenReturn(1);
         when(mapper.selectCurrent()).thenReturn(saved);
         SiteSettingsService service = new SiteSettingsService(mapper);
 
         SiteAdminSettingsDTO result = service.updateSettings(new UpdateSiteSettingsRequest("  新站名  ", null));
 
-        verify(mapper).patch(eq("新站名"), isNull(), any());
+        verify(mapper).patch(eq("新站名"), isNull(), isNull(), any());
         assertThat(result.siteName()).isEqualTo("新站名");
         assertThat(result.faviconUrl()).isEqualTo("/old.ico");
         assertThat(result.databaseConfigured()).isTrue();
@@ -54,7 +60,7 @@ class SiteSettingsServiceTest {
 
     @Test
     void allowsRootRelativeAndHttpsIconResources() {
-        when(mapper.patch(isNull(), any(), any())).thenReturn(1);
+        when(mapper.patch(isNull(), any(), isNull(), any())).thenReturn(1);
         when(mapper.selectCurrent()).thenReturn(
                 entity("Site", "/brand/icon.svg?v=2"),
                 entity("Site", "https://cdn.example.com/icon.png?v=3"));
@@ -78,7 +84,59 @@ class SiteSettingsServiceTest {
                 .hasMessageContaining("HTTPS");
         assertThatThrownBy(() -> service.updateSettings(new UpdateSiteSettingsRequest(null, "//tracker.example/icon.png")))
                 .isInstanceOf(BizException.class);
-        verify(mapper, never()).patch(any(), any(), any());
+        verify(mapper, never()).patch(any(), any(), any(), any());
+    }
+
+    @Test
+    void pageVisibilityPatchIsPassedToDatabaseWithoutOverwritingOtherKeys() {
+        SiteRuntimeConfig saved = entity("Site", "/favicon.ico");
+        saved.setPageVisibilityJson("{\"ai\":false,\"games\":false}");
+        when(mapper.selectCurrent()).thenReturn(saved);
+        when(mapper.patch(isNull(), isNull(), any(), any())).thenReturn(1);
+        SiteSettingsService service = new SiteSettingsService(mapper);
+
+        SiteAdminSettingsDTO result = service.updateSettings(
+                new UpdateSiteSettingsRequest(null, null, Map.of("ai", false)));
+
+        verify(mapper).patch(
+                isNull(), isNull(),
+                argThat(json -> json.contains("\"ai\":false") && !json.contains("games")),
+                any());
+        assertThat(result.pageVisibility().ai()).isFalse();
+        assertThat(result.pageVisibility().games()).isFalse();
+        assertThat(result.pageVisibility().market()).isTrue();
+    }
+
+    @Test
+    void storedPageVisibilityIsPublishedAndMissingKeysStayEnabled() {
+        SiteRuntimeConfig stored = entity("Site", "/favicon.ico");
+        stored.setPageVisibilityJson("{\"ai\":false}");
+        when(mapper.selectCurrent()).thenReturn(stored);
+        SiteSettingsService service = new SiteSettingsService(mapper);
+
+        var result = service.getPublicSettings();
+
+        assertThat(result.pageVisibility().ai()).isFalse();
+        assertThat(result.pageVisibility().market()).isTrue();
+        assertThat(result.pageVisibility().comments()).isTrue();
+    }
+
+    @Test
+    void rejectsUnknownOrNullPageVisibilityValuesBeforeWriting() {
+        SiteSettingsService service = new SiteSettingsService(mapper);
+
+        assertThatThrownBy(() -> service.updateSettings(
+                new UpdateSiteSettingsRequest(null, null, Map.of("unknown", true))))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("未知页面配置项");
+
+        Map<String, Boolean> nullValue = new HashMap<>();
+        nullValue.put("ai", null);
+        assertThatThrownBy(() -> service.updateSettings(
+                new UpdateSiteSettingsRequest(null, null, nullValue)))
+                .isInstanceOf(BizException.class)
+                .hasMessageContaining("不能为 null");
+        verify(mapper, never()).patch(any(), any(), any(), any());
     }
 
     @Test
@@ -90,6 +148,7 @@ class SiteSettingsServiceTest {
 
         assertThat(result.siteName()).isEqualTo("WhatIfIBought");
         assertThat(result.faviconUrl()).isEqualTo("/favicon.ico");
+        assertThat(result.pageVisibility().comments()).isTrue();
         assertThat(result.updatedAt()).isNull();
     }
 

@@ -13,6 +13,7 @@ import { MonitorCarousel } from '../components/MonitorCarousel';
 import { NewApiSettingsCard } from '../components/NewApiSettingsCard';
 import { ShadowStockAdminCard } from '../components/ShadowStockAdminCard';
 import { SiteAppearanceSettingsCard } from '../components/SiteAppearanceSettingsCard';
+import { PageVisibilitySettingsCard } from '../components/PageVisibilitySettingsCard';
 import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-react';
 
 const FUNCTION_LABELS: Record<string, string> = {
@@ -342,6 +343,9 @@ export function Admin() {
 
           {/* 浏览器标签名称与 favicon */}
           <SiteAppearanceSettingsCard />
+
+          {/* 普通用户前台功能页开关 */}
+          <PageVisibilitySettingsCard />
 
           {/* WTFiB 侧 New API SSO、额度换算与提现规则 */}
           <NewApiSettingsCard />

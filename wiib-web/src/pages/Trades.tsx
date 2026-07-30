@@ -10,6 +10,7 @@ import { formatCoinPrice } from '../lib/coinConfig';
 import { orderSideView, tradeHref, tradeSymbolName, useBStockAliasVersion } from '../lib/orderSide';
 import { Activity, Bot, ChevronLeft, ChevronRight, RefreshCw, Shield } from 'lucide-react';
 import type { PageResult, PublicTrade } from '../types';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 
 const PAGE_SIZE = 20;
 
@@ -54,6 +55,7 @@ function SideTag({ orderSide }: { orderSide: string }) {
 export function Trades() {
   useBStockAliasVersion();
   const navigate = useNavigate();
+  const marketEnabled = useSiteSettingsStore(state => state.settings.pageVisibility.market);
 
   const [symbol, setSymbol] = useState<string | undefined>(undefined);
   const [kind, setKind] = useState<'SPOT' | 'FUTURES' | undefined>(undefined);
@@ -76,7 +78,9 @@ export function Trades() {
   }, [requestKey, symbol, kind, page]);
 
   const records = result.records;
-  const go = (t: PublicTrade) => navigate(tradeHref(t.symbol));
+  const go = (t: PublicTrade) => {
+    if (marketEnabled) navigate(tradeHref(t.symbol));
+  };
 
   return (
     <div className="page-shell p-4 md:p-6 space-y-4">
@@ -182,8 +186,11 @@ export function Trades() {
                     {records.map(t => (
                       <tr
                         key={`${t.kind}-${t.tradeId}`}
-                        onClick={() => go(t)}
-                        className="border-b border-border/30 hover:bg-accent/30 transition-colors cursor-pointer"
+                        onClick={marketEnabled ? () => go(t) : undefined}
+                        className={cn(
+                          "border-b border-border/30 transition-colors",
+                          marketEnabled && "hover:bg-accent/30 cursor-pointer",
+                        )}
                       >
                         <td className="px-5 py-3 num text-xs text-muted-foreground whitespace-nowrap">
                           {fmtDateTime(t.createdAt, true)}
@@ -215,8 +222,12 @@ export function Trades() {
                   <button
                     key={`${t.kind}-${t.tradeId}`}
                     type="button"
-                    onClick={() => go(t)}
-                    className="w-full text-left px-4 py-3 space-y-2 hover:bg-accent/30 active:bg-accent/50 transition-colors"
+                    onClick={marketEnabled ? () => go(t) : undefined}
+                    disabled={!marketEnabled}
+                    className={cn(
+                      "w-full text-left px-4 py-3 space-y-2 transition-colors",
+                      marketEnabled && "hover:bg-accent/30 active:bg-accent/50",
+                    )}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0">

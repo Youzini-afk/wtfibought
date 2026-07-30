@@ -419,11 +419,25 @@ export interface UpdateNewApiAdminSettings {
   withdrawalTaxBrackets?: string;
 }
 
-// ==================== 浏览器站点外观 ====================
+// ==================== 站点外观与页面可见性 ====================
+
+export type PageVisibilityKey =
+  | 'market'
+  | 'portfolio'
+  | 'ledger'
+  | 'ai'
+  | 'ranking'
+  | 'games'
+  | 'testnet'
+  | 'strategies'
+  | 'comments';
+
+export type PageVisibility = Record<PageVisibilityKey, boolean>;
 
 export interface SiteSettings {
   siteName: string;
   faviconUrl: string;
+  pageVisibility: PageVisibility;
   updatedAt: string | null;
 }
 
@@ -435,6 +449,7 @@ export interface SiteAdminSettings extends SiteSettings {
 export interface UpdateSiteSettings {
   siteName?: string;
   faviconUrl?: string;
+  pageVisibility?: Partial<PageVisibility>;
 }
 
 export type ExternalQuotaTransferDirection = 'DEPOSIT' | 'WITHDRAWAL';

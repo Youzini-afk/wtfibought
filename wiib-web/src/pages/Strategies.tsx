@@ -7,6 +7,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { strategyAccountApi } from '../api';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { useToast } from '../components/ui/use-toast';
 import { EquityChart } from '../components/EquityChart';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
@@ -300,6 +301,7 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
  * PC 2×2 田字格对比，移动端竖排。平仓按钮仅 userId=1 渲染，后端二次校验才是真正的门。
  */
 export function Strategies() {
+  const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   const { toast } = useToast();
   const user = useUserStore(s => s.user);
   const isAdmin = user?.id === ADMIN_USER_ID;
@@ -361,9 +363,11 @@ export function Strategies() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Link to="/testnet" className="border border-border hover:bg-surface-hover px-3 py-1.5 rounded-lg text-[11px] font-bold text-muted-foreground hover:text-primary">
-            Testnet 监测 →
-          </Link>
+          {pageVisibility.testnet && (
+            <Link to="/testnet" className="border border-border hover:bg-surface-hover px-3 py-1.5 rounded-lg text-[11px] font-bold text-muted-foreground hover:text-primary">
+              Testnet 监测 →
+            </Link>
+          )}
           <button onClick={() => { void load(); }}
             className="border border-border hover:bg-surface-hover w-9 h-9 rounded-lg flex items-center justify-center text-muted-foreground hover:text-primary" aria-label="刷新">
             <RefreshCcw className={cn('w-4 h-4', loading && 'animate-spin')} />

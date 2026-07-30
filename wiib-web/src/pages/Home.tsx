@@ -21,8 +21,10 @@ import {
 } from 'lucide-react';
 import type { BuffStatus, AssetSnapshot, QuantSnapshotView } from '../types';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { cn, fmtMoney } from '../lib/utils';
 import { orderSideView } from '../lib/orderSide';
+import type { PageVisibilityKey } from '../types';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
 function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
@@ -47,6 +49,7 @@ export function Home() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useUserStore();
+  const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   // 路由已挡住未登录，user 为 null 只可能是 fetchUser 还没回来。
   // 行情/成交那几块不依赖 user，先渲染出来，本人相关的卡等 user 到了再补
   const ready = !!user;
@@ -77,8 +80,9 @@ export function Home() {
   }, [ready, refreshNonce]);
 
   useEffect(() => {
+    if (!pageVisibility.ai) return;
     quantApi.latestSnapshot('BTCUSDT').then(setQuantSnap).catch(() => {});
-  }, [refreshNonce]);
+  }, [refreshNonce, pageVisibility.ai]);
 
   useEffect(() => {
     Promise.all([cryptoOrderApi.live().catch(() => []), futuresApi.live().catch(() => [])])
@@ -177,7 +181,7 @@ export function Home() {
                 </CardContent>
               </Card>
 
-              <Card className="flex-1">
+              {pageVisibility.ai && <Card className="flex-1">
                 <CardContent className="pt-4 pb-4 flex items-center gap-4">
                   <ArcGauge
                     value={quantSnap?.fragilityScore ?? 0}
@@ -209,7 +213,7 @@ export function Home() {
                     )}
                   </div>
                 </CardContent>
-              </Card>
+              </Card>}
             </div>
           </div>
         </>
@@ -229,9 +233,11 @@ export function Home() {
                 </h2>
                 <p className="text-sm text-muted-foreground">体验"如果当初买了会怎样"。股票、BTC、合约全覆盖。</p>
                 <div className="flex flex-wrap gap-2 pt-1">
-                  <Button size="sm" onClick={() => navigate('/bstock')}>
-                    开始交易 <ArrowRight className="w-3.5 h-3.5" />
-                  </Button>
+                  {pageVisibility.market && (
+                    <Button size="sm" onClick={() => navigate('/bstock')}>
+                      开始交易 <ArrowRight className="w-3.5 h-3.5" />
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" onClick={() => navigate('/intro')}>玩法说明</Button>
                 </div>
               </div>
@@ -254,13 +260,15 @@ export function Home() {
 
       {/* ====== 快捷入口：压成一行小件（含每日福利，点开弹窗） ====== */}
       <div className="flex flex-wrap gap-2">
-        {[
-          { icon: List, label: '影子股票', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400' },
-          { icon: DollarSign, label: 'Crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400' },
-          { icon: Target, label: '预测', to: '/prediction', ic: 'text-primary' },
-          { icon: Brain, label: 'AI', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400' },
-          { icon: Gamepad2, label: '游戏', to: '/games', ic: 'text-pink-600 dark:text-pink-400' },
-        ].map(({ icon: Icon, label, to, ic }) => (
+        {([
+          { icon: List, label: '影子股票', to: '/bstock', ic: 'text-blue-600 dark:text-blue-400', page: 'market' },
+          { icon: DollarSign, label: 'Crypto', to: '/coin', ic: 'text-amber-600 dark:text-amber-400', page: 'market' },
+          { icon: Target, label: '预测', to: '/prediction', ic: 'text-primary', page: 'games' },
+          { icon: Brain, label: 'AI', to: '/ai', ic: 'text-cyan-600 dark:text-cyan-400', page: 'ai' },
+          { icon: Gamepad2, label: '游戏', to: '/games', ic: 'text-pink-600 dark:text-pink-400', page: 'games' },
+        ] satisfies Array<{ icon: typeof List; label: string; to: string; ic: string; page: PageVisibilityKey }>)
+          .filter(item => pageVisibility[item.page])
+          .map(({ icon: Icon, label, to, ic }) => (
           <button
             key={to}
             onClick={() => navigate(to)}
@@ -284,17 +292,19 @@ export function Home() {
       </div>
 
       {/* ====== 市场行情：三分类终端表，点分类头去市场页，点行直达交易页 ====== */}
-      <HomeMarketSection />
+      {pageVisibility.market && <HomeMarketSection />}
 
       {/* ====== 成交 + 快讯 + 爆仓 + FAQ ====== */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
-        <LatestTradesCard trades={latestTrades} loading={tradesLoading} />
+        <LatestTradesCard trades={latestTrades} loading={tradesLoading} showMore={pageVisibility.ledger} />
         {/* 实时快讯：BlockBeats 缓存（quant 侧），与最新成交并列 */}
         <NewsFlashCard />
         {/* 爆仓动态：轻量入口横幅，点击进 /force-orders 全量页 */}
-        <div className="md:col-span-2">
-          <ForceOrdersCard />
-        </div>
+        {pageVisibility.testnet && (
+          <div className="md:col-span-2">
+            <ForceOrdersCard />
+          </div>
+        )}
         {/* 新手教学 FAQ */}
         <div className="md:col-span-2">
           <HomeFaq />

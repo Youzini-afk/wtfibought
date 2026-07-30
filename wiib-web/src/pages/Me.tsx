@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { useTheme } from '../hooks/useTheme';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -13,10 +14,20 @@ import { useNotificationPanel } from '../hooks/useNotificationPanel';
 import { userApi } from '../api';
 import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
+import type { PageVisibilityKey } from '../types';
+
+interface MeNavItem {
+  icon: typeof Receipt;
+  label: string;
+  to: string;
+  color: string;
+  page?: PageVisibilityKey;
+}
 
 export function Me() {
   const navigate = useNavigate();
   const { user, logout, fetchUser } = useUserStore();
+  const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   const { toggleTheme, isDark } = useTheme();
   const { toast } = useToast();
 
@@ -58,19 +69,20 @@ export function Me() {
     }
   };
 
-  const items = [
+  const allItems: MeNavItem[] = [
     ...(user?.id === 1
       ? [{ icon: ShieldCheck, label: '管理后台', to: '/admin', color: 'text-primary' }]
       : []),
     // 账单没进顶栏/底栏（导航已经满了），手机端只有这一个入口，放第一位
-    { icon: Receipt, label: '资金账单', to: '/ledger', color: 'text-primary' },
+    { icon: Receipt, label: '资金账单', to: '/ledger', color: 'text-primary', page: 'ledger' },
     // 移动端底栏只有5槽，策略/模拟盘与排行/游戏一样从这里进（桌面走头部导航）
-    { icon: LineChart, label: '策略', to: '/strategies', color: 'text-violet-400' },
-    { icon: Monitor, label: '模拟盘', to: '/testnet', color: 'text-sky-400' },
-    { icon: Trophy, label: '排行榜', to: '/ranking', color: 'text-amber-400' },
-    { icon: Gamepad2, label: '游戏中心', to: '/games', color: 'text-pink-400' },
-    { icon: MessageSquare, label: '留言板', to: '/comments', color: 'text-teal-400' },
+    { icon: LineChart, label: '策略', to: '/strategies', color: 'text-violet-400', page: 'strategies' },
+    { icon: Monitor, label: '模拟盘', to: '/testnet', color: 'text-sky-400', page: 'testnet' },
+    { icon: Trophy, label: '排行榜', to: '/ranking', color: 'text-amber-400', page: 'ranking' },
+    { icon: Gamepad2, label: '游戏中心', to: '/games', color: 'text-pink-400', page: 'games' },
+    { icon: MessageSquare, label: '留言板', to: '/comments', color: 'text-teal-400', page: 'comments' },
   ];
+  const items = allItems.filter(item => !item.page || pageVisibility[item.page]);
 
   // 整页都是本人数据，user 没到之前没什么可显示的（路由已挡住未登录，null 只可能是还在拉）
   if (!user) return null;
@@ -93,7 +105,7 @@ export function Me() {
       </Card>
 
       {/* 通知（手机端唯一入口；PC 顶栏也有信封，两处共用同一份列表组件） */}
-      <Card>
+      {pageVisibility.comments && <Card>
         <CardContent className="pt-5">
           <button
             onClick={() => void toggleNotif()}
@@ -125,7 +137,7 @@ export function Me() {
             </div>
           )}
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* 功能入口 */}
       <Card>
@@ -147,7 +159,7 @@ export function Me() {
       </Card>
 
       {/* 隐私：详情页公开开关。关掉只挡详情页，仍照常上排行榜 */}
-      <ProfilePublicToggle />
+      {pageVisibility.ranking && <ProfilePublicToggle />}
 
       {/* 主题切换 */}
       <Card>

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, type ElementType, type React
 import { testnetApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
 import { EquityChart } from '../components/EquityChart';
@@ -299,6 +300,7 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
 
 /* ========== Main ========== */
 export function TestnetMonitor() {
+  const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   const { toast } = useToast();
   const user = useUserStore((s) => s.user);
   const [overview, setOverview] = useState<TnOverview | null>(null);
@@ -387,7 +389,9 @@ export function TestnetMonitor() {
             策略执行目标当前为本平台模拟盘（sim），本页展示的是切换前 Binance Testnet 的历史交易，不再产生新记录，
             与「策略账户」页的记录不一致属正常。最新策略交易请看
           </span>
-          <a href="/strategies" className="font-bold text-primary hover:underline ml-1">策略账户 →</a>
+          {pageVisibility.strategies && (
+            <a href="/strategies" className="font-bold text-primary hover:underline ml-1">策略账户 →</a>
+          )}
         </div>
       )}
 

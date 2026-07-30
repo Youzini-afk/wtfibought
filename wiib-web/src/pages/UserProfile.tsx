@@ -17,6 +17,7 @@ import {
 import type {
   PageResult, PositionHistoryItem, ProfilePosition, PublicTrade, UserProfile as UserProfileData,
 } from '../types';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 
 const TRADE_PAGE_SIZE = 20;
 
@@ -39,13 +40,17 @@ function ProfitText({ value, className }: { value: number | null; className?: st
   );
 }
 
-function PositionRow({ p, onOpen }: { p: ProfilePosition; onOpen: () => void }) {
+function PositionRow({ p, onOpen }: { p: ProfilePosition; onOpen?: () => void }) {
   const isFutures = p.side != null;
   return (
     <button
       type="button"
       onClick={onOpen}
-      className="w-full text-left px-4 py-3 flex items-center justify-between gap-3 border-b border-border/25 last:border-b-0 hover:bg-accent/30 transition-colors group"
+      disabled={!onOpen}
+      className={cn(
+        "w-full text-left px-4 py-3 flex items-center justify-between gap-3 border-b border-border/25 last:border-b-0 transition-colors",
+        onOpen && "group hover:bg-accent/30",
+      )}
     >
       <div className="min-w-0">
         <div className="flex items-center gap-1.5 flex-wrap">
@@ -81,7 +86,7 @@ function PositionRow({ p, onOpen }: { p: ProfilePosition; onOpen: () => void }) 
 function PositionCard({ title, positions, onOpen }: {
   title: string;
   positions: ProfilePosition[];
-  onOpen: (symbol: string) => void;
+  onOpen?: (symbol: string) => void;
 }) {
   return (
     <Card className="overflow-hidden">
@@ -93,7 +98,11 @@ function PositionCard({ title, positions, onOpen }: {
       </CardHeader>
       <CardContent className="p-0">
         {positions.map(p => (
-          <PositionRow key={`${p.symbol}-${p.side ?? 'SPOT'}`} p={p} onOpen={() => onOpen(p.symbol)} />
+          <PositionRow
+            key={`${p.symbol}-${p.side ?? 'SPOT'}`}
+            p={p}
+            onOpen={onOpen ? () => onOpen(p.symbol) : undefined}
+          />
         ))}
       </CardContent>
     </Card>
@@ -103,6 +112,7 @@ function PositionCard({ title, positions, onOpen }: {
 export function UserProfile() {
   useBStockAliasVersion();
   const navigate = useNavigate();
+  const marketEnabled = useSiteSettingsStore(state => state.settings.pageVisibility.market);
   const { id } = useParams<{ id: string }>();
   const userId = Number(id);
 
@@ -249,10 +259,18 @@ export function UserProfile() {
       {hasSpot || hasFutures ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
           {hasSpot && (
-            <PositionCard title="现货持仓" positions={profile.spotPositions} onOpen={s2 => navigate(tradeHref(s2))} />
+            <PositionCard
+              title="现货持仓"
+              positions={profile.spotPositions}
+              onOpen={marketEnabled ? s2 => navigate(tradeHref(s2)) : undefined}
+            />
           )}
           {hasFutures && (
-            <PositionCard title="合约持仓" positions={profile.futuresPositions} onOpen={s2 => navigate(tradeHref(s2))} />
+            <PositionCard
+              title="合约持仓"
+              positions={profile.futuresPositions}
+              onOpen={marketEnabled ? s2 => navigate(tradeHref(s2)) : undefined}
+            />
           )}
         </div>
       ) : (
@@ -298,7 +316,7 @@ export function UserProfile() {
               trades={trades}
               loading={tradesLoading}
               onPage={setTradePage}
-              onOpen={symbol => navigate(tradeHref(symbol))}
+              onOpen={marketEnabled ? symbol => navigate(tradeHref(symbol)) : undefined}
             />
           )}
         </CardContent>
@@ -312,7 +330,7 @@ function TradesPanel({ trades, loading, onPage, onOpen }: {
   trades: PageResult<PublicTrade>;
   loading: boolean;
   onPage: (p: number) => void;
-  onOpen: (symbol: string) => void;
+  onOpen?: (symbol: string) => void;
 }) {
   if (loading) {
     return (
@@ -332,8 +350,12 @@ function TradesPanel({ trades, loading, onPage, onOpen }: {
           <button
             key={`${t.kind}-${t.tradeId}`}
             type="button"
-            onClick={() => onOpen(t.symbol)}
-            className="w-full text-left px-4 py-2.5 flex items-center gap-3 border-b border-border/25 last:border-b-0 hover:bg-accent/30 transition-colors"
+            onClick={onOpen ? () => onOpen(t.symbol) : undefined}
+            disabled={!onOpen}
+            className={cn(
+              "w-full text-left px-4 py-2.5 flex items-center gap-3 border-b border-border/25 last:border-b-0 transition-colors",
+              onOpen && "hover:bg-accent/30",
+            )}
           >
             <span className={cn(
               'text-[11px] font-bold px-1.5 py-0.5 rounded shrink-0',

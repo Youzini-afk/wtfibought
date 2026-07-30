@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { userApi, cryptoOrderApi, cryptoApi, futuresApi, predictionApi, bstockApi } from '../api';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -84,6 +85,7 @@ function AnimNum({ value, prefix = '', suffix = '', duration = 600 }: { value: n
 }
 
 export function Portfolio() {
+  const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   const navigate = useNavigate();
   const { user } = useUserStore();
   const { toast } = useToast();
@@ -626,8 +628,12 @@ export function Portfolio() {
                       <button
                         type="button"
                         key={c.id}
-                        onClick={() => navigate(`/coin/${c.symbol}`)}
-                        className="w-full text-left px-4 py-3.5 cursor-pointer hover:bg-accent/40 active:bg-accent/60 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        onClick={pageVisibility.market ? () => navigate(`/coin/${c.symbol}`) : undefined}
+                        disabled={!pageVisibility.market}
+                        className={cn(
+                          "w-full text-left px-4 py-3.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                          pageVisibility.market && "group cursor-pointer hover:bg-accent/40 active:bg-accent/60",
+                        )}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -659,7 +665,7 @@ export function Portfolio() {
                                 {up ? '+' : ''}{c.profitPct.toFixed(2)}%
                               </div>
                             </div>
-                            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
+                            {pageVisibility.market && <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />}
                           </div>
                         </div>
                       </button>
@@ -696,8 +702,12 @@ export function Portfolio() {
                       <button
                         type="button"
                         key={b.id}
-                        onClick={() => navigate(`/bstock/${b.symbol}`)}
-                        className="w-full text-left px-4 py-3.5 cursor-pointer hover:bg-accent/40 active:bg-accent/60 transition-colors group focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                        onClick={pageVisibility.market ? () => navigate(`/bstock/${b.symbol}`) : undefined}
+                        disabled={!pageVisibility.market}
+                        className={cn(
+                          "w-full text-left px-4 py-3.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
+                          pageVisibility.market && "group cursor-pointer hover:bg-accent/40 active:bg-accent/60",
+                        )}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="flex items-center gap-2.5 min-w-0 flex-1">
@@ -726,7 +736,7 @@ export function Portfolio() {
                                 {up ? '+' : ''}{b.profitPct.toFixed(2)}%
                               </div>
                             </div>
-                            <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />
+                            {pageVisibility.market && <ChevronRight className="w-3.5 h-3.5 text-muted-foreground/40 group-hover:text-primary/60 transition-colors" />}
                           </div>
                         </div>
                       </button>
@@ -737,7 +747,7 @@ export function Portfolio() {
             )}
 
             {/* 预测盈亏 */}
-            {hasPrediction && predictionPnl && (
+            {hasPrediction && predictionPnl && pageVisibility.games && (
               <Card className="overflow-hidden">
                 <button
                   type="button"
@@ -821,7 +831,7 @@ export function Portfolio() {
 
       {/* 隐私开关 + 重置账户。只在 PC 出现——手机端底栏有「我的」页，同一个入口不重复摆两处 */}
       <div className="hidden md:block space-y-4">
-        <ProfilePublicToggle />
+        {pageVisibility.ranking && <ProfilePublicToggle />}
 
         <Card className="border-destructive/20">
           <CardContent className="p-4 flex items-center justify-between gap-6">

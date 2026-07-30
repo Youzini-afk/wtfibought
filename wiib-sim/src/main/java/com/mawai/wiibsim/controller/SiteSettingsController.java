@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-@Tag(name = "站点外观")
+@Tag(name = "公开站点设置")
 @RestController
 @RequestMapping("/api/site-settings")
 @RequiredArgsConstructor
@@ -19,7 +19,7 @@ public class SiteSettingsController {
     private final SiteSettingsService settingsService;
 
     @GetMapping
-    @Operation(summary = "读取浏览器标签名称和图标（登录前可用）")
+    @Operation(summary = "读取站点外观与页面可见性（登录前可用）")
     public Result<PublicSiteSettingsDTO> getSettings() {
         return Result.ok(settingsService.getPublicSettings());
     }

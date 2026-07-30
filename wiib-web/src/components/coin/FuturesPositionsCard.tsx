@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { RefreshCw, Loader2, Plus, ChevronRight } from 'lucide-react';
 import { futuresApi } from '../../api';
 import { useUserStore } from '../../stores/userStore';
+import { useSiteSettingsStore } from '../../stores/siteSettingsStore';
 import { useCryptoStream } from '../../hooks/useCryptoStream';
 import { useToast } from '../ui/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
@@ -174,6 +175,7 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
   wide?: boolean;
   onMutated: (ordersChanged: boolean) => void;
 }) {
+  const marketEnabled = useSiteSettingsStore(state => state.settings.pageVisibility.market);
   const cfg = getCoin(pos.symbol);
   // 平仓/SLTP 数量步长用合约过滤器（reduce-only 免最小名义额；全量平仓后端豁免步长，存量尘埃仓能平干净）
   const MIN_QTY = useTradeFilter('futures', pos.symbol).stepSize;
@@ -304,7 +306,7 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       <div className="flex flex-wrap items-center gap-2">
         {/* Portfolio 汇总卡里币名可点直达该币交易页（对齐现货持仓行的交互）；
             Coin 页那张卡(wide)点了是跳自己，不给入口。整卡不能做成可点——卡里全是操作按钮 */}
-        {wide ? (
+        {wide || !marketEnabled ? (
           <span className="text-[13px] font-black">{cfg.name}</span>
         ) : (
           <button

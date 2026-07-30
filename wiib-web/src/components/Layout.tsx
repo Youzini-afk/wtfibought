@@ -2,6 +2,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useClickOutside } from '../hooks/useClickOutside';
 import { useEffect, useState, useRef } from 'react';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { useTheme } from '../hooks/useTheme';
 import { useSystemHealth, type HealthLevel } from '../hooks/useSystemHealth';
 import { Button } from './ui/button';
@@ -45,6 +46,9 @@ export function Layout({ children }: Props) {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, token, logout } = useUserStore();
+  const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
+  const visibilityReady = useSiteSettingsStore(state => state.visibilityReady);
+  const visiblePages = visibilityReady ? pageVisibility : null;
   const { toggleTheme, isDark } = useTheme();
 
   // 成交、账单和用户资料接口只有真实 symbol；全局预载安全展示映射，包含历史退役标的。
@@ -78,19 +82,19 @@ export function Layout({ children }: Props) {
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-4 h-full whitespace-nowrap">
             <HeaderNavItem to="/" label="首页" />
-            <MarketDropdown isActive={isMarketActive} />
-            <HeaderNavItem to="/portfolio" label="持仓" />
+            {visiblePages?.market && <MarketDropdown isActive={isMarketActive} />}
+            {visiblePages?.portfolio && <HeaderNavItem to="/portfolio" label="持仓" />}
             {/* 账单：桌面端唯一入口（手机端在「我的」页里）。原先挂在持仓页当按钮，
                 资金流水跟持仓是两件事，藏在别的页面里找不着 */}
-            <HeaderNavItem to="/ledger" label="账单" />
-            <HeaderNavItem to="/ai" label="AI" />
-            <HeaderNavItem to="/ranking" label="排行" />
-            <HeaderNavItem to="/games" label="游戏" />
-            <HeaderNavItem to="/testnet" label="模拟盘" />
-            <HeaderNavItem to="/strategies" label="策略" />
+            {visiblePages?.ledger && <HeaderNavItem to="/ledger" label="账单" />}
+            {visiblePages?.ai && <HeaderNavItem to="/ai" label="AI" />}
+            {visiblePages?.ranking && <HeaderNavItem to="/ranking" label="排行" />}
+            {visiblePages?.games && <HeaderNavItem to="/games" label="游戏" />}
+            {visiblePages?.testnet && <HeaderNavItem to="/testnet" label="模拟盘" />}
+            {visiblePages?.strategies && <HeaderNavItem to="/strategies" label="策略" />}
             {/* 回测入口暂摘：后端 /api/ai/backtest/* 随下版本发，先别挂死页 */}
             {/* <HeaderNavItem to="/backtest" label="回测" /> */}
-            <HeaderNavItem to="/comments" label="留言" />
+            {visiblePages?.comments && <HeaderNavItem to="/comments" label="留言" />}
           </nav>
 
           {/* Actions */}
@@ -124,7 +128,7 @@ export function Layout({ children }: Props) {
                   </Button>
                 )}
                 <span className="text-xs font-semibold text-muted-foreground hidden lg:inline">{user.username}</span>
-                <NotificationBell />
+                {visiblePages?.comments && <NotificationBell />}
                 <Button variant="ghost" size="icon" className="w-8 h-8" onClick={handleLogout}>
                   <LogOut className="w-4 h-4" />
                 </Button>
@@ -151,7 +155,7 @@ export function Layout({ children }: Props) {
           </div>
         </div>
 
-        <TickerStrip />
+        {visiblePages?.market && <TickerStrip />}
         <OfflineBanner />
       </header>
 
@@ -163,10 +167,10 @@ export function Layout({ children }: Props) {
       {/* ===== 移动端底部 Tab：贴边实条 ===== */}
       <nav className="fixed bottom-0 inset-x-0 md:hidden z-50 flex items-stretch border-t border-border bg-card pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
         <BottomNavItem to="/" icon={<Home className="w-5 h-5" />} label="首页" />
-        <BottomNavItem to="/bstock" icon={<BarChart3 className="w-5 h-5" />} label="市场" forceActive={isMarketActive} />
-        <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />
+        {visiblePages?.market && <BottomNavItem to="/bstock" icon={<BarChart3 className="w-5 h-5" />} label="市场" forceActive={isMarketActive} />}
+        {visiblePages?.portfolio && <BottomNavItem to="/portfolio" icon={<Briefcase className="w-5 h-5" />} label="持仓" />}
         <BottomNavItem to="/me" icon={<User className="w-5 h-5" />} label="我的" />
-        <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label="AI" />
+        {visiblePages?.ai && <BottomNavItem to="/ai" icon={<Brain className="w-5 h-5" />} label="AI" />}
       </nav>
     </div>
   );

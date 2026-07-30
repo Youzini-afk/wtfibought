@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { TrendingUp, TrendingDown, ChevronRight, ChevronLeft } from 'lucide-react';
 import { cryptoApi, cryptoOrderApi, futuresApi } from '../api';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { useToast } from '../components/ui/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -44,6 +45,7 @@ export function CoinRoute() {
 }
 
 export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
+  const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   const cfg = getCoin(symbol);
   const Icon = cfg.icon;
   // 返回目标写死对应列表页而不是 navigate(-1)：后者在直接打开深链时会一路退出 App
@@ -258,7 +260,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
           </Card>
 
           {/* BTC涨跌预测入口 */}
-          {symbol === 'BTCUSDT' && (
+          {symbol === 'BTCUSDT' && pageVisibility.games && (
             <button onClick={() => navigate('/prediction')}
                     className="w-full flex items-center justify-between px-4 py-3 rounded-lg pt-card hover:bg-surface-hover hover:border-primary/40 transition-colors group cursor-pointer">
               <div className="flex items-center gap-3">
