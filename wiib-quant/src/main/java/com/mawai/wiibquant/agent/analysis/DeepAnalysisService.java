@@ -40,6 +40,10 @@ public class DeepAnalysisService {
     private final NewsCache newsCache;
     private final QuantDeepAnalysisMapper mapper;
 
+    public boolean isEnabled() {
+        return quantLlm.isEnabled();
+    }
+
     /** 新闻上下文：缓存的重要快讯原样拼成文本喂辩论（不再 LLM 浓缩）；无则"无新闻上下文"。 */
     public String buildNewsContext() {
         List<NewsFlash> flashes = newsCache.getFlashes();

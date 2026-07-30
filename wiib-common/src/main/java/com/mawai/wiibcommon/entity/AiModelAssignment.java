@@ -20,6 +20,9 @@ public class AiModelAssignment {
 
     private Long configId;
 
+    /** 功能位总开关；关闭后调用入口必须在发出 LLM 请求前短路。 */
+    private Boolean enabled;
+
     @TableField(fill = FieldFill.INSERT_UPDATE)
     private LocalDateTime updatedAt;
 }

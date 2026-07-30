@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.mawai.wiibcommon.util.JsonUtils;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibcommon.constant.AiFunctions;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -33,6 +34,9 @@ public class BehaviorAnalysisService {
             .build();
 
     public Result<BehaviorAnalysisReport> analyze(long userId) {
+        if (!aiAgentRuntimeManager.isFunctionEnabled(AiFunctions.BEHAVIOR)) {
+            return Result.fail("行为分析功能已关闭，不会调用LLM");
+        }
         BehaviorAnalysisReport cached = reportCache.getIfPresent(userId);
         if (cached != null) {
             return Result.ok(cached);

@@ -16,6 +16,8 @@ public final class AiFunctions {
     public static final String CHAT = "chat";
     /** sim：每日行情参数/虚构新闻生成（sim 进程自读 DB） */
     public static final String SIM = "sim";
+    /** sim：管理员按需生成影子股票架空名（与自动行情生成独立选模、独立启停） */
+    public static final String BSTOCK_ALIAS = "bstock-alias";
 
     private AiFunctions() {
     }

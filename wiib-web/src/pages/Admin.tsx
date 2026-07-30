@@ -22,8 +22,42 @@ const FUNCTION_LABELS: Record<string, string> = {
   'quant-light': '对话专家(浅)',
   chat: '对话兜底',
   sim: '模拟行情生成',
+  'bstock-alias': '架空名生成',
+};
+const FUNCTION_DESCRIPTIONS: Record<string, string> = {
+  behavior: '用户主动点击分析时调用；关闭后接口也会拦截',
+  quant: '自动与手动深度研判；关闭后仍保留数值快照，但不请求 LLM',
+  'quant-light': '管理端 AI 工作台的路由与专家模型',
+  chat: '只在对话主模型失败时调用；关闭它不关闭对话主链',
+  sim: '模拟行情或虚构新闻生成的预留功能位',
+  'bstock-alias': '影子股票管理中“生成架空名”按钮使用',
 };
 const MODEL_ASSIGNMENT_FUNCTIONS = new Set(Object.keys(FUNCTION_LABELS));
+
+function AssignmentSwitch({ checked, disabled, label, onChange }: {
+  checked: boolean;
+  disabled: boolean;
+  label: string;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors ${
+        checked ? 'border-primary bg-primary' : 'border-border bg-secondary'
+      } disabled:cursor-not-allowed disabled:opacity-50`}
+    >
+      <span className={`absolute left-0.5 top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform ${
+        checked ? 'translate-x-5' : 'translate-x-0'
+      }`} />
+    </button>
+  );
+}
 
 export function Admin() {
   const { user } = useUserStore();
@@ -72,7 +106,9 @@ export function Admin() {
     setAssignmentsLoading(true);
     try {
       const list = await adminApi.listAssignments();
-      setAssignmentsDraft(list.filter(a => MODEL_ASSIGNMENT_FUNCTIONS.has(a.functionName)).map(a => ({ ...a })));
+      setAssignmentsDraft(list
+        .filter(a => MODEL_ASSIGNMENT_FUNCTIONS.has(a.functionName))
+        .map(a => ({ ...a, enabled: a.enabled !== false })));
     } catch { /* ignore */ }
     finally { setAssignmentsLoading(false); }
   }, []);
@@ -168,9 +204,15 @@ export function Admin() {
     );
   };
 
+  const updateDraftEnabled = (functionName: string, enabled: boolean) => {
+    setAssignmentsDraft(prev =>
+      prev.map(a => a.functionName === functionName ? { ...a, enabled } : a)
+    );
+  };
+
   const handleSaveAssignments = async () => {
     for (const a of assignmentsDraft) {
-      if (!a.configId) {
+      if (a.enabled !== false && !a.configId) {
         toast(`${FUNCTION_LABELS[a.functionName] || a.functionName} 未选择 LLM`, 'error');
         return;
       }
@@ -449,27 +491,44 @@ export function Admin() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-lg">更换 LLM</CardTitle>
+                <CardTitle className="text-lg">LLM 功能与分配</CardTitle>
                 <Button variant="outline" size="sm" onClick={fetchAssignments} disabled={assignmentsLoading}>
                   <RefreshCw className={`w-3.5 h-3.5 mr-1 ${assignmentsLoading ? 'animate-spin' : ''}`} /> 刷新
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <div className="text-xs text-muted-foreground">每个功能位下拉选择要用的 LLM，保存后立即生效；模型名在上方「配置 LLM」维护。</div>
+              <div className="rounded-lg border border-warning/25 bg-warning/5 p-3 text-xs leading-relaxed text-muted-foreground">
+                页面开关只隐藏入口；这里才是后端 LLM 调用总闸。关闭功能位后，接口、定时任务和失败兜底都不能再通过该功能位发出模型请求。
+              </div>
               {assignmentsDraft.map(a => (
-                <div key={a.functionName} className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 p-3 rounded-lg border bg-muted/30">
-                  <span className="text-sm font-bold min-w-[6rem]">{FUNCTION_LABELS[a.functionName] || a.functionName}</span>
+                <div key={a.functionName} className={`flex flex-col gap-3 rounded-lg border p-3 md:flex-row md:items-center ${a.enabled === false ? 'bg-muted/10 opacity-75' : 'bg-muted/30'}`}>
+                  <div className="min-w-0 md:w-60">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold">{FUNCTION_LABELS[a.functionName] || a.functionName}</span>
+                      <Badge variant={a.enabled === false ? 'secondary' : 'success'}>{a.enabled === false ? '已停用' : '已启用'}</Badge>
+                    </div>
+                    <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{FUNCTION_DESCRIPTIONS[a.functionName]}</p>
+                  </div>
                   <select
-                    className="w-full md:flex-1 h-9 rounded-md border bg-background px-3 text-sm"
+                    className="h-9 w-full rounded-md border bg-background px-3 text-sm md:flex-1"
                     value={a.configId || ''}
                     onChange={e => updateDraft(a.functionName, Number(e.target.value))}
                   >
                     <option value="">选择 LLM</option>
                     {aiKeys.map(k => (
-                      <option key={k.id} value={k.id} disabled={!k.model}>{k.configName}（{k.model || '未设模型'}）</option>
+                      <option key={k.id} value={k.id} disabled={!k.model || k.enabled === false}>{k.configName}（{k.model || '未设模型'}）</option>
                     ))}
                   </select>
+                  <div className="flex items-center justify-between gap-3 md:justify-end">
+                    <span className="text-xs text-muted-foreground md:hidden">允许后端调用</span>
+                    <AssignmentSwitch
+                      checked={a.enabled !== false}
+                      disabled={actionLoading === 'saveAssignments'}
+                      label={`${FUNCTION_LABELS[a.functionName] || a.functionName}功能`}
+                      onChange={next => updateDraftEnabled(a.functionName, next)}
+                    />
+                  </div>
                 </div>
               ))}
               <Button onClick={() => void handleSaveAssignments()} disabled={actionLoading === 'saveAssignments' || assignmentsDraft.length === 0}>

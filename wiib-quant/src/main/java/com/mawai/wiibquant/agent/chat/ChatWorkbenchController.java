@@ -3,7 +3,10 @@ package com.mawai.wiibquant.agent.chat;
 import com.alibaba.fastjson2.JSONObject;
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.annotation.RequireAdmin;
+import com.mawai.wiibcommon.constant.AiFunctions;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletResponse;
@@ -51,6 +54,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class ChatWorkbenchController {
 
     private final ChatAgentFactory chatAgentFactory;
+    private final AiAgentRuntimeManager runtimeManager;
     private final ApprovalRegistry approvalRegistry;
     private final ChatMemoryService chatMemoryService;
     private final ChatHistoryService chatHistoryService;
@@ -83,6 +87,10 @@ public class ChatWorkbenchController {
     @PostMapping(value = "/chat", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     @Operation(summary = "工作台对话（SSE：agent调度过程+token流式）")
     public SseEmitter chat(@CurrentUserId long userId, @RequestBody WorkbenchChatRequest request, HttpServletResponse response) {
+        if (!runtimeManager.isFunctionEnabled(AiFunctions.QUANT_LIGHT)
+                || !runtimeManager.isFunctionEnabled(AiFunctions.QUANT)) {
+            throw new BizException("AI对话功能已关闭或所需模型未启用，不会调用LLM");
+        }
         // nginx 反代默认缓冲会把 SSE 憋成一次性输出，显式关掉（免改服务器配置）
         response.setHeader("X-Accel-Buffering", "no");
         if (request.getMessage() == null || request.getMessage().isBlank()) {

@@ -327,7 +327,7 @@ export interface BStockAdminItem {
   displayName: string;
   displayCode: string;
   displayLore?: string;
-  aliasSource: 'RULE' | 'RULE_PENDING' | 'MANUAL';
+  aliasSource: 'RULE' | 'RULE_PENDING' | 'MANUAL' | 'LLM';
   aliasVersion: number;
   aliasLocked: boolean;
   industry?: string;
@@ -765,6 +765,8 @@ export interface AiModelAssignment {
   id?: number;
   functionName: string;
   configId: number;
+  /** 功能位独立总开关；与前台页面可见性无关 */
+  enabled?: boolean;
 }
 
 

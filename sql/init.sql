@@ -562,13 +562,16 @@ CREATE TABLE IF NOT EXISTS ai_model_assignment (
     id BIGSERIAL PRIMARY KEY,
     function_name VARCHAR(32) NOT NULL,
     config_id BIGINT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uk_ai_ma_function UNIQUE (function_name)
+    CONSTRAINT uk_ai_ma_function UNIQUE (function_name),
+    CONSTRAINT fk_ai_ma_config FOREIGN KEY (config_id) REFERENCES ai_runtime_config(id) ON DELETE RESTRICT
 );
 
 COMMENT ON TABLE ai_model_assignment IS '功能位→LLM配置指针（模型名归属ai_runtime_config）';
-COMMENT ON COLUMN ai_model_assignment.function_name IS '功能名称：behavior/quant/quant-light/chat/sim（sim=wiib-sim行情/新闻生成，自读DB）';
+COMMENT ON COLUMN ai_model_assignment.function_name IS '功能名称：behavior/quant/quant-light/chat/sim/bstock-alias';
 COMMENT ON COLUMN ai_model_assignment.config_id IS '关联ai_runtime_config.id';
+COMMENT ON COLUMN ai_model_assignment.enabled IS '功能位独立总开关；与前台页面可见性无关';
 
 -- ============ kline_history：回测/评估用 5m 基础 K 线落库（research，可复现） ============
 CREATE TABLE IF NOT EXISTS kline_history (

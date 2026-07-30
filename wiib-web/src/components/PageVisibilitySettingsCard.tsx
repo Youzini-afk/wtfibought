@@ -153,7 +153,7 @@ export function PageVisibilitySettingsCard() {
         </div>
 
         <div className="rounded-lg border border-warning/25 bg-warning/5 p-3 text-[11px] leading-relaxed text-muted-foreground">
-          页面开关只控制前台入口与页面访问，不会删除数据，也不会停止行情同步、结算等后台任务。首页、“我的”和管理后台是基础入口，始终保留。
+          页面开关只控制前台入口与页面访问，不会删除数据，也不会停止后台任务。AI 模型是否允许被调用，请在下方“LLM 功能与分配”的功能位开关中控制。首页、“我的”和管理后台始终保留。
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">

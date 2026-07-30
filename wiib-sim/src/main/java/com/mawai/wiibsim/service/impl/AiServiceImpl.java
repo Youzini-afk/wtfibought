@@ -25,7 +25,7 @@ import java.time.Duration;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * AI 调用实现：配置全部来自 DB（ai_model_assignment 的 'sim' 功能位 → ai_runtime_config 的 key），
+ * AI 调用实现：配置全部来自 DB（ai_model_assignment 的 sim 进程功能位 → ai_runtime_config 的 key），
  * 与 quant 同表同管理入口（Admin 页），改配置即时生效。
  * 每次调用现查 DB——sim 的 AI 只用于每日行情/新闻生成，低频，免缓存即天然热切换。
  */
@@ -34,8 +34,6 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class AiServiceImpl implements AiService {
 
-    /** ai_model_assignment 里 sim 的功能位名（行由 quant 启动种子/Admin 页维护） */
-    private static final String FUNCTION_NAME = AiFunctions.SIM;
     private static final int TIMEOUT_MS = 60_000;
     private static final int MAX_RETRIES = 3;
 
@@ -45,8 +43,11 @@ public class AiServiceImpl implements AiService {
     private final ConcurrentHashMap<String, WebClient> webClientCache = new ConcurrentHashMap<>();
 
     @Override
-    public String chat(String prompt, Double temperature) {
-        Provider provider = loadProvider();
+    public String chatFor(String functionName, String prompt, Double temperature) {
+        if (!AiFunctions.SIM.equals(functionName) && !AiFunctions.BSTOCK_ALIAS.equals(functionName)) {
+            throw new IllegalArgumentException("sim进程不支持的AI功能位: " + functionName);
+        }
+        Provider provider = loadProvider(functionName);
         Exception lastException = null;
 
         for (int i = 0; i <= MAX_RETRIES; i++) {
@@ -55,7 +56,7 @@ public class AiServiceImpl implements AiService {
             } catch (Exception e) {
                 lastException = e;
                 if (i < MAX_RETRIES) {
-                    log.warn("AI调用失败，重试 {}/{}: {}", i + 1, MAX_RETRIES, e.getMessage());
+                    log.warn("AI调用失败 function={}，重试 {}/{}: {}", functionName, i + 1, MAX_RETRIES, e.getMessage());
                     try {
                         Thread.sleep(1000L * (i + 1));
                     } catch (InterruptedException ie) {
@@ -69,20 +70,27 @@ public class AiServiceImpl implements AiService {
     }
 
     /** 从 DB 解析当前生效的 key/baseUrl/model（模型名归属配置本身）；缺配置直接抛，由调用方降级（GBM 默认参数/跳过新闻） */
-    private Provider loadProvider() {
-        AiModelAssignment assignment = assignmentMapper.selectByFunction(FUNCTION_NAME);
+    private Provider loadProvider(String functionName) {
+        AiModelAssignment assignment = assignmentMapper.selectByFunction(functionName);
         if (assignment == null) {
-            throw new RuntimeException("未找到" + FUNCTION_NAME + "的功能位分配，请在Admin页配置");
+            throw new RuntimeException("未找到" + functionName + "的功能位分配，请在Admin页配置");
+        }
+        if (Boolean.FALSE.equals(assignment.getEnabled())) {
+            throw new RuntimeException("AI功能已关闭: " + functionName);
         }
         AiRuntimeConfig config = configMapper.selectById(assignment.getConfigId());
         if (config == null) {
-            throw new RuntimeException(FUNCTION_NAME + "引用的LLM配置不存在(id=" + assignment.getConfigId() + ")");
+            throw new RuntimeException(functionName + "引用的LLM配置不存在(id=" + assignment.getConfigId() + ")");
         }
         if (!Boolean.TRUE.equals(config.getEnabled())) {
-            throw new RuntimeException(FUNCTION_NAME + "引用的LLM配置已停用: " + config.getConfigName());
+            throw new RuntimeException(functionName + "引用的LLM配置已停用: " + config.getConfigName());
         }
         if (config.getModel() == null || config.getModel().isBlank()) {
-            throw new RuntimeException(FUNCTION_NAME + "所选LLM配置'" + config.getConfigName() + "'缺模型名，请在Admin页完善");
+            throw new RuntimeException(functionName + "所选LLM配置'" + config.getConfigName() + "'缺模型名，请在Admin页完善");
+        }
+        if (config.getApiKey() == null || config.getApiKey().isBlank()
+                || config.getBaseUrl() == null || config.getBaseUrl().isBlank()) {
+            throw new RuntimeException(functionName + "所选LLM配置'" + config.getConfigName() + "'不完整");
         }
         return new Provider(config.getApiKey(), config.getBaseUrl(), config.getModel(),
                 config.getReasoningEffort(), config.getApiProtocol());

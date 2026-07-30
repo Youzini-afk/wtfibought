@@ -94,10 +94,11 @@ public class QuantSnapshotWorkflow {
 
         graph.addEdge(START, "build_snapshot");
         graph.addEdge("build_snapshot", "persist_snapshot");
-        // gate：调度层判定好 trigger_deep（1h 定频/哨兵插队/手动），图内只分流——确定性门控不烧 LLM 路由
+        // gate：调度层判定 trigger_deep；功能位关闭时在 Bull/Bear/Judge 之前再次硬拦，确保零 LLM 请求。
         graph.addConditionalEdges("persist_snapshot",
                 edge_async(state -> Boolean.TRUE.equals(state.<Object>value("trigger_deep").orElse(false))
                         && !snapshotJson(state).isEmpty()
+                        && deepAnalysisService.isEnabled()
                         ? "deep" : "end"),
                 Map.of("deep", "news_context", "end", END));
         // Bull∥Bear：同源两条边 fan-out → 框架内部建 ParallelNode；两条边汇聚 judge 完成 fan-in

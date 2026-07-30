@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -35,9 +36,10 @@ public class BStockAdminService {
     private final BStockMapper bStockMapper;
     private final BStockService bStockService;
     private final CryptoOrderService cryptoOrderService;
-    private final BStockAliasGenerator aliasGenerator;
+    private final BStockAliasLlmService aliasLlmService;
     private final BStockCatalogSyncService syncService;
     private final StringRedisTemplate redisTemplate;
+    private final TransactionTemplate transactionTemplate;
 
     public IPage<BStockAdminDTO> page(String status, String keyword, int pageNum, int pageSize) {
         int safePage = Math.max(1, pageNum);
@@ -101,20 +103,51 @@ public class BStockAdminService {
         return changed;
     }
 
-    @Transactional(rollbackFor = Exception.class)
     public BStockAdminDTO regenerateAlias(Long id) {
-        BStock stock = requireStockForUpdate(id);
-        BStockAliasGenerator.Alias alias = aliasGenerator.generate(stock.getTicker(), stock.getName(), stock.getIndustry());
-        stock.setDisplayName(alias.displayName());
-        stock.setDisplayCode(alias.displayCode());
-        stock.setDisplayLore(alias.displayLore());
-        stock.setAliasSource("RULE");
-        stock.setAliasVersion(alias.version());
-        stock.setAliasLocked(false);
-        stock.setUpdatedAt(LocalDateTime.now());
-        bStockMapper.updateById(stock);
-        refreshAfterCommit();
-        return toDTO(stock);
+        if (id == null) throw new BizException(ErrorCode.PARAM_ERROR);
+        BStock source = bStockMapper.selectById(id);
+        if (source == null) throw new BizException(ErrorCode.STOCK_NOT_FOUND);
+        AliasRevision sourceRevision = AliasRevision.from(source);
+
+        // 网络调用必须在事务与 FOR UPDATE 之外，避免慢模型长时间占住目录行锁。
+        BStockAliasGenerator.Alias alias = aliasLlmService.generate(source);
+        BStockAdminDTO result = transactionTemplate.execute(status -> {
+            BStock stock = requireStockForUpdate(id);
+            if (!sourceRevision.equals(AliasRevision.from(stock))) {
+                throw new BizException(ErrorCode.CONCURRENT_UPDATE_FAILED.getCode(),
+                        "生成期间影子身份已被修改，本次LLM结果未写入，请重试");
+            }
+            long conflicts = bStockMapper.selectCount(new LambdaQueryWrapper<BStock>()
+                    .ne(BStock::getId, id)
+                    .and(w -> w.eq(BStock::getDisplayName, alias.displayName())
+                            .or().eq(BStock::getDisplayCode, alias.displayCode())));
+            if (conflicts > 0) {
+                throw new BizException(ErrorCode.PARAM_ERROR.getCode(),
+                        "LLM生成的名称或代码与其他影子股票重复，原别名未修改，请重试");
+            }
+            stock.setDisplayName(alias.displayName());
+            stock.setDisplayCode(alias.displayCode());
+            stock.setDisplayLore(alias.displayLore());
+            stock.setAliasSource("LLM");
+            stock.setAliasVersion(alias.version());
+            stock.setAliasLocked(true);
+            stock.setUpdatedAt(LocalDateTime.now());
+            bStockMapper.updateById(stock);
+            refreshAfterCommit();
+            return toDTO(stock);
+        });
+        if (result == null) {
+            throw new BizException(ErrorCode.SYSTEM_ERROR);
+        }
+        return result;
+    }
+
+    private record AliasRevision(String displayName, String displayCode, String displayLore,
+                                 String aliasSource, Integer aliasVersion, Boolean aliasLocked) {
+        private static AliasRevision from(BStock stock) {
+            return new AliasRevision(stock.getDisplayName(), stock.getDisplayCode(), stock.getDisplayLore(),
+                    stock.getAliasSource(), stock.getAliasVersion(), stock.getAliasLocked());
+        }
     }
 
     public BStockCatalogSyncResult syncNow() {

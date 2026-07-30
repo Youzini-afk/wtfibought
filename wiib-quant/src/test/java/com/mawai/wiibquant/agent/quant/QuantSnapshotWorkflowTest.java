@@ -37,7 +37,22 @@ class QuantSnapshotWorkflowTest {
     }
 
     private CompiledGraph<AgentState> graph() throws Exception {
+        when(deepAnalysisService.isEnabled()).thenReturn(true);
         return QuantSnapshotWorkflow.build(snapshotService, deepAnalysisService);
+    }
+
+    @Test
+    void featureSwitchSkipsDeepChainEvenWhenSchedulerRequestsIt() throws Exception {
+        when(snapshotService.buildSnapshot(eq("BTCUSDT"), anyLong())).thenReturn(snap());
+        when(snapshotService.persist(any(QuantSnapshot.class))).thenReturn(7L);
+        when(deepAnalysisService.isEnabled()).thenReturn(false);
+
+        Optional<AgentState> out = QuantSnapshotWorkflow.build(snapshotService, deepAnalysisService).invoke(Map.of(
+                "target_symbol", "BTCUSDT", "kline_close_time", 123L, "trigger_deep", true));
+
+        assertThat(out).isPresent();
+        assertThat(out.get().value("snapshot_id")).contains(7L);
+        verify(deepAnalysisService, never()).buildNewsContext();
     }
 
     @Test

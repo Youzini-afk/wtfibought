@@ -186,7 +186,7 @@ export function ShadowStockAdminCard() {
     setAction(`alias-${item.id}`);
     try {
       await adminApi.regenerateBStockAlias(item.id);
-      toast('已按当前规则生成并固定新别名', 'success');
+      toast('架空名 LLM 已生成并固定新别名', 'success');
       await load();
     } catch (error) {
       toast((error as Error).message || '别名生成失败', 'error');
@@ -302,6 +302,7 @@ export function ShadowStockAdminCard() {
                     <Badge variant={statusBadge(item.catalogStatus)}>{STATUS_LABELS[item.catalogStatus]}</Badge>
                     <Badge variant={item.sourceStatus === 'TRADING' ? 'success' : 'destructive'}>{item.sourceStatus}</Badge>
                     {item.aliasSource === 'MANUAL' && <Badge variant="secondary">人工别名</Badge>}
+                    {item.aliasSource === 'LLM' && <Badge variant="secondary">LLM 别名</Badge>}
                   </div>
                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
                     <span>源：{item.name || item.ticker} · {item.symbol}</span>
@@ -317,8 +318,8 @@ export function ShadowStockAdminCard() {
                   ) : (
                     <Button variant="outline" size="sm" onClick={() => void setOneStatus(item, 'LISTED')} disabled={action !== null}>上架</Button>
                   )}
-                  <Button variant="ghost" size="sm" onClick={() => void regenerate(item)} disabled={action !== null} title="按规则重新生成别名">
-                    <WandSparkles className="h-3.5 w-3.5" />
+                  <Button variant="ghost" size="sm" onClick={() => void regenerate(item)} disabled={action !== null} title="使用架空名生成 LLM 创建并固定新别名">
+                    <WandSparkles className={`h-3.5 w-3.5 ${action === `alias-${item.id}` ? 'animate-pulse' : ''}`} />
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => openEdit(item)} disabled={action !== null}>
                     <Edit3 className="h-3.5 w-3.5" />编辑

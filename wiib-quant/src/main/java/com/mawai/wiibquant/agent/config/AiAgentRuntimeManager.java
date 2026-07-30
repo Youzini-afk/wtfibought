@@ -44,9 +44,12 @@ public class AiAgentRuntimeManager {
 
     // P2a 删 reflection（方向反思链）；P4 增 quant-light（对话子 agent 浅模型，深浅分层省成本）
     // 管理口径（种子/Admin白名单/配置删除保护）：前4个是本进程运行时功能位（refresh()按名建模型），
-    // sim 是 wiib-sim 进程的功能位——它每次调用自读 DB，不在本进程建模型，只借 quant 统一种子和管理
+    // sim/bstock-alias 是 wiib-sim 进程的功能位——每次调用自读 DB，不在本进程建模型，只借 quant 统一种子和管理
     private static final List<String> MANAGED_FUNCTIONS = List.of(
-            AiFunctions.BEHAVIOR, AiFunctions.QUANT, AiFunctions.QUANT_LIGHT, AiFunctions.CHAT, AiFunctions.SIM);
+            AiFunctions.BEHAVIOR, AiFunctions.QUANT, AiFunctions.QUANT_LIGHT, AiFunctions.CHAT,
+            AiFunctions.SIM, AiFunctions.BSTOCK_ALIAS);
+    private static final Set<String> RUNTIME_FUNCTIONS = Set.of(
+            AiFunctions.BEHAVIOR, AiFunctions.QUANT, AiFunctions.QUANT_LIGHT, AiFunctions.CHAT);
 
     private final BehaviorAgentFactory behaviorAgentFactory;
     private final ApplicationEventPublisher eventPublisher;
@@ -89,45 +92,81 @@ public class AiAgentRuntimeManager {
         return MANAGED_FUNCTIONS.contains(functionName);
     }
 
+    public boolean isFunctionEnabled(String functionName) {
+        AiAgentRuntime runtime = runtimeRef.get();
+        return runtime != null && runtime.isEnabled(functionName);
+    }
+
+    public ChatModel requireModel(String functionName) {
+        AiAgentRuntime runtime = current();
+        if (!runtime.isEnabled(functionName)) {
+            throw new IllegalStateException("AI功能已关闭: " + functionName);
+        }
+        ChatModel model = runtime.model(functionName);
+        if (model == null) {
+            throw new IllegalStateException("AI功能未就绪: " + functionName);
+        }
+        return model;
+    }
+
     /**
-     * 从DB读取所有配置和分配关系，重建4个独立ChatModel；返回是否刷新成功（Admin据此报错）。
+     * 从DB读取所有配置和分配关系，重建已启用的 ChatModel；主要用于进程启动与非事务刷新。
      * 空库→runtime置空（合法的"未配置"态）；构建失败→保留上一份可用runtime——坏切换/瞬时DB错误不打死在跑的AI。
      */
     public boolean refresh() {
+        try {
+            activate(prepareCurrentRuntime());
+            return true;
+        } catch (Exception e) {
+            log.error("AI运行时构建失败，沿用变更前模型运行", e);
+            return false;
+        }
+    }
+
+    /**
+     * 只构建候选运行时，不改当前引用、不发布事件。Admin 事务可先调用它验证全部启用功能，
+     * 提交成功后再 {@link #activate(AiAgentRuntime)}，避免“DB已保存但内存仍是旧模型”的半切换。
+     */
+    public AiAgentRuntime prepareCurrentRuntime() {
         synchronized (graphLock) {
-            boolean ok;
-            try {
-                List<AiRuntimeConfig> configs = configMapper.selectAllConfigs();
-                if (configs.isEmpty()) {
-                    runtimeRef.set(null);
-                    log.warn("AI未配置：ai_runtime_config为空，AI功能暂不可用——在Admin页添加LLM配置后自动生效，无需重启");
-                    ok = true;
-                } else {
-                    seedMissingAssignments(configs);
-                    Map<Long, AiRuntimeConfig> configMap = configs.stream()
-                            .collect(Collectors.toMap(AiRuntimeConfig::getId, c -> c));
-                    List<AiModelAssignment> assignments = assignmentMapper.selectAll();
-                    runtimeRef.set(new AiAgentRuntime(
-                            buildFromAssignment(assignments, AiFunctions.BEHAVIOR, configMap),
-                            buildFromAssignment(assignments, AiFunctions.QUANT, configMap),
-                            buildFromAssignment(assignments, AiFunctions.QUANT_LIGHT, configMap),
-                            buildFromAssignment(assignments, AiFunctions.CHAT, configMap)
-                    ));
-                    log.info("AI运行时已刷新，共{}个LLM配置，{}个功能位分配", configMap.size(), assignments.size());
-                    ok = true;
-                }
-            } catch (Exception e) {
-                log.error("AI运行时构建失败，沿用变更前模型运行", e);
-                ok = false;
+            List<AiRuntimeConfig> configs = configMapper.selectAllConfigs();
+            if (configs.isEmpty()) {
+                return null;
             }
-            // 成败都广播：让对话图等构建期绑定模型的缓存失效重建，与当前 runtime 保持一致
+            seedMissingAssignments(configs);
+            Map<Long, AiRuntimeConfig> configMap = configs.stream()
+                    .collect(Collectors.toMap(AiRuntimeConfig::getId, c -> c));
+            List<AiModelAssignment> assignments = assignmentMapper.selectAll();
+            Set<String> enabledFunctions = assignments.stream()
+                    .filter(a -> RUNTIME_FUNCTIONS.contains(a.getFunctionName()))
+                    .filter(AiAgentRuntimeManager::assignmentEnabled)
+                    .map(AiModelAssignment::getFunctionName)
+                    .collect(Collectors.toUnmodifiableSet());
+            return new AiAgentRuntime(
+                    buildEnabledFromAssignment(assignments, AiFunctions.BEHAVIOR, configMap),
+                    buildEnabledFromAssignment(assignments, AiFunctions.QUANT, configMap),
+                    buildEnabledFromAssignment(assignments, AiFunctions.QUANT_LIGHT, configMap),
+                    buildEnabledFromAssignment(assignments, AiFunctions.CHAT, configMap),
+                    enabledFunctions
+            );
+        }
+    }
+
+    /** 安装已经验证完成的候选运行时；该步骤不再执行可能失败的模型构建。 */
+    public void activate(AiAgentRuntime candidate) {
+        synchronized (graphLock) {
+            runtimeRef.set(candidate);
+            if (candidate == null) {
+                log.warn("AI未配置：ai_runtime_config为空，AI功能暂不可用——在Admin页添加LLM配置后自动生效，无需重启");
+            } else {
+                log.info("AI运行时已切换，已启用功能位={}", candidate.enabledFunctions());
+            }
             eventPublisher.publishEvent(new AiRuntimeRefreshedEvent(this));
-            return ok;
         }
     }
 
     public StateGraph<MessagesState<Message>> createBehaviorAgent(Consumer<String> onProgress) throws GraphStateException {
-        return behaviorAgentFactory.create(current().behaviorChatModel(), onProgress);
+        return behaviorAgentFactory.create(requireModel(AiFunctions.BEHAVIOR), onProgress);
     }
 
     // 旧 quant graph 构建/fallback 整套已随旧管线删除（P2a）：
@@ -142,23 +181,59 @@ public class AiAgentRuntimeManager {
                 .anyMatch(a -> configId.equals(a.getConfigId()));
     }
 
-    private ChatModel buildFromAssignment(List<AiModelAssignment> assignments, String functionName,
-                                          Map<Long, AiRuntimeConfig> configMap) {
+    private ChatModel buildEnabledFromAssignment(List<AiModelAssignment> assignments, String functionName,
+                                                 Map<Long, AiRuntimeConfig> configMap) {
         AiModelAssignment assignment = assignments.stream()
                 .filter(a -> functionName.equals(a.getFunctionName()))
                 .findFirst()
                 .orElseThrow(() -> new IllegalStateException("未找到" + functionName + "的功能位分配"));
 
+        if (!assignmentEnabled(assignment)) {
+            return null;
+        }
+
         AiRuntimeConfig config = configMap.get(assignment.getConfigId());
         if (config == null) {
             throw new IllegalStateException(functionName + "引用的LLM配置不存在(id=" + assignment.getConfigId() + ")");
         }
-        // 模型名归属配置本身（一条配置=一个具体LLM），功能位只是指针
-        if (config.getModel() == null || config.getModel().isBlank()) {
-            throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName() + "'缺模型名，请在Admin页完善");
+        validateEnabledConfig(functionName, config);
+        try {
+            return buildChatModel(config);
+        } catch (Exception e) {
+            throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName()
+                    + "'构建失败: " + rootMessage(e), e);
         }
+    }
 
-        return buildChatModel(config);
+    public void validateEnabledConfig(String functionName, AiRuntimeConfig config) {
+        if (!Boolean.TRUE.equals(config.getEnabled())) {
+            throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName() + "'已停用");
+        }
+        if (config.getApiKey() == null || config.getApiKey().isBlank()) {
+            throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName() + "'缺API Key");
+        }
+        if (config.getBaseUrl() == null || config.getBaseUrl().isBlank()) {
+            throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName() + "'缺Base URL");
+        }
+        if (config.getModel() == null || config.getModel().isBlank()) {
+            throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName() + "'缺模型名");
+        }
+        if (config.getApiProtocol() != null && !AiProtocols.isValid(config.getApiProtocol())) {
+            throw new IllegalStateException(functionName + "所选LLM配置'" + config.getConfigName() + "'协议无效");
+        }
+    }
+
+    private static boolean assignmentEnabled(AiModelAssignment assignment) {
+        return !Boolean.FALSE.equals(assignment.getEnabled());
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
     }
 
     /**
@@ -180,6 +255,7 @@ public class AiAgentRuntimeManager {
                 AiModelAssignment a = new AiModelAssignment();
                 a.setFunctionName(fn);
                 a.setConfigId(first.getId());
+                a.setEnabled(!AiFunctions.BSTOCK_ALIAS.equals(fn));
                 a.setUpdatedAt(LocalDateTime.now());
                 assignmentMapper.insert(a);
                 log.info("自动创建功能位分配 function={} → 配置'{}'(model={})", fn, first.getConfigName(), first.getModel());

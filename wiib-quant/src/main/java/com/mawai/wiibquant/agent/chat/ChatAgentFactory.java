@@ -2,6 +2,7 @@ package com.mawai.wiibquant.agent.chat;
 
 import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONArray;
+import com.mawai.wiibcommon.constant.AiFunctions;
 import com.mawai.wiibquant.agent.config.AiAgentRuntime;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
 import com.mawai.wiibquant.agent.config.AiRuntimeRefreshedEvent;
@@ -233,9 +234,9 @@ public class ChatAgentFactory {
 
     private CompiledGraph<MessagesState<Message>> build() throws Exception {
         AiAgentRuntime runtime = runtimeManager.current();
-        ChatModel deep = runtime.quantChatModel();
-        ChatModel light = runtime.quantLightChatModel();
-        ChatModel fallback = runtime.chatChatModel();
+        ChatModel deep = requiredRuntimeModel(runtime, AiFunctions.QUANT);
+        ChatModel light = requiredRuntimeModel(runtime, AiFunctions.QUANT_LIGHT);
+        ChatModel fallback = runtime.isEnabled(AiFunctions.CHAT) ? runtime.model(AiFunctions.CHAT) : null;
 
         Map<String, CompiledGraph<MessagesState<Message>>> experts = new LinkedHashMap<>();
         experts.put(MARKET_AGENT, expertGraph(light, marketToolkit, "required", """
@@ -286,6 +287,14 @@ public class ChatAgentFactory {
         return graph.compile(CompileConfig.builder().checkpointSaver(checkpointSaver).build());
     }
 
+    private static ChatModel requiredRuntimeModel(AiAgentRuntime runtime, String functionName) {
+        ChatModel model = runtime.isEnabled(functionName) ? runtime.model(functionName) : null;
+        if (model == null) {
+            throw new IllegalStateException("AI功能已关闭或未就绪: " + functionName);
+        }
+        return model;
+    }
+
     /**
      * 专家 agent：浅模型 + 自己那套工具的 ReAct 循环。
      *
@@ -318,6 +327,12 @@ public class ChatAgentFactory {
      */
     private StateGraph<MessagesState<Message>> summarizerGraph(ChatModel deep, ChatModel light, ChatModel fallback)
             throws Exception {
+        var resilientBuilder = ResilientChatService.builder()
+                .model(deep)
+                .maxAttempts(3).initialDelay(500).maxDelay(4000);
+        if (fallback != null) {
+            resilientBuilder.fallbackModel(fallback);
+        }
         return ReactAgent.<MessagesState<Message>>builder()
                 .chatModel(deep)
                 .stateSerializer(stateSerializer)
@@ -346,10 +361,7 @@ public class ChatAgentFactory {
                         输出精炼中文。""".formatted(supplementTag, mergedTag))
                 .addCallModelHook(wrapBefore(new ConversationSummarizer(light, summarizeThresholdTokens, summarizeKeepMessages)))
                 .addExecuteToolsHook(new ModelCallLimiter(runModelCallLimit))
-                .build(ResilientChatService.builder()
-                        .model(deep).fallbackModel(fallback)
-                        .maxAttempts(3).initialDelay(500).maxDelay(4000)
-                        .asFactory());
+                .build(resilientBuilder.asFactory());
     }
 
     /**

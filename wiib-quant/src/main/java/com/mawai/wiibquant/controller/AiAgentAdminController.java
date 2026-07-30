@@ -2,15 +2,19 @@ package com.mawai.wiibquant.controller;
 
 import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.annotation.Symbol;
+import com.mawai.wiibcommon.constant.AiFunctions;
 import com.mawai.wiibcommon.constant.AiProtocols;
+import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.entity.AiModelAssignment;
 import com.mawai.wiibcommon.entity.AiRuntimeConfig;
 import com.mawai.wiibcommon.constant.QuantConstants;
+import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibcommon.mapper.AiModelAssignmentMapper;
 import com.mawai.wiibcommon.mapper.AiRuntimeConfigMapper;
 import com.mawai.wiibquant.agent.analysis.VolVerificationService;
 import com.mawai.wiibquant.agent.config.AiAgentRuntimeManager;
+import com.mawai.wiibquant.agent.config.AiAgentRuntime;
 import com.mawai.wiibquant.agent.research.ForecastHorizon;
 import com.mawai.wiibquant.task.QuantSnapshotScheduler;
 import io.swagger.v3.oas.annotations.Operation;
@@ -19,7 +23,11 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Set;
@@ -51,6 +59,7 @@ public class AiAgentAdminController {
 
     @PostMapping("/keys")
     @Operation(summary = "新增/修改API Key配置")
+    @Transactional(rollbackFor = Exception.class)
     public Result<AiRuntimeConfig> saveKey(@RequestBody KeyRequest req) {
         if (req.getApiKey() == null || req.getApiKey().isBlank()) {
             return Result.fail("apiKey不能为空");
@@ -79,9 +88,11 @@ public class AiAgentAdminController {
             return Result.fail("协议仅支持 openai / responses");
         }
 
-        String baseUrl = req.getBaseUrl().trim();
-        if (baseUrl.endsWith("/")) {
-            baseUrl = baseUrl.substring(0, baseUrl.length() - 1);
+        String baseUrl;
+        try {
+            baseUrl = normalizeBaseUrl(req.getBaseUrl());
+        } catch (IllegalArgumentException e) {
+            return Result.fail(e.getMessage());
         }
 
         AiRuntimeConfig config;
@@ -110,23 +121,19 @@ public class AiAgentAdminController {
             configMapper.updateById(config);
         }
 
-        // 管理端配置修改频率很低，直接全量刷新最稳，确保主图和fallback图缓存都失效
-        if (!aiAgentRuntimeManager.refresh()) {
-            return Result.fail("配置已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行");
-        }
+        scheduleRuntimeActivation("LLM配置");
         return Result.ok(config);
     }
 
     @DeleteMapping("/keys/{id}")
     @Operation(summary = "删除LLM配置")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Void> deleteKey(@PathVariable Long id) {
         if (aiAgentRuntimeManager.isConfigReferenced(id)) {
             return Result.fail("该LLM配置正被功能位引用，无法删除");
         }
         configMapper.deleteById(id);
-        if (!aiAgentRuntimeManager.refresh()) {
-            return Result.fail("已删除，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行");
-        }
+        scheduleRuntimeActivation("LLM配置删除");
         return Result.ok(null);
     }
 
@@ -142,7 +149,12 @@ public class AiAgentAdminController {
 
     @PostMapping("/assignments")
     @Operation(summary = "更换功能位LLM（只改指针，模型名随所选配置）并刷新运行时")
+    @Transactional(rollbackFor = Exception.class)
     public Result<Void> saveAssignments(@RequestBody List<AssignmentRequest> assignments) {
+        if (assignments == null || assignments.isEmpty()) {
+            return Result.fail("功能位分配不能为空");
+        }
+        // 先完整校验，再写任何一行；避免后半条失败时前半条已经落库。
         for (AssignmentRequest req : assignments) {
             if (req.getFunctionName() == null) {
                 return Result.fail("参数不完整: " + null);
@@ -157,27 +169,35 @@ public class AiAgentAdminController {
             if (target == null) {
                 return Result.fail("LLM配置不存在(id=" + req.getConfigId() + ")");
             }
-            // 空model的配置建不出模型（历史遗留行可能缺model），提前拦截别等refresh才炸
-            if (target.getModel() == null || target.getModel().isBlank()) {
-                return Result.fail("LLM配置'" + target.getConfigName() + "'缺模型名，请先在「配置LLM」里补全");
+            if (!Boolean.FALSE.equals(req.getEnabled())) {
+                try {
+                    aiAgentRuntimeManager.validateEnabledConfig(req.getFunctionName(), target);
+                } catch (IllegalStateException e) {
+                    return Result.fail(e.getMessage());
+                }
             }
+        }
 
+        for (AssignmentRequest req : assignments) {
+            if (req.getFunctionName() == null || !AiAgentRuntimeManager.isManagedFunction(req.getFunctionName())) {
+                continue;
+            }
             AiModelAssignment existing = assignmentMapper.selectByFunction(req.getFunctionName());
             if (existing != null) {
                 existing.setConfigId(req.getConfigId());
+                existing.setEnabled(!Boolean.FALSE.equals(req.getEnabled()));
                 existing.setUpdatedAt(LocalDateTime.now());
                 assignmentMapper.updateById(existing);
             } else {
                 AiModelAssignment a = new AiModelAssignment();
                 a.setFunctionName(req.getFunctionName());
                 a.setConfigId(req.getConfigId());
+                a.setEnabled(!Boolean.FALSE.equals(req.getEnabled()));
                 a.setUpdatedAt(LocalDateTime.now());
                 assignmentMapper.insert(a);
             }
         }
-        if (!aiAgentRuntimeManager.refresh()) {
-            return Result.fail("分配已保存，但AI运行时刷新失败（详见服务日志），当前沿用变更前模型运行");
-        }
+        scheduleRuntimeActivation("LLM分配");
         return Result.ok(null);
     }
 
@@ -186,6 +206,9 @@ public class AiAgentAdminController {
     @PostMapping("/quant/trigger")
     @Operation(summary = "手动触发量化分析")
     public Result<String> triggerQuant(@Symbol String symbol) {
+        if (!aiAgentRuntimeManager.isFunctionEnabled(AiFunctions.QUANT)) {
+            return Result.fail("量化研判（深）已关闭，不会调用LLM");
+        }
         Thread.startVirtualThread(() -> quantSnapshotScheduler.runSnapshot(symbol));
         return Result.ok("量化分析已触发: " + symbol);
     }
@@ -241,6 +264,76 @@ public class AiAgentAdminController {
     public static class AssignmentRequest {
         private String functionName;
         private Long configId;
+        private Boolean enabled;
+    }
+
+    private void scheduleRuntimeActivation(String action) {
+        final AiAgentRuntime candidate;
+        try {
+            candidate = aiAgentRuntimeManager.prepareCurrentRuntime();
+        } catch (Exception e) {
+            String detail = rootMessage(e);
+            log.warn("{}候选运行时构建失败，事务将回滚: {}", action, detail, e);
+            throw new BizException(ErrorCode.PARAM_ERROR.getCode(), action + "未保存：" + detail);
+        }
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            aiAgentRuntimeManager.activate(candidate);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                // 重新读取“此刻已提交”的最终 DB 状态，而不是安装事务开始时的候选快照；
+                // 并发保存即使 afterCommit 回调乱序，也不会让旧候选覆盖较新的功能开关。
+                refreshCommittedRuntime(action);
+            }
+        });
+    }
+
+    private void refreshCommittedRuntime(String action) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            if (aiAgentRuntimeManager.refresh()) {
+                return;
+            }
+            try {
+                Thread.sleep(100L * attempt);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        log.error("{}已提交，但读取最终DB状态刷新AI运行时连续失败，请检查数据库连接", action);
+    }
+
+    private static String normalizeBaseUrl(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        while (value.endsWith("/")) {
+            value = value.substring(0, value.length() - 1);
+        }
+        // 本项目的两个客户端都会自行拼 /v1/...；管理员粘贴常见的 OpenAI base URL 时自动纠正。
+        if (value.toLowerCase().endsWith("/v1")) {
+            value = value.substring(0, value.length() - 3);
+        }
+        URI uri;
+        try {
+            uri = URI.create(value);
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Base URL格式无效");
+        }
+        if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                || uri.getHost() == null || uri.getQuery() != null || uri.getFragment() != null) {
+            throw new IllegalArgumentException("Base URL必须是无查询参数的HTTP(S)地址");
+        }
+        return value;
+    }
+
+    private static String rootMessage(Throwable error) {
+        Throwable current = error;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return message == null || message.isBlank() ? current.getClass().getSimpleName() : message;
     }
 
 }

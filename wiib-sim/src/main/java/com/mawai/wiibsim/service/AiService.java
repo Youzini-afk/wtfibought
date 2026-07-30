@@ -1,7 +1,9 @@
 package com.mawai.wiibsim.service;
 
+import com.mawai.wiibcommon.constant.AiFunctions;
+
 /**
- * AI调用服务接口（配置来自 DB 的 'sim' 功能位，Admin 页可切换）
+ * AI调用服务接口（配置来自 DB 的 sim 进程功能位，Admin 页可独立选模与启停）
  */
 public interface AiService {
 
@@ -11,7 +13,7 @@ public interface AiService {
      * @return AI生成的文本
      */
     default String chat(String prompt) {
-        return chat(prompt, null);
+        return chatFor(AiFunctions.SIM, prompt, null);
     }
 
     /**
@@ -20,5 +22,10 @@ public interface AiService {
      * @param temperature 采样温度；null=不传走模型默认
      * @return AI生成的文本
      */
-    String chat(String prompt, Double temperature);
+    default String chat(String prompt, Double temperature) {
+        return chatFor(AiFunctions.SIM, prompt, temperature);
+    }
+
+    /** 按独立功能位调用，功能位关闭时在发出网络请求前失败。 */
+    String chatFor(String functionName, String prompt, Double temperature);
 }
