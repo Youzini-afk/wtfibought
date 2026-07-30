@@ -11,7 +11,10 @@ import { applyCachedSiteSettings, applySiteSettings, installSiteSettingsStorageS
 // 缓存同步应用以避免重复访问时闪回默认品牌；公开 API 随后以数据库真值校正。
 applyCachedSiteSettings()
 installSiteSettingsStorageSync()
-void siteSettingsApi.get().then(settings => applySiteSettings(settings)).catch(() => {})
+void siteSettingsApi.get()
+  .then(settings => applySiteSettings(settings))
+  .catch(() => {})
+  .finally(() => window.__wiibSplashBrandDone?.())
 
 createRoot(document.getElementById('root')!).render(
   <ToastProvider>

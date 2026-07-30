@@ -1,5 +1,12 @@
 import type { SiteSettings } from '../types';
 
+declare global {
+  interface Window {
+    __wiibSetSplashName?: (siteName: string) => void;
+    __wiibSplashBrandDone?: () => void;
+  }
+}
+
 export const SITE_SETTINGS_STORAGE_KEY = 'wiib-site-settings';
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   siteName: 'WhatIfIBought',
@@ -57,6 +64,7 @@ export function applySiteSettings(settings: SiteSettings, persist = true) {
   if (versionOf(normalized) < versionOf(readCached())) return;
 
   document.title = normalized.siteName;
+  window.__wiibSetSplashName?.(normalized.siteName);
   let icon = document.querySelector<HTMLLinkElement>('link[rel~="icon"]');
   if (!icon) {
     icon = document.createElement('link');

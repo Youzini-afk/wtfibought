@@ -15,11 +15,13 @@
     <title>WhatIfIBought</title>
     <script>
       // React/API 尚未启动时先应用上次由服务端确认过的品牌，避免刷新时闪回默认标题。
+      window.__wiibInitialSiteName = 'WhatIfIBought';
       try {
         const brand = JSON.parse(localStorage.getItem('wiib-site-settings') || 'null');
         if (brand && typeof brand.siteName === 'string' && brand.siteName.trim()
           && typeof brand.faviconUrl === 'string' && brand.faviconUrl.trim()) {
           document.title = brand.siteName.trim();
+          window.__wiibInitialSiteName = brand.siteName.trim();
           const icon = document.querySelector('link[rel~="icon"]');
           if (icon) {
             const iconUrl = new URL(brand.faviconUrl.trim(), location.origin);
@@ -67,27 +69,37 @@
 
       .sp-mid {
         position: absolute; left: 50%; top: 50%; translate: -50% -50%;
+        box-sizing: border-box; width: 100%; padding: 0 20px;
+        display: flex; flex-direction: column; align-items: center;
         text-align: center; font-family: system-ui, "Microsoft YaHei", sans-serif;
       }
       #splash.sp-out .sp-mid { animation: sp-fade .45s .18s ease both }
       @keyframes sp-fade { to { opacity: 0; transform: translateY(-14px) } }
 
-      /* 字标走 SVG 描边：@fontsource 跟 bundle 一起到，这时候用文字必然 fallback 走形 */
-      .sp-wm { display: block; width: 190px; height: auto }
-      .sp-p {
-        fill: none; stroke: var(--c-fg); stroke-width: 6;
-        stroke-linecap: square; stroke-linejoin: miter;
-        stroke-dasharray: 100; stroke-dashoffset: 100;
-        animation: sp-draw .42s cubic-bezier(.5,0,.3,1) both;
-        animation-delay: calc(.2s + var(--i) * .06s);
+      /* 任意站点名都用真实文本渲染；字号由内联脚本按字符宽度和视口计算。
+         每个字符独立成 span，长名称到最小字号后可以安全换行，不会撑出屏幕。 */
+      .sp-brand {
+        --sp-brand-size: 56px;
+        max-width: min(84vw, 1080px);
+        display: flex; flex-wrap: wrap; justify-content: center; align-items: baseline;
+        color: var(--c-fg); font-size: var(--sp-brand-size); line-height: .94;
+        font-family: "Arial Narrow", "DIN Alternate", system-ui, "Microsoft YaHei", sans-serif;
+        font-weight: 800; letter-spacing: .035em; overflow-wrap: anywhere;
       }
-      @keyframes sp-draw { to { stroke-dashoffset: 0 } }
-      .sp-dot {
-        fill: var(--c-pri); opacity: 0; transform: scale(.2);
-        transform-origin: 165px 48px;
-        animation: sp-dot .3s .54s cubic-bezier(.34,1.56,.64,1) both;
+      .sp-letter {
+        display: inline-block; opacity: 0;
+        transform: translateY(.28em) scale(.94); filter: blur(4px);
+        animation: sp-letter-in .42s var(--ld) cubic-bezier(.2,.8,.2,1) both;
       }
-      @keyframes sp-dot { to { opacity: 1; transform: scale(1) } }
+      .sp-letter.sp-space { width: .32em }
+      @keyframes sp-letter-in {
+        to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0) }
+      }
+      .sp-mark {
+        color: var(--c-pri); opacity: 0; transform: scale(.2);
+        animation: sp-mark-in .3s .62s cubic-bezier(.34,1.56,.64,1) both;
+      }
+      @keyframes sp-mark-in { to { opacity: 1; transform: scale(1) } }
 
       .sp-lbl {
         margin-top: 18px; font-size: 10px; letter-spacing: .12em; font-weight: 700;
@@ -98,7 +110,6 @@
       @keyframes sp-in { to { opacity: 1 } }
 
       @media (min-width: 768px) {
-        .sp-wm { width: 300px }
         .sp-lbl { margin-top: 22px }
         .sp-wide { display: inline }
       }
@@ -106,11 +117,10 @@
       /* 减弱动效：不做逐格溶解和书写，整块淡出即可——但绝不能不显示，
          否则白屏又回来了 */
       @media (prefers-reduced-motion: reduce) {
-        .sp-c, #splash.sp-out .sp-c, .sp-p, .sp-dot, .sp-lbl, #splash.sp-out .sp-mid {
+        .sp-c, #splash.sp-out .sp-c, .sp-letter, .sp-mark, .sp-lbl, #splash.sp-out .sp-mid {
           animation: none !important;
         }
-        .sp-p { stroke-dashoffset: 0 }
-        .sp-dot { opacity: 1; transform: none }
+        .sp-letter, .sp-mark { opacity: 1; transform: none; filter: none }
         .sp-lbl { opacity: 1 }
         #splash { transition: opacity .35s ease }
         #splash.sp-out { opacity: 0 }
@@ -141,14 +151,7 @@
     <div id="splash" aria-hidden="true">
       <div id="sp-grid"></div>
       <div class="sp-mid">
-        <svg class="sp-wm" viewBox="0 0 176 60">
-          <path class="sp-p" style="--i:0" pathLength="100" d="M8 8 L19 52 L33 22 L47 52 L58 8"/>
-          <path class="sp-p" style="--i:1" pathLength="100" d="M76 8 L76 52"/>
-          <path class="sp-p" style="--i:2" pathLength="100" d="M94 8 L94 52"/>
-          <path class="sp-p" style="--i:3" pathLength="100" d="M112 52 L112 8 L138 8 L146 16 L146 23 L139 30 L112 30"/>
-          <path class="sp-p" style="--i:4" pathLength="100" d="M112 30 L140 30 L148 38 L148 45 L140 52 L112 52"/>
-          <rect class="sp-dot" x="160" y="43" width="10" height="10"/>
-        </svg>
+        <div id="sp-brand" class="sp-brand"></div>
         <div class="sp-lbl">GRID ONLINE <b>·</b> <i class="sp-wide">全市场</i>数据接入</div>
       </div>
     </div>
@@ -156,7 +159,55 @@
       (function () {
         var el = document.getElementById('splash');
         var grid = document.getElementById('sp-grid');
+        var brand = document.getElementById('sp-brand');
         var pc = innerWidth >= 768;   // 768 对齐 index.css 的 md: 断点
+
+        function visualUnits(value) {
+          var units = 0;
+          Array.from(value).forEach(function (char) {
+            if (/\s/.test(char)) units += .32;
+            else if (/[\u2e80-\u9fff\uf900-\ufaff]/.test(char)) units += 1;
+            else if (/[A-Z0-9]/.test(char)) units += .68;
+            else if (/[a-z]/.test(char)) units += .56;
+            else units += .45;
+          });
+          return Math.max(4, units);
+        }
+
+        function renderBrand(rawName) {
+          var value = typeof rawName === 'string' && rawName.trim()
+            ? rawName.trim().replace(/\s+/g, ' ')
+            : 'WhatIfIBought';
+          var maxWidth = Math.min(innerWidth * .84, 1080);
+          var maxSize = innerWidth >= 768 ? 104 : 56;
+          var minSize = innerWidth >= 768 ? 30 : 22;
+          var size = Math.max(minSize, Math.min(maxSize, maxWidth / visualUnits(value)));
+          brand.style.maxWidth = maxWidth + 'px';
+          brand.style.setProperty('--sp-brand-size', size.toFixed(2) + 'px');
+          brand.replaceChildren();
+
+          var chars = Array.from(value);
+          var step = Math.min(.045, .5 / Math.max(1, chars.length));
+          chars.forEach(function (char, index) {
+            var span = document.createElement('span');
+            span.className = 'sp-letter' + (/\s/.test(char) ? ' sp-space' : '');
+            span.style.setProperty('--ld', (.16 + index * step).toFixed(3) + 's');
+            span.textContent = /\s/.test(char) ? '\u00a0' : char;
+            brand.appendChild(span);
+          });
+          var mark = document.createElement('span');
+          mark.className = 'sp-letter sp-mark';
+          mark.textContent = '▪';
+          brand.appendChild(mark);
+        }
+
+        function handleResize() { renderBrand(window.__wiibInitialSiteName || document.title); }
+        window.__wiibSetSplashName = function (name) {
+          window.__wiibInitialSiteName = name;
+          renderBrand(name);
+        };
+        renderBrand(window.__wiibInitialSiteName || document.title);
+        window.addEventListener('resize', handleResize);
 
         // 格子尽量接近正方：按目标边长反推行列。两头夹住，超宽屏别爆出几百个元素
         var t = pc ? 92 : 66;
@@ -183,16 +234,32 @@
         // 网页拿不到真实加载百分比，只有"好了/没好"一个布尔信号，所以不做假进度条。
         // 最短 950ms 等字标写完（加载太快时闪一下更难看），最长 6s 强制放行——
         // 接口挂了也不能一直遮着人家页面
-        var t0 = Date.now(), fired = false;
+        var t0 = Date.now(), fired = false, appReady = false, brandReady = false;
         function finish() {
           if (fired) return;
           fired = true;
           setTimeout(function () {
             el.classList.add('sp-out');
-            setTimeout(function () { el.remove(); }, 1000);
+            setTimeout(function () {
+              window.removeEventListener('resize', handleResize);
+              if (window.__wiibSetSplashName) delete window.__wiibSetSplashName;
+              if (window.__wiibSplashDone) delete window.__wiibSplashDone;
+              if (window.__wiibSplashBrandDone) delete window.__wiibSplashBrandDone;
+              el.remove();
+            }, 1000);
           }, Math.max(0, 950 - (Date.now() - t0)));
         }
-        window.__wiibSplashDone = finish;
+        function finishWhenReady() {
+          if (appReady && brandReady) finish();
+        }
+        window.__wiibSplashDone = function () {
+          appReady = true;
+          finishWhenReady();
+        };
+        window.__wiibSplashBrandDone = function () {
+          brandReady = true;
+          finishWhenReady();
+        };
         setTimeout(finish, 6000);
       })();
     </script>
