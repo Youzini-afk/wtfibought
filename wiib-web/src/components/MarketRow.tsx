@@ -5,6 +5,7 @@ import { formatCoinPrice, type CoinCfg } from '../lib/coinConfig';
 import { cryptoApi, futuresApi, bstockApi } from '../api';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { Sparkline } from './fx/Sparkline';
+import { BStockIcon } from './BStockIcon';
 import type { BStock } from '../types';
 
 /**
@@ -122,11 +123,18 @@ export function BStockMarketRow({ stock }: { stock: BStock }) {
   return (
     <MarketRow
       icon={(
-        stock.sourceIconUrl
-          ? <img src={stock.sourceIconUrl} alt="" className="w-6 h-6 rounded-md border bg-white object-contain p-0.5 shrink-0" />
-          : <span className="w-6 h-6 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[8px] font-bold text-muted-foreground tracking-tight">
+        <BStockIcon
+          symbol={stock.symbol}
+          sourceIconUrl={stock.sourceIconUrl}
+          alt=""
+          loading="lazy"
+          className="w-6 h-6 rounded-md border bg-white object-contain p-0.5 shrink-0"
+          fallback={(
+            <span className="w-6 h-6 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[8px] font-bold text-muted-foreground tracking-tight">
               {(stock.displayCode || stock.ticker)?.slice(0, 4)}
             </span>
+          )}
+        />
       )}
       name={stock.displayName || stock.name}
       sub={`${stock.displayCode || stock.ticker} · 影子股票`}

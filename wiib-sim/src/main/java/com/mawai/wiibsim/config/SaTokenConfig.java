@@ -25,6 +25,7 @@ public class SaTokenConfig extends BaseSaTokenConfig {
         paths.add("/api/auth/login/**");    // 管理员直登/密码登录，登录前访问
         paths.add("/api/auth/register");    // 邀请码注册，登录前访问
         paths.add("/api/site-settings");   // 浏览器标签标题/favicon，登录页也必须可读取
+        paths.add("/api/bstock/icon/**");  // img 标签无法携带 Bearer token；图标本身是公开静态信息
         paths.add("/linuxdo/**");
         paths.add("/ws/**");
         paths.add("/internal/**");   // internal API 走 InternalApiFilter 的 token 校验，不走用户登录

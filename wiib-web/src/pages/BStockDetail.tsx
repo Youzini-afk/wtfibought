@@ -11,6 +11,7 @@ import { Skeleton } from '../components/ui/skeleton';
 import { Badge } from '../components/ui/badge';
 import { CandleChart } from '../components/CandleChart';
 import { FuturesActionButton } from '../components/FuturesActionButton';
+import { BStockIcon } from '../components/BStockIcon';
 import { useQuantityAnimation } from '../components/coin/useQuantityAnimation';
 import { cn, fmtNum } from '../lib/utils';
 import { ChevronLeft, Wallet, Globe, Landmark, TriangleAlert } from 'lucide-react';
@@ -133,13 +134,17 @@ function BStockDetail({ symbol }: { symbol: string }) {
         <Button variant="ghost" size="icon" className="h-9 w-9 shrink-0" onClick={() => navigate('/bstock')}>
           <ChevronLeft className="w-5 h-5" />
         </Button>
-        {info?.sourceIconUrl ? (
-          <img src={info.sourceIconUrl} alt="" className="w-10 h-10 rounded-xl border bg-white object-contain p-1 shrink-0" />
-        ) : (
-          <div className="w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 flex items-center justify-center shrink-0 text-[11px] font-bold text-primary">
-            {info?.displayCode?.slice(0, 4) ?? <Landmark className="w-5 h-5" />}
-          </div>
-        )}
+        <BStockIcon
+          symbol={info?.symbol ?? symbol}
+          sourceIconUrl={info?.sourceIconUrl}
+          alt=""
+          className="w-10 h-10 rounded-xl border bg-white object-contain p-1 shrink-0"
+          fallback={(
+            <div className="w-10 h-10 rounded-xl bg-primary/10 ring-1 ring-primary/20 flex items-center justify-center shrink-0 text-[11px] font-bold text-primary">
+              {info?.displayCode?.slice(0, 4) ?? <Landmark className="w-5 h-5" />}
+            </div>
+          )}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-lg font-extrabold tracking-tight truncate">{info?.displayName ?? info?.name ?? symbol}</span>

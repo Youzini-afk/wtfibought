@@ -61,6 +61,7 @@ public class BStockCatalogSyncService {
     private final BStockAliasGenerator aliasGenerator;
     private final BinanceRestClient binanceRestClient;
     private final StringRedisTemplate redisTemplate;
+    private final BStockIconService bStockIconService;
 
     private final AtomicBoolean syncing = new AtomicBoolean(false);
     private final AtomicBoolean enriching = new AtomicBoolean(false);
@@ -178,6 +179,9 @@ public class BStockCatalogSyncService {
                 }
                 if ("CANDIDATE".equals(stock.getCatalogStatus())) candidates++;
                 if (!"TRADING".equals(sourceStatus)) cancelPendingOrders(symbol, sourceStatus);
+                if (stock.getSourceIconUrl() != null && !stock.getSourceIconUrl().isBlank()) {
+                    bStockIconService.warmIfNeededAsync(symbol, stock.getSourceIconUrl());
+                }
 
                 if (stock.getMetadataSyncedAt() == null
                         || stock.getMetadataSyncedAt().isBefore(now.minusHours(24))) {
@@ -281,6 +285,7 @@ public class BStockCatalogSyncService {
             JSONObject company = meta == null ? null : meta.getJSONObject("companyInfo");
             JSONObject stockInfo = dynamic == null ? null : dynamic.getJSONObject("stockInfo");
             JSONObject statusInfo = dynamic == null ? null : dynamic.getJSONObject("statusInfo");
+            String iconUrl = current.getSourceIconUrl();
             BStock patch = new BStock();
             patch.setUpdatedAt(LocalDateTime.now());
             patch.setMetadataSyncedAt(LocalDateTime.now());
@@ -295,7 +300,10 @@ public class BStockCatalogSyncService {
             }
             if (meta != null) {
                 String icon = meta.getString("icon");
-                if (icon != null && !icon.isBlank()) patch.setSourceIconUrl(icon.startsWith("http") ? icon : ICON_BASE_URL + icon);
+                if (icon != null && !icon.isBlank()) {
+                    iconUrl = normalizeIconUrl(icon);
+                    patch.setSourceIconUrl(iconUrl);
+                }
             }
             if (stockInfo != null) {
                 patch.setMarketCap(stockInfo.getBigDecimal("marketCap"));
@@ -327,6 +335,9 @@ public class BStockCatalogSyncService {
                         .eq(BStock::getId, current.getId())
                         .eq(BStock::getAliasSource, "RULE_PENDING")
                         .and(w -> w.isNull(BStock::getAliasLocked).or().eq(BStock::getAliasLocked, false)));
+            }
+            if (iconUrl != null && !iconUrl.isBlank()) {
+                bStockIconService.refreshIfNeeded(asset.symbol(), iconUrl);
             }
         } catch (Exception e) {
             log.debug("影子股票元数据同步失败 symbol={}: {}", asset.symbol(), e.getMessage());
@@ -418,6 +429,14 @@ public class BStockCatalogSyncService {
 
     private String encode(String value) {
         return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
+    }
+
+    private String normalizeIconUrl(String icon) {
+        String value = icon.trim();
+        if (value.startsWith("https://")) return value;
+        if (value.startsWith("http://")) return "https://" + value.substring("http://".length());
+        if (value.startsWith("//")) return "https:" + value;
+        return ICON_BASE_URL + (value.startsWith("/") ? value : "/" + value);
     }
 
     private record RwaAsset(String symbol, String ticker, String chainId, String contractAddress,

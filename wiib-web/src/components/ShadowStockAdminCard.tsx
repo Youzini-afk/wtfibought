@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from './ui/dialog';
 import { Input } from './ui/input';
 import { useToast } from './ui/use-toast';
+import { BStockIcon } from './BStockIcon';
 
 const STATUS_LABELS: Record<BStockCatalogStatus, string> = {
   CANDIDATE: '候选',
@@ -283,11 +284,16 @@ export function ShadowStockAdminCard() {
                   {selected.has(item.id) && <Check className="h-3.5 w-3.5" />}
                 </button>
 
-                {item.sourceIconUrl ? (
-                  <img src={item.sourceIconUrl} alt="" className="h-9 w-9 shrink-0 rounded-lg border bg-white object-contain p-1" />
-                ) : (
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-card text-[10px] font-bold">{item.displayCode}</div>
-                )}
+                <BStockIcon
+                  symbol={item.symbol}
+                  sourceIconUrl={item.sourceIconUrl}
+                  alt=""
+                  loading="lazy"
+                  className="h-9 w-9 shrink-0 rounded-lg border bg-white object-contain p-1"
+                  fallback={(
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-card text-[10px] font-bold">{item.displayCode}</div>
+                  )}
+                />
 
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">

@@ -9,6 +9,9 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface BStockMapper extends BaseMapper<BStock> {
 
+    @Select("SELECT source_icon_url FROM bstock WHERE symbol = #{symbol}")
+    String selectSourceIconUrl(@Param("symbol") String symbol);
+
     /** 与买卖事务共用的目录行锁，防止管理员暂停与订单成交穿插。 */
     @Select("SELECT * FROM bstock WHERE symbol = #{symbol} FOR UPDATE")
     BStock selectBySymbolForUpdate(@Param("symbol") String symbol);

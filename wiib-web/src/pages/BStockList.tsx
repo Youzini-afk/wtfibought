@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { bstockApi } from '../api';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -6,6 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Skeleton } from '../components/ui/skeleton';
 import { Badge } from '../components/ui/badge';
+import { BStockIcon } from '../components/BStockIcon';
 import { useToast } from '../components/ui/use-toast';
 import { cn, fmtNum } from '../lib/utils';
 import { Landmark, RefreshCcw, Search, X, ArrowUpDown, ChevronRight } from 'lucide-react';
@@ -30,18 +31,66 @@ export function BStockList() {
   const [query, setQuery] = useState('');
   const [sortField, setSortField] = useState<SortField>('cap');
   const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const mountedRef = useRef(true);
+  const requestSequence = useRef(0);
 
-  const load = useCallback((silent = false) => {
-    bstockApi.list()
-      .then(setStocks)
-      .catch(() => { if (!silent) toast('获取影子股票列表失败', 'error', { description: '请稍后重试' }); })
-      .finally(() => setLoaded(true));
+  const load = useCallback(async (silent = false) => {
+    const sequence = ++requestSequence.current;
+    try {
+      const next = await bstockApi.list();
+      if (!mountedRef.current || sequence !== requestSequence.current) return false;
+      setStocks(next);
+      return true;
+    } catch {
+      if (mountedRef.current && sequence === requestSequence.current && !silent) {
+        toast('获取影子股票列表失败', 'error', { description: '请稍后重试' });
+      }
+      return false;
+    } finally {
+      if (mountedRef.current && sequence === requestSequence.current) setLoaded(true);
+    }
   }, [toast]);
 
   useEffect(() => {
-    load();
-    const t = setInterval(() => load(true), 8000); // 8s 静默刷新，价格保持鲜活
-    return () => clearInterval(t);
+    mountedRef.current = true;
+    let disposed = false;
+    let running = false;
+    let timer: number | undefined;
+
+    const schedule = () => {
+      if (disposed) return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      timer = window.setTimeout(() => void poll(true), 8000);
+    };
+    const poll = async (silent: boolean) => {
+      if (disposed || running) return;
+      if (document.visibilityState !== 'visible') {
+        schedule();
+        return;
+      }
+      running = true;
+      try {
+        await load(silent);
+      } finally {
+        running = false;
+        schedule();
+      }
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState !== 'visible' || running) return;
+      if (timer !== undefined) window.clearTimeout(timer);
+      void poll(true);
+    };
+
+    void poll(false);
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      disposed = true;
+      mountedRef.current = false;
+      requestSequence.current += 1;
+      if (timer !== undefined) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
   }, [load]);
 
   const processed = useMemo(() => {
@@ -90,7 +139,9 @@ export function BStockList() {
                   </button>
                 )}
               </div>
-              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => { load(); toast('已刷新', 'info'); }}>
+              <Button variant="outline" size="icon" className="h-9 w-9 shrink-0" onClick={() => {
+                void load().then(success => { if (success) toast('已刷新', 'info'); });
+              }}>
                 <RefreshCcw className="w-4 h-4" />
               </Button>
             </div>
@@ -131,13 +182,18 @@ export function BStockList() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0 flex-1">
-                      {s.sourceIconUrl ? (
-                        <img src={s.sourceIconUrl} alt="" className="w-10 h-10 rounded-md border border-border bg-white object-contain p-1 shrink-0" />
-                      ) : (
-                        <div className="w-10 h-10 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[10px] font-bold text-muted-foreground tracking-tight">
-                          {s.displayCode?.slice(0, 4) || s.ticker?.slice(0, 4)}
-                        </div>
-                      )}
+                      <BStockIcon
+                        symbol={s.symbol}
+                        sourceIconUrl={s.sourceIconUrl}
+                        alt=""
+                        loading="lazy"
+                        className="w-10 h-10 rounded-md border border-border bg-white object-contain p-1 shrink-0"
+                        fallback={(
+                          <div className="w-10 h-10 rounded-md border border-border bg-card-2 flex items-center justify-center shrink-0 text-[10px] font-bold text-muted-foreground tracking-tight">
+                            {s.displayCode?.slice(0, 4) || s.ticker?.slice(0, 4)}
+                          </div>
+                        )}
+                      />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-semibold text-sm truncate group-hover:text-primary transition-colors">{s.displayName || s.name}</span>

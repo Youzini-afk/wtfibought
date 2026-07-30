@@ -45,10 +45,22 @@ CREATE TABLE IF NOT EXISTS bstock (
     updated_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS bstock_icon_cache (
+    symbol        VARCHAR(20) PRIMARY KEY REFERENCES bstock(symbol) ON UPDATE CASCADE ON DELETE CASCADE,
+    source_url    VARCHAR(512) NOT NULL,
+    content_type  VARCHAR(64) NOT NULL,
+    image_data    BYTEA NOT NULL,
+    content_hash  CHAR(64) NOT NULL,
+    byte_size     INT NOT NULL CHECK (byte_size > 0 AND byte_size <= 1048576),
+    cached_at     TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at    TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 COMMENT ON TABLE  bstock IS 'bStock 代币化美股（静态信息，独立于虚拟 stock/company）';
 COMMENT ON COLUMN bstock.symbol     IS 'Binance 现货符号，如 NVDABUSDT（查价/下单）';
 COMMENT ON COLUMN bstock.ticker     IS '真实股票代码，如 NVDA（展示）';
 COMMENT ON COLUMN bstock.multiplier IS 'bStock 乘数（信息用，现货价已含分红再投）';
+COMMENT ON TABLE bstock_icon_cache IS '影子股票图标的同源持久缓存；刷新失败时保留旧内容';
 
 INSERT INTO bstock (symbol, ticker, name, name_en, industry, description, ceo, homepage, market_cap, pe_ratio, dividend_yield, multiplier, week52_high, week52_low, sort) VALUES
 ('NVDABUSDT','NVDA','英伟达','Nvidia Corp','半导体','英伟达是图形处理单元的领先开发商。传统上，GPU用于提升计算平台的体验，最显著的是在个人电脑的游戏应用中。GPU的使用案例随后发展成为人工智能中运行大型语言模型的重要半导体。英伟达不仅提供人工智能GPU，还提供用于人工智能模型开发和训练的软件平台Cuda。英伟达还在扩展其数据中心网络解决方案，帮助将GPU连接起来以处理复杂的工作负载。','Jen-Hsun Huang','https://www.nvidia.com',5109298845000,32.01,0.02,1.000932054247057497,236.54,162.02,1),
