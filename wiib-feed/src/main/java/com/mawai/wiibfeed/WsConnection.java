@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
+import java.net.http.WebSocketHandshakeException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.util.concurrent.CompletionStage;
@@ -38,6 +39,8 @@ public class WsConnection {
     private final AtomicBoolean reconnecting = new AtomicBoolean(false);
     private final AtomicInteger reconnectAttempt = new AtomicInteger(0);
     private volatile long lastMessageAt;
+    /** 最近一次断线原因，仅进入管理员流健康快照；连接恢复后清空。 */
+    private volatile String lastError;
     private ScheduledFuture<?> idleWatchdog;
     private volatile ScheduledFuture<?> reconnectFuture;
     // 状态变化回调（连/断/重连转换时各触发一次）：装配期由 BinanceWsClient 接到 StreamHealthPublisher；默认 null 不影响现有行为。
@@ -82,6 +85,8 @@ public class WsConnection {
 
     public int reconnectAttempt() { return reconnectAttempt.get(); }
 
+    public String lastError() { return lastError; }
+
     /** 由三个原子标志推导状态：已连 > 正在连 > 等退避 > 断开。 */
     public Status status() {
         if (connected.get()) return Status.CONNECTED;
@@ -119,13 +124,16 @@ public class WsConnection {
                     connecting.set(false);
                     reconnecting.set(false);
                     reconnectAttempt.set(0);
+                    lastError = null;
                     startIdleWatchdog();
                     log.info("{} WS已连接", name);
                     fireStatus(); // CONNECTED
                     if (onConnected != null) onConnected.accept(ws);
                 })
                 .exceptionally(ex -> {
-                    log.error("{} WS连接失败: {}", name, ex.getMessage());
+                    String detail = describeError(ex);
+                    lastError = "连接失败：" + detail;
+                    log.error("{} WS连接失败: {}", name, detail);
                     connecting.set(false);
                     reconnecting.set(false);
                     scheduleReconnect();
@@ -172,6 +180,7 @@ public class WsConnection {
             if (!connected.get()) return;
             long idle = System.currentTimeMillis() - lastMessageAt;
             if (idle > maxIdleMs) {
+                lastError = "数据流静默超时：" + idle + "ms 未收到业务数据";
                 log.warn("{} WS 静默{}ms 超阈值{}ms，主动重连", name, idle, maxIdleMs);
                 WebSocket ws = wsRef.getAndSet(null);
                 if (ws != null) try { ws.abort(); } catch (Exception ignored) {}
@@ -201,6 +210,33 @@ public class WsConnection {
         connecting.set(false);
         reconnecting.set(true);
         reconnectAttempt.set(0);
+    }
+
+    /**
+     * 提取适合管理员查看的一行错误摘要。CompletableFuture 常把真正原因包在多层 cause 中；
+     * WebSocket 握手异常单独带出 HTTP 状态（地域限制通常表现为 4xx）。
+     */
+    private static String describeError(Throwable error) {
+        if (error == null) return "未知错误";
+        String detail = null;
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof WebSocketHandshakeException handshake) {
+                return "WebSocket 握手 HTTP " + handshake.getResponse().statusCode();
+            }
+            String message = sanitize(current.getMessage());
+            if (!message.isBlank()) {
+                detail = current.getClass().getSimpleName() + ": " + message;
+            }
+            current = current.getCause();
+        }
+        return detail != null ? detail : error.getClass().getSimpleName();
+    }
+
+    private static String sanitize(String value) {
+        if (value == null) return "";
+        String oneLine = value.replace('\r', ' ').replace('\n', ' ').trim();
+        return oneLine.length() <= 500 ? oneLine : oneLine.substring(0, 500) + "…";
     }
 
     private class Listener implements WebSocket.Listener {
@@ -244,6 +280,9 @@ public class WsConnection {
         @Override
         public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
             if (wsRef.get() != webSocket) return null;
+            String cleanReason = sanitize(reason);
+            lastError = "服务端关闭：code=" + statusCode
+                    + (cleanReason.isBlank() ? "" : "，reason=" + cleanReason);
             log.warn("{} WS关闭: code={} reason={}", name, statusCode, reason);
             WsConnection.this.scheduleReconnect();
             return null;
@@ -252,7 +291,9 @@ public class WsConnection {
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
             if (wsRef.get() != webSocket) return;
-            log.error("{} WS错误: {}", name, error.getMessage());
+            String detail = describeError(error);
+            lastError = "连接错误：" + detail;
+            log.error("{} WS错误: {}", name, detail);
             WsConnection.this.scheduleReconnect();
         }
     }

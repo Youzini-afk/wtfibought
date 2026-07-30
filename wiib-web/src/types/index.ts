@@ -687,6 +687,7 @@ export interface FeedStreamHealth {
   status: 'CONNECTED' | 'CONNECTING' | 'RECONNECTING' | 'DISCONNECTED';
   lastMessageAt: number;   // epoch millis，前端本地算"距上次数据 Xs"
   reconnectAttempt: number;
+  lastError?: string | null; // 最近一次握手/断线原因；连接恢复后为空
 }
 
 // ========== P7 研判工作台 ==========

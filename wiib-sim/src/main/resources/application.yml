@@ -110,10 +110,11 @@ trading:
 
 # Binance行情配置
 binance:
-  ws-url: wss://stream.binance.com:9443/ws
-  futures-ws-url: wss://fstream.binance.com/ws
-  rest-base-url: https://api.binance.com
-  futures-rest-base-url: https://fapi.binance.com
+  # sim 只经 REST 读取公开现货行情；与 feed 共用官方 market-data-only 默认值及部署覆盖键。
+  ws-url: ${BINANCE_SPOT_WS_URL:wss://data-stream.binance.vision/ws}
+  futures-ws-url: ${BINANCE_FUTURES_WS_URL:wss://fstream.binance.com/ws}
+  rest-base-url: ${BINANCE_SPOT_REST_URL:https://data-api.binance.vision}
+  futures-rest-base-url: ${BINANCE_FUTURES_REST_URL:https://fapi.binance.com}
   symbols:
     - BTCUSDT
     - ETHUSDT

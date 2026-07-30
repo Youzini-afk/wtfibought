@@ -55,6 +55,8 @@ LINUXDO_REDIRECT_URI=https://<WTFiB域名>/login
 
 New API SSO/额度桥接不要写成 `NEW_API_*` 环境变量。启动后进入 `/admin` 配置，环境变量只用于需要锁定字段的部署级覆盖。
 
+公共现货行情默认使用 Binance 官方 `data-stream.binance.vision` / `data-api.binance.vision`，适用于美东等 Binance.com 主站行情入口受限、但官方 market-data-only 端点可用的部署区域，无需 API Key。通常不要添加任何 `BINANCE_*_URL`；只有使用自建行情代理时才按 `.env.example` 覆盖。
+
 ## 4. 自动数据库初始化
 
 容器每次启动都会先等待 PostgreSQL，然后：

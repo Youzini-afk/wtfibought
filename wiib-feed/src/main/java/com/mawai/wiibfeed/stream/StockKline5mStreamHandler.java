@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 import java.util.List;
 
 /**
- * bStock 现货 5m K线连接（轻壳）：@kline_5m，走现货端点（stream.binance.com）。
+ * bStock 现货 5m K线连接（轻壳）：@kline_5m，走 Binance 公开现货行情端点。
  * bStock 无合约，不能并入走合约端点的 {@link KlineStreamHandler}；解析复用其 handle 并传 feedStrategy=false
  * ——只广播给前端蜡烛图，绝不进策略 Stream（策略只吃 crypto 合约 5m，混入股票会污染预测/触发）。
  * 未配 stockSymbols 时 buildUrl 返回空串，BinanceWsClient 据此跳过不建连。

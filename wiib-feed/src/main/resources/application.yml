@@ -44,10 +44,12 @@ management:
 
 # Binance行情配置（WS 接入 + REST 回填）
 binance:
-  ws-url: wss://stream.binance.com:9443/ws
-  futures-ws-url: wss://fstream.binance.com/ws
-  rest-base-url: https://api.binance.com
-  futures-rest-base-url: https://fapi.binance.com
+  # 现货只读取公开行情，默认走 Binance 官方 market-data-only 域名，避免依赖受地域策略影响的主站交易域名。
+  # 四个地址均可按部署出口覆盖；美东等 Binance.com 受限区域不要把现货改回 stream/api.binance.com。
+  ws-url: ${BINANCE_SPOT_WS_URL:wss://data-stream.binance.vision/ws}
+  futures-ws-url: ${BINANCE_FUTURES_WS_URL:wss://fstream.binance.com/ws}
+  rest-base-url: ${BINANCE_SPOT_REST_URL:https://data-api.binance.vision}
+  futures-rest-base-url: ${BINANCE_FUTURES_REST_URL:https://fapi.binance.com}
   symbols:
     - BTCUSDT
     - ETHUSDT
