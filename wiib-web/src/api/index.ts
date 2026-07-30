@@ -2,6 +2,7 @@ import axios from 'axios';
 import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnManualOrderReq, TnOrderResult, TnAck } from '../types/testnet';
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
+import type { NewApiAdminSettings, UpdateNewApiAdminSettings } from '../types';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
@@ -215,6 +216,10 @@ export const adminApi = {
   generateInviteCodes: (maxUses: number, count: number) =>
     api.post<unknown, InviteCode[]>('/admin/invite-code/generate', { maxUses, count }),
   disableInviteCode: (id: number) => api.post<unknown, void>(`/admin/invite-code/${id}/disable`),
+  // WTFiB 侧 New API SSO / 额度桥接运行时设置（仅 userId=1）
+  getNewApiSettings: () => api.get<unknown, NewApiAdminSettings>('/admin/new-api-settings'),
+  updateNewApiSettings: (settings: UpdateNewApiAdminSettings) =>
+    api.put<unknown, NewApiAdminSettings>('/admin/new-api-settings', settings),
 };
 
 // ========== Buff接口 ==========

@@ -24,8 +24,8 @@
 
    不要为了本功能在生产旧库重跑整份 `sql/init.sql`；其中还包含其他历史升级语句。
 
-4. 部署 WTFiB，但先保持 `NEW_API_ENABLED=false`。
-5. 在两边配置同一组 App ID/Secret，先启用并重启 New API，再启用并重启 WTFiB。
+4. 部署 WTFiB，但先在 Admin 页保持 New API 额度桥接关闭。
+5. 在两边配置同一组 App ID/Secret，先启用 New API，再在 WTFiB Admin 页启用桥接。
 6. 用测试账号完成第 5 节的冒烟检查，再向用户开放入口。
 
 ## 3. New API 配置
@@ -47,7 +47,11 @@ EXTERNAL_GAME_SIGNATURE_TOLERANCE_SECONDS=300
 
 ## 4. WTFiB 配置
 
-在 WTFiB 根目录 `.env` 中配置：
+推荐使用 WTFiB `/admin` 页中的“New API 额度桥接”卡片配置。它会把设置持久化到
+`new_api_runtime_config`，保存后以整份运行时快照立即生效；App Secret 不会通过管理 API
+回显，密钥框留空表示保留原值。
+
+也可以通过 WTFiB 根目录 `.env` 设置部署级覆盖：
 
 ```env
 NEW_API_ENABLED=true
@@ -66,6 +70,7 @@ NEW_API_WITHDRAWAL_TAX_BRACKETS=20:0.05,50:0.10,100:0.15,*:0.20
 
 注意：
 
+- 环境变量优先级高于数据库。只要某个 `NEW_API_*` 变量存在，Admin 页对应字段就会只读；删除变量并重启后才改由数据库设置接管。
 - `NEW_API_BASE_URL` 是主站根地址，不带 `/v1`，末尾斜杠可有可无。
 - `APP_ID` 和 `APP_SECRET` 必须与 New API 完全一致。
 - `NEW_API_QUOTA_PER_UNIT` 必须等于主站实际 `QuotaPerUnit`。登录换码时 WTFiB 会校验主站返回值，不一致会拒绝登录，避免错账。
@@ -94,10 +99,10 @@ NEW_API_WITHDRAWAL_TAX_BRACKETS=20:0.05,50:0.10,100:0.15,*:0.20
 
 ## 6. 故障处理与回滚
 
-- 只需紧急关闭提现：在 WTFiB 设置 `NEW_API_WITHDRAWAL_ENABLED=false` 并重启。已提交记录仍会继续对账。
-- 需要停止所有新跨站操作：先关闭前端入口或 `NEW_API_ENABLED`，但应让已有 `PENDING` 记录完成对账后再关闭 New API 的 `EXTERNAL_GAME_ENABLED`。
+- 只需紧急关闭提现：在 WTFiB Admin 页关闭“允许盈利转回主站”；也可用 `NEW_API_WITHDRAWAL_ENABLED=false` 覆盖并重启。已提交记录仍会继续对账。
+- 需要停止所有新跨站操作：先在 Admin 页关闭额度桥接（或用 `NEW_API_ENABLED=false` 覆盖），但应让已有 `PENDING` 记录完成对账后再关闭 New API 的 `EXTERNAL_GAME_ENABLED`。
 - 不要删除 `external_quota_transfer` 或 New API 的幂等操作表；删除会失去重试判定依据。
-- 轮换共享密钥前先等待 `PENDING` 清零，再同时更新两边并重启。只改一边会让服务间请求持续返回 401。
+- 轮换共享密钥前先等待 `PENDING` 清零，再在两边的管理设置中更新同一密钥；只改一边会让服务间请求持续返回 401。环境变量托管密钥时仍需修改变量并重启。
 - 回滚应用版本时保留新增列和表即可；它们不会影响旧版查询。
 
 ## 7. 信任边界

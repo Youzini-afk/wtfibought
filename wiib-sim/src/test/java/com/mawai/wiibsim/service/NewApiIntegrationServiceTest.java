@@ -1,6 +1,8 @@
 package com.mawai.wiibsim.service;
 
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.mawai.wiibcommon.entity.ExternalQuotaTransfer;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibsim.config.NewApiIntegrationConfig;
@@ -11,6 +13,7 @@ import com.mawai.wiibsim.mapper.ExternalQuotaTransferMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -19,9 +22,11 @@ import org.mockito.quality.Strictness;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -41,10 +46,16 @@ class NewApiIntegrationServiceTest {
     @Mock NewApiAccountBindingService accountBindingService;
 
     private NewApiIntegrationService service;
+    private NewApiIntegrationConfig.Settings settings;
 
     @BeforeEach
     void setUp() {
+        TableInfoHelper.initTableInfo(
+                new MapperBuilderAssistant(new MybatisConfiguration(), ""), ExternalQuotaTransfer.class);
+        settings = enabledSettings();
         when(config.isUsable()).thenReturn(true);
+        when(config.isReconciliationConfigured()).thenReturn(true);
+        when(config.snapshot()).thenReturn(settings);
         when(config.getQuotaPerUnit()).thenReturn(new BigDecimal("500000"));
         service = new NewApiIntegrationService(
                 config, client, userService, transferMapper, settlementService, withdrawalService,
@@ -64,7 +75,7 @@ class NewApiIntegrationServiceTest {
             transfer.setId(99L);
             return 1;
         });
-        when(client.status(any())).thenAnswer(invocation -> {
+        when(client.statusForReconciliation(any(), eq(settings))).thenAnswer(invocation -> {
             String operationId = invocation.getArgument(0);
             return Optional.of(new NewApiQuotaResult(
                     operationId, 42L, "debit", 625000L, "completed", "", 900000L, true));
@@ -90,20 +101,22 @@ class NewApiIntegrationServiceTest {
     @Test
     void reconciliationRetriesSameOperationWhenRemoteStatusIsMissing() {
         ExternalQuotaTransfer transfer = pendingTransfer("deposit-operation-1");
-        when(client.status(transfer.getOperationId())).thenReturn(Optional.empty());
-        when(client.debit(transfer.getOperationId(), 42L, 500000L)).thenReturn(new NewApiQuotaResult(
+        when(client.statusForReconciliation(transfer.getOperationId(), settings)).thenReturn(Optional.empty());
+        when(client.debitForReconciliation(transfer.getOperationId(), 42L, 500000L, settings))
+                .thenReturn(new NewApiQuotaResult(
                 transfer.getOperationId(), 42L, "debit", 500000L, "completed", "", 500000L, true));
 
         service.reconcileOne(transfer);
 
-        verify(client).debit(transfer.getOperationId(), 42L, 500000L);
+        verify(client).debitForReconciliation(transfer.getOperationId(), 42L, 500000L, settings);
         verify(settlementService).settleDeposit(transfer.getOperationId(), 500000L);
     }
 
     @Test
     void terminalRemoteFailureIsRecordedWithoutLocalCredit() {
         ExternalQuotaTransfer transfer = pendingTransfer("deposit-operation-2");
-        when(client.status(transfer.getOperationId())).thenReturn(Optional.of(new NewApiQuotaResult(
+        when(client.statusForReconciliation(transfer.getOperationId(), settings))
+                .thenReturn(Optional.of(new NewApiQuotaResult(
                 transfer.getOperationId(), 42L, "debit", 500000L,
                 "failed", "insufficient_quota", 10L, false)));
 
@@ -120,15 +133,16 @@ class NewApiIntegrationServiceTest {
         transfer.setDirection("WITHDRAWAL");
         transfer.setAmount(new BigDecimal("10.00"));
         transfer.setQuotaAmount(4_750_000L);
-        when(client.status(transfer.getOperationId())).thenReturn(Optional.empty());
-        when(client.credit(transfer.getOperationId(), 42L, 4_750_000L)).thenReturn(new NewApiQuotaResult(
+        when(client.statusForReconciliation(transfer.getOperationId(), settings)).thenReturn(Optional.empty());
+        when(client.creditForReconciliation(transfer.getOperationId(), 42L, 4_750_000L, settings))
+                .thenReturn(new NewApiQuotaResult(
                 transfer.getOperationId(), 42L, "credit", 4_750_000L,
                 "completed", "", 9_750_000L, true));
 
         service.reconcileOne(transfer);
 
-        verify(client).credit(transfer.getOperationId(), 42L, 4_750_000L);
-        verify(client, never()).debit(any(), anyLong(), anyLong());
+        verify(client).creditForReconciliation(transfer.getOperationId(), 42L, 4_750_000L, settings);
+        verify(client, never()).debitForReconciliation(any(), anyLong(), anyLong(), any());
         verify(settlementService).settleWithdrawal(transfer.getOperationId(), 9_750_000L);
     }
 
@@ -136,7 +150,8 @@ class NewApiIntegrationServiceTest {
     void terminalWithdrawalFailureRefundsLocalGrossReservation() {
         ExternalQuotaTransfer transfer = pendingTransfer("withdrawal-operation-2");
         transfer.setDirection("WITHDRAWAL");
-        when(client.status(transfer.getOperationId())).thenReturn(Optional.of(new NewApiQuotaResult(
+        when(client.statusForReconciliation(transfer.getOperationId(), settings))
+                .thenReturn(Optional.of(new NewApiQuotaResult(
                 transfer.getOperationId(), 42L, "credit", 500000L,
                 "failed", "user_not_found", 0L, false)));
 
@@ -177,6 +192,74 @@ class NewApiIntegrationServiceTest {
 
         assertThat(result).isSameAs(bound);
         verify(accountBindingService).bind(7L, identity);
+    }
+
+    @Test
+    void disablingNewOperationsStillReconcilesAnExistingPendingTransfer() {
+        NewApiIntegrationConfig.Settings disabledSettings = settings(false);
+        when(config.isUsable()).thenReturn(false);
+        when(config.snapshot()).thenReturn(disabledSettings);
+        ExternalQuotaTransfer transfer = pendingTransfer("disabled-reconcile-operation");
+        when(transferMapper.selectList(any())).thenReturn(List.of(transfer));
+        when(client.statusForReconciliation(transfer.getOperationId(), disabledSettings))
+                .thenReturn(Optional.of(new NewApiQuotaResult(
+                        transfer.getOperationId(), 42L, "debit", 500000L,
+                        "completed", "", 750000L, true)));
+
+        service.reconcilePendingTransfers();
+
+        verify(client).statusForReconciliation(transfer.getOperationId(), disabledSettings);
+        verify(settlementService).settleDeposit(transfer.getOperationId(), 750000L);
+    }
+
+    @Test
+    void disablingIntegrationBlocksNewSsoBindingAndDepositBeforeRemoteCalls() {
+        when(config.isUsable()).thenReturn(false);
+
+        assertThatThrownBy(() -> service.resolveSsoUser("login-code"))
+                .hasMessageContaining("登录未启用");
+        assertThatThrownBy(() -> service.bindSsoUser(7L, "bind-code"))
+                .hasMessageContaining("登录未启用");
+        assertThatThrownBy(() -> service.deposit(7L, BigDecimal.ONE))
+                .hasMessageContaining("额度转入未启用");
+
+        verify(client, never()).exchangeCode(any());
+        verify(transferMapper, never()).insert(any(ExternalQuotaTransfer.class));
+    }
+
+    @Test
+    void incompleteReconciliationConfigurationKeepsTransferPendingForRetry() {
+        NewApiIntegrationConfig.Settings incomplete = new NewApiIntegrationConfig.Settings(
+                false, "", "wtfib", "", new BigDecimal("500000"),
+                false, new BigDecimal("0.50"), new BigDecimal("100.00"),
+                new BigDecimal("1.00"), "Asia/Shanghai", "20:0.05,*:0.10");
+        when(config.snapshot()).thenReturn(incomplete);
+        ExternalQuotaTransfer transfer = pendingTransfer("incomplete-config-operation");
+
+        service.reconcileOne(transfer);
+
+        verify(transferMapper).scheduleRetry(
+                eq(transfer.getOperationId()), eq("主站额度桥接配置暂不完整"), any(LocalDateTime.class));
+        verify(client, never()).statusForReconciliation(any(), any());
+    }
+
+    private NewApiIntegrationConfig.Settings enabledSettings() {
+        return settings(true);
+    }
+
+    private NewApiIntegrationConfig.Settings settings(boolean enabled) {
+        return new NewApiIntegrationConfig.Settings(
+                enabled,
+                "https://youzi.today",
+                "wtfib",
+                "test-secret-12345678",
+                new BigDecimal("500000"),
+                true,
+                new BigDecimal("0.50"),
+                new BigDecimal("100.00"),
+                new BigDecimal("1.00"),
+                "Asia/Shanghai",
+                "20:0.05,50:0.10,*:0.20");
     }
 
     private ExternalQuotaTransfer pendingTransfer(String operationId) {

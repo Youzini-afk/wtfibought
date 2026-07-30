@@ -37,11 +37,15 @@ public final class WithdrawalPolicy {
     }
 
     public static WithdrawalPolicy from(NewApiIntegrationConfig config) {
+        return from(config.snapshot());
+    }
+
+    public static WithdrawalPolicy from(NewApiIntegrationConfig.Settings settings) {
         return new WithdrawalPolicy(
-                config.getWithdrawalProfitRate(),
-                config.getWithdrawalDailyLimit(),
-                config.getWithdrawalMinAmount(),
-                config.getWithdrawalTaxBrackets());
+                settings.withdrawalProfitRate(),
+                settings.withdrawalDailyLimit(),
+                settings.withdrawalMinAmount(),
+                settings.withdrawalTaxBrackets());
     }
 
     public Limits limits(BigDecimal currentProfit,

@@ -45,11 +45,12 @@ public class ExternalWithdrawalService {
     private BigDecimal initialBalance;
 
     public ExternalWithdrawalPreviewDTO preview(long userId, BigDecimal requestedAmount) {
-        ensureAvailable();
+        NewApiIntegrationConfig.Settings settings = config.snapshot();
+        ensureAvailable(settings);
         User user = userService.getById(userId);
         validateBoundUser(user);
         BigDecimal normalized = requestedAmount == null ? null : normalizeAmount(requestedAmount);
-        return calculate(userId, user, normalized);
+        return calculate(userId, user, normalized, settings);
     }
 
     /**
@@ -59,12 +60,13 @@ public class ExternalWithdrawalService {
     @Transactional(rollbackFor = Exception.class)
     @Ledger(LedgerBizType.EXTERNAL_WITHDRAWAL)
     public ExternalQuotaTransfer reserve(long userId, BigDecimal requestedAmount) {
-        ensureAvailable();
+        NewApiIntegrationConfig.Settings settings = config.snapshot();
+        ensureAvailable(settings);
         BigDecimal amount = normalizeAmount(requestedAmount);
         User locked = userMapper.selectByIdForUpdate(userId);
         validateBoundUser(locked);
 
-        ExternalWithdrawalPreviewDTO preview = calculate(userId, locked, amount);
+        ExternalWithdrawalPreviewDTO preview = calculate(userId, locked, amount, settings);
         if (!preview.requestAllowed()) {
             throw new BizException(ErrorCode.PARAM_ERROR.getCode(), preview.rejectionReason());
         }
@@ -79,7 +81,7 @@ public class ExternalWithdrawalService {
         transfer.setNetAmount(preview.estimatedNetAmount());
         transfer.setEffectiveTaxRate(preview.effectiveTaxRate());
         transfer.setBusinessDate(preview.businessDate());
-        transfer.setQuotaAmount(toQuotaAmount(preview.estimatedNetAmount()));
+        transfer.setQuotaAmount(toQuotaAmount(preview.estimatedNetAmount(), settings));
         transfer.setStatus(STATUS_PENDING);
         transfer.setRemoteStatus("pending");
         transfer.setAttemptCount(0);
@@ -99,9 +101,12 @@ public class ExternalWithdrawalService {
         return transfer;
     }
 
-    private ExternalWithdrawalPreviewDTO calculate(long userId, User user, BigDecimal requestedAmount) {
-        WithdrawalPolicy policy = policy();
-        LocalDate businessDate = LocalDate.now(zoneId());
+    private ExternalWithdrawalPreviewDTO calculate(long userId,
+                                                    User user,
+                                                    BigDecimal requestedAmount,
+                                                    NewApiIntegrationConfig.Settings settings) {
+        WithdrawalPolicy policy = policy(settings);
+        LocalDate businessDate = LocalDate.now(zoneId(settings));
         UserDTO portfolio = userService.getUserPortfolio(userId);
         if (Boolean.TRUE.equals(portfolio.getBankrupt())) {
             throw new BizException(ErrorCode.USER_BANKRUPT);
@@ -183,29 +188,29 @@ public class ExternalWithdrawalService {
         }
     }
 
-    private void ensureAvailable() {
-        if (!config.isUsable()) {
+    private void ensureAvailable(NewApiIntegrationConfig.Settings settings) {
+        if (!settings.isUsable()) {
             throw new BizException("New API 额度桥接未启用");
         }
-        if (!config.isWithdrawalEnabled()) {
+        if (!settings.withdrawalEnabled()) {
             throw new BizException(ErrorCode.FORBIDDEN.getCode(), "盈利提现暂未开放");
         }
     }
 
-    private WithdrawalPolicy policy() {
+    private WithdrawalPolicy policy(NewApiIntegrationConfig.Settings settings) {
         try {
-            return WithdrawalPolicy.from(config);
+            return WithdrawalPolicy.from(settings);
         } catch (IllegalArgumentException e) {
             log.error("New API 提现规则配置无效", e);
             throw new BizException("盈利提现配置无效，请联系管理员");
         }
     }
 
-    private ZoneId zoneId() {
+    private ZoneId zoneId(NewApiIntegrationConfig.Settings settings) {
         try {
-            return ZoneId.of(config.getWithdrawalZoneId().trim());
+            return ZoneId.of(settings.withdrawalZoneId());
         } catch (Exception e) {
-            log.error("New API 提现业务时区配置无效: {}", config.getWithdrawalZoneId(), e);
+            log.error("New API 提现业务时区配置无效: {}", settings.withdrawalZoneId(), e);
             throw new BizException("盈利提现时区配置无效，请联系管理员");
         }
     }
@@ -221,9 +226,9 @@ public class ExternalWithdrawalService {
         }
     }
 
-    private long toQuotaAmount(BigDecimal amount) {
+    private long toQuotaAmount(BigDecimal amount, NewApiIntegrationConfig.Settings settings) {
         try {
-            long quota = amount.multiply(config.getQuotaPerUnit()).longValueExact();
+            long quota = amount.multiply(settings.quotaPerUnit()).longValueExact();
             if (quota <= 0 || quota > Integer.MAX_VALUE) {
                 throw new ArithmeticException("quota out of range");
             }

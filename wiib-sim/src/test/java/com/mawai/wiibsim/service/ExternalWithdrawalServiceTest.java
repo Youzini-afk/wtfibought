@@ -41,14 +41,18 @@ class ExternalWithdrawalServiceTest {
 
     @BeforeEach
     void setUp() {
-        when(config.isUsable()).thenReturn(true);
-        when(config.isWithdrawalEnabled()).thenReturn(true);
-        when(config.getWithdrawalProfitRate()).thenReturn(new BigDecimal("0.50"));
-        when(config.getWithdrawalDailyLimit()).thenReturn(new BigDecimal("100.00"));
-        when(config.getWithdrawalMinAmount()).thenReturn(new BigDecimal("1.00"));
-        when(config.getWithdrawalZoneId()).thenReturn("Asia/Shanghai");
-        when(config.getWithdrawalTaxBrackets()).thenReturn("20:0.05,50:0.10,100:0.15,*:0.20");
-        lenient().when(config.getQuotaPerUnit()).thenReturn(new BigDecimal("500000"));
+        when(config.snapshot()).thenReturn(new NewApiIntegrationConfig.Settings(
+                true,
+                "https://youzi.today",
+                "wtfib",
+                "0123456789abcdef0123456789abcdef",
+                new BigDecimal("500000"),
+                true,
+                new BigDecimal("0.50"),
+                new BigDecimal("100.00"),
+                new BigDecimal("1.00"),
+                "Asia/Shanghai",
+                "20:0.05,50:0.10,100:0.15,*:0.20"));
         lenient().when(transferMapper.countOpenWithdrawals(7L)).thenReturn(0L);
 
         service = new ExternalWithdrawalService(

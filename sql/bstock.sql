@@ -42,4 +42,20 @@ INSERT INTO bstock (symbol, ticker, name, name_en, industry, description, ceo, h
 ('AMDBUSDT','AMD','AMD','Advanced Micro Devices','半导体','超威半导体设计各种数字半导体，应用于个人电脑、游戏主机、数据中心（包括人工智能）、工业和汽车等市场。AMD的传统优势在于用于个人电脑和数据中心的中央处理器和图形处理器。然而，AMD正逐渐成为人工智能GPU及相关硬件领域的重要参与者。此外，该公司还供应索尼PlayStation和微软Xbox等知名游戏主机中的芯片。','Lisa T. Su','https://www.amd.com',909231612300,181.61,0,1,584.73,141.90,7),
 ('SPCXBUSDT','SPCX','SpaceX','SpaceX','航空航天','美国航天与科技公司，成立于 2002 年，由 Elon Musk 创立。公司专注于火箭、航天器、卫星互联网和人工智能基础设施的研发与运营，业务涵盖卫星发射、载人航天、全球宽带通信以及下一代太空技术。其核心产品包括 Falcon 系列火箭、Starship 飞船以及 Starlink 卫星网络。SpaceX 目前是全球最大的商业航天企业之一，并在全球轨道发射市场占据领先地位。','Elon Musk','https://www.spacex.com',NULL,NULL,0,1,225.64,135.00,8),
 ('QQQBUSDT','QQQ','纳指100ETF','Invesco QQQ Trust','ETF','QQQ是一只追踪纳斯达克100指数的明星基金。它包含了纳斯达克市值最大的100家非金融公司（主要是科技、生物医药和消费巨头）。作为全球科技创新的代名词，QQQ是投资者捕捉科技巨头成长红利、进行流动性管理的核心工具。',NULL,'https://invesco.com',486064702200,NULL,NULL,1.003352854155083837,748.65,551.56,9),
-('SOXLBUSDT','SOXL','半导体3x做多ETF','Direxion Daily Semiconductor Bull 3X Shares','ETF','Direxion 每日半导体三倍做多 ETF：以每日再平衡方式提供半导体行业指数约 3 倍的杠杆多头敞口，是放大押注半导体板块的短线交易工具。含杠杆与每日复利损耗，波动极大，仅适合短期交易而非长期持有。',NULL,'https://www.direxion.com',25479423525,NULL,NULL,1,302.00,22.57,10);
+('SOXLBUSDT','SOXL','半导体3x做多ETF','Direxion Daily Semiconductor Bull 3X Shares','ETF','Direxion 每日半导体三倍做多 ETF：以每日再平衡方式提供半导体行业指数约 3 倍的杠杆多头敞口，是放大押注半导体板块的短线交易工具。含杠杆与每日复利损耗，波动极大，仅适合短期交易而非长期持有。',NULL,'https://www.direxion.com',25479423525,NULL,NULL,1,302.00,22.57,10)
+ON CONFLICT (symbol) DO UPDATE SET
+    ticker         = EXCLUDED.ticker,
+    name           = EXCLUDED.name,
+    name_en        = EXCLUDED.name_en,
+    industry       = EXCLUDED.industry,
+    description    = EXCLUDED.description,
+    ceo            = EXCLUDED.ceo,
+    homepage       = EXCLUDED.homepage,
+    market_cap     = EXCLUDED.market_cap,
+    pe_ratio       = EXCLUDED.pe_ratio,
+    dividend_yield = EXCLUDED.dividend_yield,
+    multiplier     = EXCLUDED.multiplier,
+    week52_high    = EXCLUDED.week52_high,
+    week52_low     = EXCLUDED.week52_low,
+    sort           = EXCLUDED.sort,
+    updated_at     = CURRENT_TIMESTAMP;

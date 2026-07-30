@@ -42,7 +42,8 @@ public class NewApiClient {
     }
 
     public NewApiIdentity exchangeCode(String code) {
-        JsonNode root = post("/api/external-app/token", Map.of("code", code));
+        JsonNode root = post(
+                "/api/external-app/token", Map.of("code", code), config.snapshot(), false);
         JsonNode data = requiredData(root);
         return new NewApiIdentity(
                 data.path("user_id").asLong(),
@@ -54,17 +55,25 @@ public class NewApiClient {
         );
     }
 
-    public NewApiQuotaResult debit(String operationId, long userId, long amount) {
-        return mutateQuota("/api/external-app/quota/debit", operationId, userId, amount);
+    NewApiQuotaResult debitForReconciliation(String operationId,
+                                             long userId,
+                                             long amount,
+                                             NewApiIntegrationConfig.Settings settings) {
+        return mutateQuota("/api/external-app/quota/debit", operationId, userId, amount, settings);
     }
 
-    public NewApiQuotaResult credit(String operationId, long userId, long amount) {
-        return mutateQuota("/api/external-app/quota/credit", operationId, userId, amount);
+    NewApiQuotaResult creditForReconciliation(String operationId,
+                                              long userId,
+                                              long amount,
+                                              NewApiIntegrationConfig.Settings settings) {
+        return mutateQuota("/api/external-app/quota/credit", operationId, userId, amount, settings);
     }
 
-    public Optional<NewApiQuotaResult> status(String operationId) {
+    Optional<NewApiQuotaResult> statusForReconciliation(
+            String operationId, NewApiIntegrationConfig.Settings settings) {
         try {
-            JsonNode root = post("/api/external-app/quota/status", Map.of("operation_id", operationId));
+            JsonNode root = post(
+                    "/api/external-app/quota/status", Map.of("operation_id", operationId), settings, true);
             return Optional.of(parseQuotaResult(requiredData(root)));
         } catch (NewApiRemoteException e) {
             if (e.getStatusCode() == 404) return Optional.empty();
@@ -72,35 +81,46 @@ public class NewApiClient {
         }
     }
 
-    private NewApiQuotaResult mutateQuota(String path, String operationId, long userId, long amount) {
+    private NewApiQuotaResult mutateQuota(String path,
+                                          String operationId,
+                                          long userId,
+                                          long amount,
+                                          NewApiIntegrationConfig.Settings settings) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("operation_id", operationId);
         body.put("user_id", userId);
         body.put("amount", amount);
         try {
-            return parseQuotaResult(requiredData(post(path, body)));
+            return parseQuotaResult(requiredData(post(path, body, settings, true)));
         } catch (NewApiResponseWithDataException e) {
             return parseQuotaResult(e.data);
         }
     }
 
-    private JsonNode post(String path, Object request) {
-        if (!config.isUsable()) {
-            throw new NewApiRemoteException(503, "New API integration is not configured", false);
+    private JsonNode post(String path,
+                          Object request,
+                          NewApiIntegrationConfig.Settings settings,
+                          boolean allowDisabledForReconciliation) {
+        boolean configured = settings != null && (allowDisabledForReconciliation
+                ? settings.isReconciliationConfigured()
+                : settings.isUsable());
+        if (!configured) {
+            // 管理员可能恰好在一笔在途操作期间修改配置；保留 PENDING 等待恢复，不能终态退款/失败。
+            throw new NewApiRemoteException(503, "New API integration is not configured", true);
         }
         try {
             byte[] body = MAPPER.writeValueAsBytes(request);
             String timestamp = Long.toString(Instant.now().getEpochSecond());
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
-            headers.set("X-External-App", config.getAppId().trim());
+            headers.set("X-External-App", settings.appId());
             headers.set("X-External-Timestamp", timestamp);
             headers.set("X-External-Signature", signature(
-                    config.getAppId().trim(), config.getAppSecret().trim(), timestamp,
+                    settings.appId(), settings.appSecret(), timestamp,
                     HttpMethod.POST.name(), path, body));
 
             ResponseEntity<byte[]> response = restTemplate.exchange(
-                    config.normalizedBaseUrl() + path,
+                    settings.normalizedBaseUrl() + path,
                     HttpMethod.POST,
                     new HttpEntity<>(body, headers),
                     byte[].class

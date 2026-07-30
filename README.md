@@ -136,7 +136,7 @@
 <tr><td rowspan="3"><b>AI</b></td><td>langgraph4j</td><td>1.8.20（core + spring-ai + agentexecutor + postgres-saver）</td></tr>
 <tr><td>Spring AI</td><td>2.0.0（OpenAI Compatible + Responses API，思考档位可配，配置在 DB）</td></tr>
 <tr><td>MCP Server</td><td>Spring AI MCP Server WebMVC / SSE 2.0.0</td></tr>
-<tr><td rowspan="3"><b>数据</b></td><td>PostgreSQL</td><td>共享主库，建表见 <code>sql/init.sql</code>（29 张）+ <code>sql/bstock.sql</code></td></tr>
+<tr><td rowspan="3"><b>数据</b></td><td>PostgreSQL</td><td>共享主库，建表见 <code>sql/init.sql</code>（31 张）+ <code>sql/bstock.sql</code></td></tr>
 <tr><td>Redis + Caffeine</td><td>行情总线、分布式锁、ZSet 索引 + 本地热缓存</td></tr>
 <tr><td>MyBatis-Plus</td><td>3.5.17（<code>spring-boot4-starter</code>）</td></tr>
 <tr><td><b>认证</b></td><td>Sa-Token</td><td>1.45.0（LinuxDo OAuth + 账号密码 / 邀请码注册，开关控制）</td></tr>
@@ -304,7 +304,7 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 ├── start-local.ps1 / .bat            # 本地一键启动三服务（bat 为双击入口，转调 ps1）
 ├── docker-compose.yml                # 三进程编排（无私有值，配置全在 .env）
 ├── redis-compose.yml                 # Redis 主从 + 哨兵栈（可选）
-├── sql/                              # init.sql（29 表）+ bstock.sql（bStock 静态表 + 种子）
+├── sql/                              # init.sql（31 表）+ bstock.sql（bStock 静态表 + 种子）
 │
 ├── wiib-common/                      # 共享层：被 feed/quant/sim 共同依赖，三者互不直接依赖
 │   └── market/ broadcast/ cache/ aspect/ mapper/ entity/ dto/ enums/ util/ ...
@@ -358,6 +358,31 @@ whatifibought/                        # Maven 多 module 聚合 reactor
 
 ## 部署
 
+### Zeabur 推荐方案：只部署 3 个服务
+
+仓库根目录的生产 `Dockerfile` 已将前端、Nginx、`wiib-feed`、`wiib-sim`、`wiib-quant` 打进同一个镜像。Zeabur 项目中只需创建：
+
+1. PostgreSQL（模板服务，保留模板自带数据卷）
+2. Redis（模板服务，保留 `/data` 数据卷）
+3. WTFiB（从本仓库 Git 分支部署，不挂盘，只给它绑定公网域名）
+
+WTFiB 启动器会自动完成以下工作：
+
+- 自动兼容 Zeabur 暴露的 `POSTGRES_*` / `REDIS_*` 变量，无需手工改 Spring 数据源；
+- 等待 PostgreSQL、Redis 就绪；
+- 新库自动执行 `sql/init.sql`、`sql/bstock.sql`，已有库只登记基线；
+- 通过 `wiib_schema_migration` 和 PostgreSQL advisory lock 串行执行未应用的 `sql/migrations/*.sql`；
+- 依次启动 feed → sim → quant，全部健康后再开放 Nginx 前端入口；任一子进程退出，整个容器退出并由 Zeabur 重启。
+
+WTFiB 服务首次只建议手工添加：
+
+```env
+PASSWORD_LOGIN_ENABLED=true
+ADMIN_PASSWORD=<强密码>
+```
+
+New API 桥接和 LLM 都在 `/admin` 配置。服务健康检查使用 `/healthz`，建议给 WTFiB 分配至少 16 GiB 内存。完整步骤见 [`ZEABUR.md`](ZEABUR.md)。
+
 ### 环境要求
 
 | 依赖 | 最低版本 | 说明 |
@@ -375,7 +400,9 @@ git clone https://github.com/mamawai/wtfibought.git
 cd wtfibought
 ```
 
-### 2. 初始化数据库
+### 2. 初始化数据库（仅本地/传统部署）
+
+Zeabur 根 `Dockerfile` 会自动初始化和升级数据库，不执行本节命令。
 
 ```bash
 psql -U postgres -c "CREATE DATABASE wiib;"
@@ -397,12 +424,13 @@ psql -v ON_ERROR_STOP=1 -U postgres -d wiib -f sql/migrations/20260730_new_api_q
 cp .env.example .env.local    # 填 PG_USER / PG_PASSWORD（必填），其余可选
 ```
 
-启动时按 `本机环境变量 > .env.local > yml 默认值` 解析；线上 Docker 部署同一文件命名为 `.env`（见第 6 节）。
+启动时按 `本机环境变量 > .env.local > yml 默认值` 解析；传统 Docker Compose 部署同一文件命名为 `.env`。Zeabur 单服务部署直接使用平台变量，不需要上传 env 文件。
 
 要点：
 
 - **共享库 / 总线**：三进程指向同一 PostgreSQL `wiib` + 同一 Redis，读同一份 `.env.local`；`INTERNAL_API_TOKEN` 天然一致（进程间 `/internal/**` 鉴权），不填走统一默认值。
 - **New API SSO / 额度桥接**：两边变量、上线顺序、账号绑定、提现规则与回滚步骤见 [`NEW_API_QUOTA_ECONOMY.md`](NEW_API_QUOTA_ECONOMY.md)。
+- **WTFiB 侧桥接设置**：管理员进入 `/admin` 后可直接配置主站地址、App ID/Secret、换算比例、提现限制和累进税档，保存后立即生效。`NEW_API_*` 环境变量仍具有最高优先级；存在变量时对应字段会在页面中标为只读。
 - **LLM 配置不在 yml**：唯一来源是 DB（`ai_runtime_config` + `ai_model_assignment`）。启动后用管理员账号进 Admin 页填 LLM（API Key + Base URL + 模型名，Base URL 不含 `/v1`）并给各功能位分配，即时生效、无需重启。
 - **quant 必须关掉 Spring AI 的 OpenAI 自动装配**（6 类全关，否则缺 api-key 拒绝启动）：
 
@@ -459,7 +487,7 @@ java -jar wiib-quant/target/wiib-quant-0.0.1-SNAPSHOT.jar  # :8082 量化研判 
 java -jar wiib-sim/target/wiib-sim-0.0.1-SNAPSHOT.jar      # :8080 模拟交易（对外，前端连它）
 ```
 
-Docker Compose（三进程全编排；配置放服务器上的 `.env`，与 `.env.example` 同款变量）：
+传统 Docker Compose（三进程全编排；配置放服务器上的 `.env`，与 `.env.example` 同款变量）：
 
 ```bash
 docker network create wiib-network

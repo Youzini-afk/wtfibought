@@ -68,4 +68,23 @@ COMMENT ON COLUMN "user".protected_principal IS '当前经济周期受保护本�
 COMMENT ON COLUMN user_asset_snapshot.capital_base IS '快照时的收益基准：初始资金加当前周期受保护本金';
 COMMENT ON TABLE external_quota_transfer IS 'New API 主站额度与 WTFiB 游戏金额的幂等转账状态机';
 
+-- 管理后台可热更新的 WTFiB 侧桥接配置。固定单行；没有记录时仍沿用部署默认值。
+CREATE TABLE IF NOT EXISTS new_api_runtime_config (
+    id                          SMALLINT PRIMARY KEY CHECK (id = 1),
+    enabled                     BOOLEAN NOT NULL DEFAULT FALSE,
+    base_url                    VARCHAR(512) NOT NULL DEFAULT 'https://youzi.today',
+    app_id                      VARCHAR(64) NOT NULL DEFAULT 'wtfib',
+    app_secret                  VARCHAR(512) NOT NULL DEFAULT '',
+    quota_per_unit              NUMERIC(20,0) NOT NULL DEFAULT 500000,
+    withdrawal_enabled          BOOLEAN NOT NULL DEFAULT FALSE,
+    withdrawal_profit_rate      NUMERIC(10,8) NOT NULL DEFAULT 0.50,
+    withdrawal_daily_limit      NUMERIC(18,2) NOT NULL DEFAULT 100.00,
+    withdrawal_min_amount       NUMERIC(18,2) NOT NULL DEFAULT 1.00,
+    withdrawal_zone_id          VARCHAR(64) NOT NULL DEFAULT 'Asia/Shanghai',
+    withdrawal_tax_brackets     VARCHAR(1024) NOT NULL DEFAULT '20:0.05,50:0.10,100:0.15,*:0.20',
+    updated_at                  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE new_api_runtime_config IS 'WTFiB 管理端维护的 New API SSO、额度换算与盈利提现运行时配置（固定 id=1）';
+COMMENT ON COLUMN new_api_runtime_config.app_secret IS '服务间 HMAC 共享密钥；管理 API 只返回是否已配置';
+
 COMMIT;

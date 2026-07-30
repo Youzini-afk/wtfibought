@@ -10,6 +10,7 @@ import { Input } from '../components/ui/input';
 import { useToast } from '../components/ui/use-toast';
 import { FeedStreamHealthCard } from '../components/FeedStreamHealthCard';
 import { MonitorCarousel } from '../components/MonitorCarousel';
+import { NewApiSettingsCard } from '../components/NewApiSettingsCard';
 import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-react';
 
 const FUNCTION_LABELS: Record<string, string> = {
@@ -83,12 +84,15 @@ export function Admin() {
   }, []);
 
   useEffect(() => {
-    if (user?.id === 1) {
-      fetchInterestRate();
-      fetchAiKeys();
-      fetchAssignments();
-      fetchInviteCodes();
-    }
+    const timer = window.setTimeout(() => {
+      if (user?.id === 1) {
+        void fetchInterestRate();
+        void fetchAiKeys();
+        void fetchAssignments();
+        void fetchInviteCodes();
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [user, fetchInterestRate, fetchAiKeys, fetchAssignments, fetchInviteCodes]);
 
   // 外层守卫保证 token 存在，user 为 null 只能是 fetchUser 还没回来 —— 等它。
@@ -330,6 +334,9 @@ export function Admin() {
               })}
             </CardContent>
           </Card>
+
+          {/* WTFiB 侧 New API SSO、额度换算与提现规则 */}
+          <NewApiSettingsCard />
 
           {/* ========== 配置 LLM（一条=key+baseUrl+model） ========== */}
           <Card>

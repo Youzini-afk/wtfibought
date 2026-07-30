@@ -1,0 +1,17 @@
+.git
+.github
+.idea
+.vscode
+.claude
+.superpowers
+**/target
+**/node_modules
+wiib-web/dist
+dumps
+.env
+.env.*
+!.env.example
+*.log
+*.hprof
+docs
+export-md

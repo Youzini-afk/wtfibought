@@ -154,7 +154,7 @@ public class NewApiIntegrationService {
 
     @Scheduled(fixedDelayString = "${new-api.reconcile-interval-ms:30000}")
     public void reconcilePendingTransfers() {
-        if (!isEnabled()) return;
+        if (!config.isReconciliationConfigured()) return;
         LocalDateTime now = LocalDateTime.now();
         List<ExternalQuotaTransfer> pending = transferMapper.selectList(
                 new LambdaQueryWrapper<ExternalQuotaTransfer>()
@@ -169,15 +169,23 @@ public class NewApiIntegrationService {
     }
 
     void reconcileOne(ExternalQuotaTransfer transfer) {
+        NewApiIntegrationConfig.Settings settings = config.snapshot();
+        if (settings == null || !settings.isReconciliationConfigured()) {
+            scheduleRetry(transfer, "主站额度桥接配置暂不完整");
+            return;
+        }
         try {
             boolean withdrawal = DIRECTION_WITHDRAWAL.equals(transfer.getDirection());
             if (!withdrawal && !DIRECTION_DEPOSIT.equals(transfer.getDirection())) {
                 throw new IllegalStateException("unknown external quota transfer direction");
             }
-            Optional<NewApiQuotaResult> remote = client.status(transfer.getOperationId());
+            Optional<NewApiQuotaResult> remote = client.statusForReconciliation(
+                    transfer.getOperationId(), settings);
             NewApiQuotaResult result = remote.orElseGet(() -> withdrawal
-                    ? client.credit(transfer.getOperationId(), transfer.getNewApiUserId(), transfer.getQuotaAmount())
-                    : client.debit(transfer.getOperationId(), transfer.getNewApiUserId(), transfer.getQuotaAmount()));
+                    ? client.creditForReconciliation(
+                            transfer.getOperationId(), transfer.getNewApiUserId(), transfer.getQuotaAmount(), settings)
+                    : client.debitForReconciliation(
+                            transfer.getOperationId(), transfer.getNewApiUserId(), transfer.getQuotaAmount(), settings));
             validateRemoteResult(transfer, result, withdrawal ? "credit" : "debit");
             if (result.completed()) {
                 if (withdrawal) {

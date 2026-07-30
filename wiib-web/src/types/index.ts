@@ -317,6 +317,41 @@ export interface ExternalWalletInfo {
   protectedPrincipal: number;
 }
 
+/** 管理端看到的是有效配置；共享密钥只返回状态与来源，不返回原文。 */
+export interface NewApiAdminSettings {
+  enabled: boolean;
+  usable: boolean;
+  baseUrl: string;
+  appId: string;
+  appSecretConfigured: boolean;
+  appSecretSource: 'environment' | 'database' | 'deployment' | 'none';
+  quotaPerUnit: number;
+  withdrawalEnabled: boolean;
+  withdrawalProfitRate: number;
+  withdrawalDailyLimit: number;
+  withdrawalMinAmount: number;
+  withdrawalZoneId: string;
+  withdrawalTaxBrackets: string;
+  databaseConfigured: boolean;
+  /** 字段名 -> 实际覆盖它的环境变量名。 */
+  environmentManagedFields: Record<string, string>;
+}
+
+/** 缺失字段保持不变；appSecret 为空也表示保留旧密钥。 */
+export interface UpdateNewApiAdminSettings {
+  enabled?: boolean;
+  baseUrl?: string;
+  appId?: string;
+  appSecret?: string;
+  quotaPerUnit?: number;
+  withdrawalEnabled?: boolean;
+  withdrawalProfitRate?: number;
+  withdrawalDailyLimit?: number;
+  withdrawalMinAmount?: number;
+  withdrawalZoneId?: string;
+  withdrawalTaxBrackets?: string;
+}
+
 export type ExternalQuotaTransferDirection = 'DEPOSIT' | 'WITHDRAWAL';
 export type ExternalQuotaTransferStatus = 'PENDING' | 'APPLYING' | 'COMPLETED' | 'FAILED';
 
