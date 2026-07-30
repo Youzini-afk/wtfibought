@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
 import { formatCoinPrice, type CoinCfg } from '../lib/coinConfig';
-import { cryptoApi, futuresApi, bstockApi } from '../api';
+import { cryptoApi, futuresApi, bstockApi, referenceMarketApi } from '../api';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { Sparkline } from './fx/Sparkline';
 import { BStockIcon } from './BStockIcon';
@@ -68,12 +68,14 @@ export function CoinMarketRow({ cfg }: { cfg: CoinCfg }) {
 
   useEffect(() => {
     let cancelled = false;
-    const loadKlines = cfg.futuresOnly ? futuresApi.klines : cryptoApi.klines;
+    const loadKlines = cfg.category === 'commodity' || cfg.category === 'tradfi'
+      ? referenceMarketApi.klines
+      : cfg.futuresOnly ? futuresApi.klines : cryptoApi.klines;
     loadKlines(cfg.symbol, '1h', 25)
       .then(rows => { if (!cancelled && rows?.length) setCloses(rows.map(r => Number(r[4]))); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [cfg.symbol, cfg.futuresOnly]);
+  }, [cfg.symbol, cfg.futuresOnly, cfg.category]);
 
   const livePrice = cfg.futuresOnly ? (tick?.fp ?? tick?.price) : tick?.price;
   const spark = livePrice != null && closes.length ? [...closes.slice(0, -1), livePrice] : closes;

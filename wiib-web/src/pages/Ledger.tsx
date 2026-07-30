@@ -9,6 +9,7 @@ import { EmptyState } from '../components/EmptyState';
 import { cn, fmtNum, fmtTime } from '../lib/utils';
 import { Receipt, RefreshCw, Loader2, TriangleAlert } from 'lucide-react';
 import type { LedgerEntry, LedgerBizTypeOption, LedgerWallet } from '../types';
+import { tradeSymbolName } from '../lib/orderSide';
 
 /** 后端默认 30、封顶 100。取默认值即可，一屏够看还省流量 */
 const PAGE_SIZE = 30;
@@ -81,7 +82,7 @@ function EntryRow({ entry }: { entry: LedgerEntry }) {
           </span>
           {entry.symbol && (
             <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary font-medium shrink-0">
-              {entry.symbol.replace('USDT', '')}
+              {tradeSymbolName(entry.symbol)}
             </span>
           )}
         </div>

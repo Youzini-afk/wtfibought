@@ -136,6 +136,10 @@ binance:
     - SPCXUSDT
   fallback-poll-interval: 5000
 
+# 大宗商品/TradFi 历史图参考源。交易与实时价仍走内部 Binance symbol；此源只补历史 OHLCV。
+reference-market:
+  yahoo-base-url: ${REFERENCE_MARKET_YAHOO_BASE_URL:https://query1.finance.yahoo.com}
+
 # WebSocket配置
 websocket:
   # 最大连接数

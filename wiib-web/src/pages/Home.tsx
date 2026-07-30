@@ -23,7 +23,7 @@ import type { BuffStatus, AssetSnapshot, QuantSnapshotView } from '../types';
 import { useUserStore } from '../stores/userStore';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { cn, fmtMoney } from '../lib/utils';
-import { orderSideView } from '../lib/orderSide';
+import { orderSideView, tradeSymbolName } from '../lib/orderSide';
 import type { PageVisibilityKey } from '../types';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
@@ -87,8 +87,8 @@ export function Home() {
   useEffect(() => {
     Promise.all([cryptoOrderApi.live().catch(() => []), futuresApi.live().catch(() => [])])
       .then(([co, fo]) => {
-        const ci: TradeItem[] = co.map(o => ({ id: `c-${o.orderId}`, orderSide: o.orderSide, sideTone: o.orderSide === 'BUY' ? 'buy' as const : 'sell' as const, name: o.symbol.replace('USDT', ''), quantity: o.quantity, unit: o.symbol.replace('USDT', ''), filledAmount: o.filledAmount, createdAt: o.createdAt }));
-        const fi: TradeItem[] = fo.map(o => { const s = orderSideView(o.orderSide); const b = o.symbol.replace('USDT', ''); return { id: `f-${o.orderId}`, orderSide: o.orderSide, sideLabel: s.label, sideTone: s.tone, name: `${b} 合约`, quantity: o.quantity, unit: b, filledAmount: o.filledAmount, createdAt: o.createdAt, isAi: o.isAiTrader === true }; });
+        const ci: TradeItem[] = co.map(o => { const name = tradeSymbolName(o.symbol); return { id: `c-${o.orderId}`, orderSide: o.orderSide, sideTone: o.orderSide === 'BUY' ? 'buy' as const : 'sell' as const, name, quantity: o.quantity, unit: name, filledAmount: o.filledAmount, createdAt: o.createdAt }; });
+        const fi: TradeItem[] = fo.map(o => { const s = orderSideView(o.orderSide); const name = tradeSymbolName(o.symbol); return { id: `f-${o.orderId}`, orderSide: o.orderSide, sideLabel: s.label, sideTone: s.tone, name: `${name} 合约`, quantity: o.quantity, unit: name, filledAmount: o.filledAmount, createdAt: o.createdAt, isAi: o.isAiTrader === true }; });
         setLatestTrades([...ci, ...fi].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()).slice(0, 20));
       }).finally(() => setTradesLoadedNonce(refreshNonce));
   }, [refreshNonce]);
@@ -194,7 +194,7 @@ export function Home() {
                       onClick={() => navigate('/ai')}
                       className="microlabel font-semibold hover:text-primary transition-colors cursor-pointer"
                     >
-                      AI 波动画像 · BTC →
+                      AI 波动画像 · {tradeSymbolName('BTCUSDT')} →
                     </button>
                     {volLegs ? (
                       ['H6', 'H24'].map(h => (
@@ -231,7 +231,7 @@ export function Home() {
                   模拟交易,<br />
                   <span className="text-primary">随时随地!</span>
                 </h2>
-                <p className="text-sm text-muted-foreground">体验"如果当初买了会怎样"。股票、BTC、合约全覆盖。</p>
+                <p className="text-sm text-muted-foreground">体验平行行情里的另一种可能。影子股票、影子币与合约全覆盖。</p>
                 <div className="flex flex-wrap gap-2 pt-1">
                   {pageVisibility.market && (
                     <Button size="sm" onClick={() => navigate('/bstock')}>
@@ -245,7 +245,7 @@ export function Home() {
                 {[
                   { num: '50+', label: '影子股票' },
                   { num: '6', label: '币种' },
-                  { num: '24/7', label: 'BTC行情' },
+                  { num: '24/7', label: '影子币行情' },
                 ].map(s => (
                   <div key={s.label} className="text-center">
                     <div className="text-2xl font-extrabold num">{s.num}</div>

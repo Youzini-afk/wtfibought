@@ -8,10 +8,10 @@ import { ChatPanel } from './ChatPanel';
 import { VolTimeline } from './VolTimeline';
 import { AnalysisCard } from './AnalysisCard';
 import type { QuantDeepAnalysisView, QuantSnapshotSeriesPoint, QuantSnapshotView } from '../../types';
+import { tradeSymbolName } from '../../lib/orderSide';
 
 // 只展示 quant 实际监控的标的（WATCH_SYMBOLS=BTC/ETH）
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT'] as const;
-const SYM_LABEL: Record<string, string> = { BTCUSDT: 'BTC', ETHUSDT: 'ETH' };
 const WINDOWS = [{ label: '24h', hours: 24 }, { label: '72h', hours: 72 }, { label: '7d', hours: 168 }] as const;
 const FRAGILITY_CN: Record<string, string> = { LOW: '平稳', ELEVATED: '偏脆', HIGH: '脆弱', EXTREME: '极脆' };
 const FRAGILITY_TONE: Record<string, string> = {
@@ -99,7 +99,7 @@ export function Workbench() {
                     symbol === s ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground',
                   )}
                 >
-                  {SYM_LABEL[s]}
+                  {tradeSymbolName(s)}
                 </button>
               ))}
               <span className="w-1" />

@@ -6,6 +6,7 @@ import { Skeleton } from './ui/skeleton';
 import { fmtDateTime, fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
 import type { ForceOrder } from '../types';
+import { tradeSymbolName } from '../lib/orderSide';
 
 const POLL_MS = 30_000;
 
@@ -44,7 +45,7 @@ export function ForceOrdersCard() {
             <span className={`font-medium px-1.5 py-px rounded shrink-0 ${isLongLiq ? 'bg-loss/10 text-loss' : 'bg-gain/10 text-gain'}`}>
               {isLongLiq ? '多爆' : '空爆'}
             </span>
-            <span className="font-medium text-foreground shrink-0">{latest.symbol.replace('USDT', '')}</span>
+            <span className="font-medium text-foreground shrink-0">{tradeSymbolName(latest.symbol)}</span>
             <span className="font-mono tabular-nums truncate">${formatCoinPrice(latest.symbol, latest.price)}</span>
             <span className={`font-mono font-bold tabular-nums shrink-0 ${isLongLiq ? 'text-loss' : 'text-gain'}`}>
               ${fmtNum(latest.amount, 0)}
@@ -52,7 +53,7 @@ export function ForceOrdersCard() {
             <span className="shrink-0 hidden sm:inline">{fmtDateTime(latest.tradeTime)}</span>
           </div>
         ) : (
-          <div className="text-xs text-muted-foreground mt-1.5">Binance 全网强平实时记录</div>
+          <div className="text-xs text-muted-foreground mt-1.5">平行合约市场强平实时记录</div>
         )}
       </div>
       <span className="flex items-center gap-0.5 text-xs font-bold text-muted-foreground shrink-0">

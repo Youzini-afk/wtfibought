@@ -327,6 +327,11 @@ export const cryptoApi = {
   price: (symbol = 'BTCUSDT') => api.get<unknown, CryptoPrice>('/crypto/price', { params: { symbol } }),
 };
 
+/** 大宗商品/TradFi 影子合约历史图：服务端从参考市场源归一化，内部交易 symbol 不变。 */
+export const referenceMarketApi = {
+  klines: rawKlines('/api/reference-market/klines'),
+};
+
 // ========== 加密货币交易接口 ==========
 export const cryptoOrderApi = {
   buy: (data: CryptoOrderRequest) => api.post<unknown, CryptoOrder>('/crypto/order/buy', data),

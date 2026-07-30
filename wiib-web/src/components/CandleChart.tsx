@@ -8,6 +8,7 @@ import { futuresApi } from '../api';
 import { useKlineStream } from '../hooks/useKlineStream';
 import { useIsDark } from '../hooks/useIsDark';
 import { getCoinPriceDecimals } from '../lib/coinConfig';
+import { tradeSymbolName } from '../lib/orderSide';
 import { bollSeries, emaSeries, macdSeries, maSeries, rsiSeries } from '../lib/indicators';
 
 /** 一根 K：series 只用 OHLC，量/额留给气泡和成交量柱。 */
@@ -350,6 +351,8 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const ovRef = useRef<OverlaySeries | null>(null);
   // 默认全关走裸K：三组九条线画满会糊成一团，要看哪组点图表上方工具条的按钮开
   const [overlays, setOverlays] = useState<Record<OverlayKey, boolean>>({ ma: false, ema: false, boll: false });
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
+  const [retryNonce, setRetryNonce] = useState(0);
   const overlaysRef = useRef(overlays);
   const maLegendRef = useRef<HTMLSpanElement>(null);
   const emaLegendRef = useRef<HTMLSpanElement>(null);
@@ -365,7 +368,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
   const hoverRef = useRef<{ time: number | null; x: number; y: number }>({ time: null, x: 0, y: 0 });
   const isDarkRef = useRef(isDark);
   const decimals = getCoinPriceDecimals(symbol);
-  const base = symbol.replace('USDT', '');
+  const base = tradeSymbolName(symbol);
 
   const live = useKlineStream(symbol, interval);
 
@@ -396,6 +399,9 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     if (!wrap || !host) return;
     // 异步回调回来时图可能已被 cleanup 销毁（切了 symbol/interval），对死图 setData 会抛
     let disposed = false;
+    const loadingStateTimer = window.setTimeout(() => {
+      if (!disposed) setLoadState('loading');
+    }, 0);
     const dark = isDarkRef.current;
     const grid = dark ? '#181b21' : '#f1f1ee', border = dark ? '#23262e' : '#e4e4df', text = dark ? '#878b96' : '#71737b';
 
@@ -541,7 +547,7 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
           chart.timeScale().setVisibleLogicalRange({ from: before.from + older.length, to: before.to + older.length });
         }
         hideHint();
-      }).catch(() => { if (!disposed) hideHint(); })
+      }).catch(() => { if (!disposed) showHint('历史载入失败，请稍后重试'); })
         // disposed 时新一轮 effect 已经重置过锁了，这里别再动，否则会把新请求的锁误清
         .finally(() => { if (!disposed) loadingRef.current = false; });
     };
@@ -568,7 +574,12 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
       }
       exhaustedRef.current = raw.length < limit;   // 首屏就没拉满 = 币安只有这么多，别再往回问
       readyRef.current = true;
-    }).catch(() => { /* 历史失败仍可靠实时累积 */ });
+      window.clearTimeout(loadingStateTimer);
+      setLoadState(bars.length ? 'ready' : 'empty');
+    }).catch(() => {
+      window.clearTimeout(loadingStateTimer);
+      if (!disposed) setLoadState('error');
+    });
 
     const ro = new ResizeObserver(() => {
       chart.applyOptions({ width: host.clientWidth, height: host.clientHeight });
@@ -583,14 +594,14 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
     return () => {
       // hint 是 JSX 节点、不随图表销毁重建：切 symbol/interval 时若正挂着"载入历史…"，
       // 在飞的请求会因 disposed 直接 return 而走不到 hideHint，不在这里收就永远留在新图上
-      disposed = true; hideHint();
+      disposed = true; window.clearTimeout(loadingStateTimer); hideHint();
       ro.disconnect(); chart.remove();
       chartRef.current = null; candleRef.current = null; volRef.current = null;
       indRef.current = null; ovRef.current = null;
       readyRef.current = false; barsRef.current = []; idxRef.current = new Map();
       loadingRef.current = false; exhaustedRef.current = false;
     };
-  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, legendRefs]);
+  }, [symbol, interval, limit, visibleBars, decimals, klinesFn, indicators, legendRefs, retryNonce]);
 
   // 指标开关：只切 visible，不重建 series；切完立刻刷读数（展开的组要马上有值）
   useEffect(() => {
@@ -709,6 +720,34 @@ export function CandleChart({ symbol, interval, limit = 300, visibleBars = 110, 
 
       <div ref={wrapRef} className="relative w-full flex-1 min-h-0">
         <div ref={chartDivRef} className="absolute inset-0" />
+        {loadState !== 'ready' && (
+          <div className="absolute inset-0 z-[6] flex items-center justify-center bg-card/35 backdrop-blur-[1px]">
+            <div className="flex flex-col items-center gap-2 rounded-lg border border-border bg-card/95 px-5 py-4 text-center shadow-lg">
+              {loadState === 'loading' && (
+                <>
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
+                  <span className="text-xs font-semibold text-muted-foreground">行情载入中…</span>
+                </>
+              )}
+              {loadState === 'empty' && (
+                <span className="text-xs font-semibold text-muted-foreground">该周期暂无行情数据</span>
+              )}
+              {loadState === 'error' && (
+                <>
+                  <span className="text-xs font-semibold text-foreground">行情加载失败</span>
+                  <span className="text-[10px] text-muted-foreground">上游暂不可用，请稍后重试</span>
+                  <button
+                    type="button"
+                    onClick={() => setRetryNonce(value => value + 1)}
+                    className="mt-1 rounded-md border border-border px-3 py-1.5 text-[11px] font-bold text-primary hover:bg-surface-hover"
+                  >
+                    重新加载
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
         {/* 翻历史提示（载入中 / 到底）。主图 pane 左上角是空的：叠加指标的读数条在图表外的工具条上 */}
         <div ref={hintRef} style={{
           position: 'absolute', left: 10, top: 6, display: 'none', pointerEvents: 'none', zIndex: 4,

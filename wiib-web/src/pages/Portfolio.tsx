@@ -760,7 +760,7 @@ export function Portfolio() {
                         <Target className="w-4 h-4 text-amber-400" />
                       </div>
                       <div>
-                        <span className="text-sm font-semibold tracking-tight">BTC涨跌预测</span>
+                        <span className="text-sm font-semibold tracking-tight">{tradeSymbolName('BTCUSDT')}涨跌预测</span>
                         <span className="text-[11px] text-muted-foreground ml-1.5">{predictionPnl.totalBets}笔</span>
                       </div>
                     </div>

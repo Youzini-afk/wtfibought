@@ -13,6 +13,7 @@ import { EquityChart } from '../components/EquityChart';
 import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import type { FuturesPosition, StrategyAccountView, StrategyClosedPosition, StrategySignalState } from '../types';
 import type { TnEquityPoint } from '../types/testnet';
+import { tradeSymbolName } from '../lib/orderSide';
 
 const ADMIN_USER_ID = 1;
 const REFRESH_MS = 60_000;
@@ -51,7 +52,7 @@ function PositionCard({ pos, canClose, closing, onClose }: {
         {isLong
           ? <ArrowUpRight className="w-3.5 h-3.5 text-gain shrink-0" />
           : <ArrowDownRight className="w-3.5 h-3.5 text-loss shrink-0" />}
-        <span className="text-xs font-black">{pos.symbol}</span>
+        <span className="text-xs font-black">{tradeSymbolName(pos.symbol)}</span>
         <span className={cn('text-[10px] font-bold px-1.5 py-0.5 rounded', isLong ? 'bg-gain/15 text-gain' : 'bg-loss/15 text-loss')}>
           {isLong ? '多' : '空'} {pos.leverage}x
         </span>
@@ -93,7 +94,7 @@ function SignalStateRow({ sig }: { sig: StrategySignalState }) {
   return (
     <div className="rounded-md border border-border bg-card p-2.5 space-y-1.5">
       <div className="flex items-start gap-2">
-        <span className="text-xs font-black shrink-0">{sig.symbol.replace('USDT', '')}</span>
+        <span className="text-xs font-black shrink-0">{tradeSymbolName(sig.symbol)}</span>
         <span className="ml-auto text-right text-[10px] font-bold text-primary/90 leading-tight">{sig.state}</span>
       </div>
       <div className="flex flex-wrap gap-x-3 gap-y-1">
@@ -129,7 +130,7 @@ function TradeRow({ t }: { t: StrategyClosedPosition }) {
       <span className={cn('w-1 self-stretch rounded-full shrink-0', isLong ? 'bg-gain' : 'bg-loss')} />
       <div className="min-w-0 shrink-0">
         <div className="font-bold leading-tight">
-          {t.symbol.replace('USDT', '')}
+          {tradeSymbolName(t.symbol)}
           <span className={cn('ml-1 text-[9px] font-black', isLong ? 'text-gain' : 'text-loss')}>{isLong ? '多' : '空'}</span>
           {t.status === 'LIQUIDATED' && <span className="ml-1 text-[9px] font-bold px-1 py-px rounded bg-loss/15 text-loss">强平</span>}
         </div>

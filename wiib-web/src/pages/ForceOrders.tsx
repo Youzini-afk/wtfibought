@@ -8,6 +8,7 @@ import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import { AlertTriangle, ChevronLeft, ChevronRight, Flame, RefreshCw } from 'lucide-react';
 import type { ForceOrder, PageResult } from '../types';
 import { formatCoinPrice } from '../lib/coinConfig';
+import { tradeSymbolName } from '../lib/orderSide';
 
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'DOGEUSDT'] as const;
 const PAGE_SIZE = 20;
@@ -70,8 +71,8 @@ export function ForceOrders() {
                 爆仓记录
               </CardTitle>
               <div className="text-xs sm:text-sm leading-5 sm:leading-6 text-muted-foreground">
-                <span className="hidden sm:inline">Binance 合约市场最近爆仓记录。SELL 代表多头被强平，BUY 代表空头被强平。大额连续爆仓通常意味着短时波动和情绪放大，但不是独立交易信号。</span>
-                <span className="sm:hidden">Binance 合约爆仓记录。SELL=多头强平，BUY=空头强平。</span>
+                <span className="hidden sm:inline">平行合约市场最近爆仓记录。SELL 代表多头被强平，BUY 代表空头被强平。大额连续爆仓通常意味着短时波动和情绪放大，但不是独立交易信号。</span>
+                <span className="sm:hidden">平行合约爆仓记录。SELL=多头强平，BUY=空头强平。</span>
               </div>
             </div>
             <Button variant="outline" size="sm" className="h-9 w-fit gap-2 shrink-0" onClick={() => setRefreshNonce(n => n + 1)}>
@@ -95,7 +96,7 @@ export function ForceOrders() {
                     : 'bg-card border border-border text-foreground hover:bg-surface-hover',
                 )}
               >
-                {item.replace('USDT', '')}
+                {tradeSymbolName(item)}
               </button>
             ))}
           </div>
@@ -130,7 +131,7 @@ export function ForceOrders() {
         <CardHeader className="pb-3">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div className="space-y-1">
-              <CardTitle className="text-base font-black">{symbol} 强平列表</CardTitle>
+              <CardTitle className="text-base font-black">{tradeSymbolName(symbol)}强平列表</CardTitle>
               <div className="text-xs text-muted-foreground">
                 按成交时间倒序展示，每页 {PAGE_SIZE} 条，当前共 {result.total} 条记录。
               </div>
@@ -194,7 +195,7 @@ export function ForceOrders() {
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-1">
                         <div className="text-xs text-muted-foreground font-mono">{fmtDateTime(order.tradeTime, true)}</div>
-                        <div className="text-sm font-black">{symbol.replace('USDT', '')}</div>
+                        <div className="text-sm font-black">{tradeSymbolName(symbol)}</div>
                       </div>
                       <Badge
                         className={cn(

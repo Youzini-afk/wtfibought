@@ -13,6 +13,7 @@ import type {
   BacktestEvent, BacktestResultPayload, BacktestStrategyMeta, BacktestTaskStatus, BacktestTrade,
 } from '../types';
 import type { TnEquityPoint } from '../types/testnet';
+import { tradeSymbolName } from '../lib/orderSide';
 
 const STORE_KEY = 'wiib.backtest.task';
 const POLL_MS = 800;
@@ -439,7 +440,7 @@ export function Backtest() {
                   onClick={() => setSymbol(sym)}
                   className={cn('px-3 h-9 text-xs font-bold transition-colors disabled:opacity-60',
                     symbol === sym ? 'bg-primary text-primary-foreground' : 'bg-card-2 text-muted-foreground hover:bg-surface-hover')}>
-                  {sym.replace('USDT', '')}
+                  {tradeSymbolName(sym)}
                 </button>
               ))}
             </div>
@@ -511,7 +512,7 @@ export function Backtest() {
           <div className="space-y-5 min-w-0">
             <div className="rounded-lg pt-card p-3 md:p-4 space-y-3">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="microlabel uppercase">{symbol} · 5m{status ? ` · ${metaOf(status.strategyId).name}` : ''}</span>
+                <span className="microlabel uppercase">{tradeSymbolName(symbol)} · 5m{status ? ` · ${metaOf(status.strategyId).name}` : ''}</span>
                 {cursorTime != null && (
                   <span className="text-[10px] num text-primary font-bold">回放 @ {fmtDateTime(cursorTime)}</span>
                 )}

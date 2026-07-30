@@ -39,7 +39,7 @@ export function Intro() {
           <section>
             <h3 className="font-bold mb-1">现货 · 影子股票</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              <li>真实 Binance 现货行情，NVDA / TSLA / QQQ 等，24/7 全天候</li>
+              <li>现实市场波动映射为影子股票，24/7 全天候模拟交易</li>
               <li>市价 / 限价单，市价买入可加 1-10 倍杠杆（借款日息 0.05%）</li>
               <li>手续费 0.1%，卖出即时到账，无 T+1</li>
             </ul>
@@ -48,7 +48,7 @@ export function Intro() {
           <section>
             <h3 className="font-bold mb-1">现货 · 加密货币</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              <li>BTC 等主流币，Binance WebSocket 实时行情</li>
+              <li>比特饼等影子币，实时行情驱动</li>
               <li>限价单 50%-150% 市价内有效 24 小时</li>
               <li>杠杆 1-10 倍日息 0.05%，手续费 0.1%</li>
             </ul>
@@ -58,7 +58,7 @@ export function Intro() {
             <h3 className="font-bold mb-1">USDT 永续合约</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
               <li><strong>开多 / 开空</strong>：市价、限价单，全仓保证金——整个账户净值为仓位兜底</li>
-              <li><strong>杠杆 1-150 倍</strong>：按仓位价值分档，对齐 Binance 档位表</li>
+              <li><strong>杠杆 1-150 倍</strong>：按仓位价值使用平台合约档位</li>
               <li><strong>止盈止损</strong>：开仓即可预设、支持分批，实时预估强平价</li>
               <li><strong>资金费率</strong>：真实费率，每 8 小时多空互付</li>
               <li><strong>手续费</strong>：挂单 maker 0.02%，市价 taker 0.04%</li>
@@ -86,7 +86,7 @@ export function Intro() {
             <li><strong>21点</strong>：经典 Blackjack，支持分牌、加倍、保险</li>
             <li><strong>视频扑克</strong>：发 5 张选保留换一次，按牌型赔付</li>
             <li><strong>翻翻爆金币</strong>：翻开安全格奖金递增，踩雷归零，随时收手</li>
-            <li><strong>BTC 涨跌预测</strong>：每 5 分钟一轮，Polymarket 实时概率定价，可随时卖出</li>
+            <li><strong>比特饼涨跌预测</strong>：每 5 分钟一轮，外部概率市场定价，可随时卖出</li>
             <li><strong>每日福利</strong>：每天一抽，红包 / 股票 / 折扣券</li>
           </ul>
         </CardContent>

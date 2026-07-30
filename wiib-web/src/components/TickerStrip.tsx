@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
 import { cn } from '../lib/utils';
 import { COIN_MAP } from '../lib/coinConfig';
-import { cryptoApi, futuresApi, bstockApi } from '../api';
+import { cryptoApi, futuresApi, bstockApi, referenceMarketApi } from '../api';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import type { BStock } from '../types';
 
@@ -24,12 +24,14 @@ function useCoinQuote(symbol: string): Quote {
 
   useEffect(() => {
     let cancelled = false;
-    const load = cfg.futuresOnly ? futuresApi.klines : cryptoApi.klines;
+    const load = cfg.category === 'commodity' || cfg.category === 'tradfi'
+      ? referenceMarketApi.klines
+      : cfg.futuresOnly ? futuresApi.klines : cryptoApi.klines;
     load(symbol, '1h', 25)
       .then(rows => { if (!cancelled && rows?.length) setBase(Number(rows[0][4])); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [symbol, cfg.futuresOnly]);
+  }, [symbol, cfg.futuresOnly, cfg.category]);
 
   const price = (cfg.futuresOnly ? (tick?.fp ?? tick?.price) : tick?.price) ?? null;
   const pct = price != null && base ? ((price - base) / base) * 100 : null;

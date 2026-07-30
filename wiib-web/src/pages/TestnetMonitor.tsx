@@ -14,9 +14,9 @@ import {
 import type {
   TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnPosition, TnOpenOrder,
 } from '../types/testnet';
+import { tradeSymbolName } from '../lib/orderSide';
 
 const SYMBOLS = ['ALL', 'BTCUSDT', 'ETHUSDT'] as const;
-const SYM_LABEL: Record<string, string> = { ALL: '全部', BTCUSDT: 'BTC', ETHUSDT: 'ETH' };
 
 /* ========== 格式化（与 AiTrader 同口径） ========== */
 function fmt$(n?: number | null, compact = false) {
@@ -67,7 +67,7 @@ function PositionCard({ p }: { p: TnPosition }) {
         <div className="flex items-center gap-2.5">
           <div className={cn('w-9 h-9 rounded-lg flex items-center justify-center text-xs font-black',
             isLong ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss')}>
-            {p.symbol.replace('USDT', '')}
+            {tradeSymbolName(p.symbol)}
           </div>
           <div>
             <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded',
@@ -103,7 +103,7 @@ function OpenOrderRow({ o }: { o: TnOpenOrder }) {
   const buy = o.side === 'BUY';
   return (
     <div className="border border-border bg-card rounded-md px-3 py-2 flex items-center gap-2 text-xs">
-      <span className="font-bold">{o.symbol.replace('USDT', '')}</span>
+      <span className="font-bold">{tradeSymbolName(o.symbol)}</span>
       <span className={cn('text-[10px] font-black px-1.5 py-0.5 rounded',
         isEntry ? 'bg-primary/10 text-primary' : 'bg-warning/10 text-warning')}>
         {isEntry ? '进场' : o.type === 'STOP_MARKET' ? '止损' : '止盈'}
@@ -125,7 +125,7 @@ function TradeRow({ t }: { t: TnTrade }) {
     // flex-wrap：手机上时间+价格×数量+盈亏一行放不下时折行
     <div className="border border-border bg-card rounded-md px-3 py-2 flex flex-wrap items-center gap-2 text-xs">
       <span className="text-[10px] text-muted-foreground tabular-nums w-20">{fmtDateTime(t.time)}</span>
-      <span className="font-bold">{t.symbol.replace('USDT', '')}</span>
+      <span className="font-bold">{tradeSymbolName(t.symbol)}</span>
       <span className={cn('font-bold', buy ? 'text-gain' : 'text-loss')}>{t.side}</span>
       {t.maker
         ? <span className="text-[9px] font-black px-1 py-0.5 rounded bg-primary/10 text-primary">MAKER</span>
@@ -207,7 +207,7 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
 
   const submitCancelAll = () => run('cancel', async () => {
     await testnetApi.manualCancelAll(symbol);
-    return `已撤 ${symbol} 全部挂单`;
+    return `已撤 ${tradeSymbolName(symbol)} 全部挂单`;
   });
 
   const inputCls = 'border border-border bg-card-2 rounded-md px-2.5 py-1.5 text-xs tabular-nums w-24 bg-transparent outline-none';
@@ -229,7 +229,7 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
                 <button key={s} onClick={() => setSymbol(s)}
                   className={cn('text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all',
                     symbol === s ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground')}>
-                  {s.replace('USDT', '')}
+                  {tradeSymbolName(s)}
                 </button>
               ))}
             </div>
@@ -289,7 +289,7 @@ function ManualTradePanel({ onDone }: { onDone: () => void }) {
             </div>
           )}
           <div className="text-[10px] text-muted-foreground/70 leading-relaxed">
-            数量为币本位张数(如 BTC 0.002)。需先在 application.yml 配置 binance-testnet 的 api-key/secret-key；
+            数量为币本位张数（如 {tradeSymbolName('BTCUSDT')} 0.002）。需先在 application.yml 配置 testnet 的 api-key/secret-key；
             手动测试建议关闭自动执行(strategy.execution.enabled=false)，避免两套状态机冲突。
           </div>
         </div>
@@ -361,7 +361,7 @@ export function TestnetMonitor() {
           </div>
           <div>
             <h1 className="text-xl font-black tracking-tight">模拟盘监测</h1>
-            <p className="text-[11px] text-muted-foreground">Binance Testnet · 策略实盘验证轨 · 真实盘口撮合</p>
+            <p className="text-[11px] text-muted-foreground">外部 Testnet · 策略验证轨 · 模拟盘口撮合</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -370,7 +370,7 @@ export function TestnetMonitor() {
               <button key={s} onClick={() => setSymbol(s)}
                 className={cn('text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all',
                   symbol === s ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground')}>
-                {SYM_LABEL[s]}
+                {s === 'ALL' ? '全部' : tradeSymbolName(s)}
               </button>
             ))}
           </div>
@@ -386,7 +386,7 @@ export function TestnetMonitor() {
         <div className="rounded-lg border border-border bg-card px-4 py-3 text-xs leading-relaxed border-l-4 border-l-warning">
           <span className="font-black text-warning">Testnet 轨已停用：</span>
           <span className="text-muted-foreground">
-            策略执行目标当前为本平台模拟盘（sim），本页展示的是切换前 Binance Testnet 的历史交易，不再产生新记录，
+            策略执行目标当前为本平台模拟盘（sim），本页展示的是切换前外部 Testnet 的历史交易，不再产生新记录，
             与「策略账户」页的记录不一致属正常。最新策略交易请看
           </span>
           {pageVisibility.strategies && (

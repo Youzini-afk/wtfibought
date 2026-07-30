@@ -7,6 +7,7 @@ import { cn, fmtDateTime } from '../../lib/utils';
 import { chatStore, type ChatItem } from './chatStore';
 import { BeamCard } from '../fx/BeamCard';
 import type { WorkbenchSessionSummary } from '../../types';
+import { tradeSymbolName } from '../../lib/orderSide';
 
 const AGENT_CN: Record<string, string> = {
   market_agent: '市场专家',
@@ -41,7 +42,7 @@ function HitlCard({ item, onDecide, busy }: {
       <div className="flex items-center gap-2">
         <ShieldQuestion className="w-4 h-4 text-primary shrink-0" />
         <span className="text-xs font-black">深度研判确认</span>
-        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary">{item.symbol}</span>
+        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-primary/10 text-primary">{tradeSymbolName(item.symbol)}</span>
       </div>
       <p className="text-xs text-muted-foreground leading-relaxed">{item.reason}</p>
       {item.status === 'pending' ? (
@@ -252,7 +253,7 @@ export function ChatPanel() {
             <Bot className="w-10 h-10 text-muted-foreground/50" />
             <p className="text-sm text-muted-foreground">问点什么——比如：</p>
             <div className="space-y-1.5 w-full max-w-xs">
-              {['BTC 现在市场结构怎么样？', '你的 vol 预测战绩靠谱吗？', '对 ETH 做一次深度研判'].map(q => (
+              {[`${tradeSymbolName('BTCUSDT')}现在市场结构怎么样？`, '你的波动预测战绩靠谱吗？', `对${tradeSymbolName('ETHUSDT')}做一次深度研判`].map(q => (
                 <button
                   key={q}
                   onClick={() => { setInput(''); void chatStore.send(q); }}

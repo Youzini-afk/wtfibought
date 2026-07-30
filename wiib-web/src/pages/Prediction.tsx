@@ -14,8 +14,10 @@ import { Badge } from '../components/ui/badge';
 import { WalletTransferModal } from '../components/WalletTransferModal';
 import { TrendingUp, TrendingDown, Loader2, Clock, Wallet, ArrowUpRight, ArrowDownRight, ArrowLeftRight } from 'lucide-react';
 import type { PredictionRound, PredictionBet, PageResult } from '../types';
+import { tradeSymbolName } from '../lib/orderSide';
 
 const WINDOW_SECONDS = 300;
+const PREDICTION_ASSET = tradeSymbolName('BTCUSDT');
 
 function RollingChar({ char, direction }: { char: string; direction: 'up' | 'down' | 'none' }) {
   const prevRef = useRef(char);
@@ -357,7 +359,7 @@ export function Prediction() {
 
       <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold">
         <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-        新玩法测试中 — 预测BTC 5分钟涨跌，基于 polymarket.com 实时数据 手续费等相关费用收取可能会不同
+        新玩法测试中 — 预测{PREDICTION_ASSET} 5分钟涨跌，参考外部概率市场，手续费等相关费用可能会不同
       </div>
 
       {/* ── Hero: 标题 + 倒计时 + 价格 + 图表 ── */}
@@ -370,7 +372,7 @@ export function Prediction() {
                 <span className="text-lg font-black text-amber-500">B</span>
               </div>
               <div>
-                <h1 className="text-base font-bold leading-tight">BTC 5分钟涨跌预测</h1>
+                <h1 className="text-base font-bold leading-tight">{PREDICTION_ASSET} 5分钟涨跌预测</h1>
                 <span className="text-[10px] text-muted-foreground font-mono">
                   5min &middot; {round?.windowStart ?? Math.floor((Date.now() + serverClockOffsetMs) / 1000 / WINDOW_SECONDS) * WINDOW_SECONDS}
                 </span>
@@ -406,7 +408,7 @@ export function Prediction() {
             </div>
             <span className="px-2.5 py-1 rounded bg-muted text-xs font-bold font-mono tabular-nums text-muted-foreground flex items-center gap-1">
               {startPrice != null
-                ? <><HelpTip side="top" iconClassName="w-3 h-3" text="回合开始时的BTC基准价，结束时高于此价为涨，低于为跌" />目标价 ${fmtNum(startPrice)}</>
+                ? <><HelpTip side="top" iconClassName="w-3 h-3" text={`回合开始时的${PREDICTION_ASSET}基准价，结束时高于此价为涨，低于为跌`} />目标价 ${fmtNum(startPrice)}</>
                 : <><Loader2 className="w-3 h-3 animate-spin" />目标价获取中</>}
             </span>
           </div>
@@ -561,7 +563,7 @@ export function Prediction() {
                         {up ? '↑' : '↓'}
                       </span>
                       <span className="text-[11px] text-muted-foreground truncate">
-                        {isLocal ? (a.username || 'User') : 'Polymarket'}
+                        {isLocal ? (a.username || 'User') : '外部市场'}
                       </span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">

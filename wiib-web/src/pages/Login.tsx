@@ -4,6 +4,7 @@ import NumberFlow from '@number-flow/react';
 import { authApi, externalWalletApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
+import { tradeSymbolName } from '../lib/orderSide';
 import { DecryptedText } from '../components/fx/DecryptedText';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -251,13 +252,13 @@ export function Login() {
           </p>
           {/* 实时行情角标：未登录也在跳动 */}
           <div className="flex flex-wrap gap-3">
-            <LiveQuote symbol="BTCUSDT" name="BTC" />
-            <LiveQuote symbol="ETHUSDT" name="ETH" />
+            <LiveQuote symbol="BTCUSDT" name={tradeSymbolName('BTCUSDT')} />
+            <LiveQuote symbol="ETHUSDT" name={tradeSymbolName('ETHUSDT')} />
           </div>
         </div>
 
         <div className="flex items-center gap-6 text-[11px] font-semibold text-muted-foreground">
-          <span className="flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5" />Binance 实时行情</span>
+          <span className="flex items-center gap-1.5"><BarChart3 className="w-3.5 h-3.5" />平行实时行情</span>
           <span className="flex items-center gap-1.5"><Wallet className="w-3.5 h-3.5" />虚拟资金 零风险</span>
           <span className="flex items-center gap-1.5"><LineChart className="w-3.5 h-3.5" />AI 波动研判</span>
         </div>

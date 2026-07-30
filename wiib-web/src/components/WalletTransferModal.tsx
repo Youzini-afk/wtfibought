@@ -9,6 +9,7 @@ import { ArrowLeft, ArrowRight, Gamepad2, Wallet } from 'lucide-react';
 import { fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
 import type { WalletTransferPreview } from '../types';
+import { tradeSymbolName } from '../lib/orderSide';
 
 type Direction = 'TO_GAME' | 'TO_BALANCE';
 
@@ -154,7 +155,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
                 </div>
                 {preview.positions?.map(p => (
                   <div key={p.positionId} className="flex justify-between">
-                    <span className="text-muted-foreground">{p.symbol} {p.side === 'LONG' ? '多' : '空'} 新强平价</span>
+                    <span className="text-muted-foreground">{tradeSymbolName(p.symbol)} {p.side === 'LONG' ? '多' : '空'} 新强平价</span>
                     <span className="font-mono tabular-nums text-yellow-500">
                       {p.estLiqPrice > 0 ? formatCoinPrice(p.symbol, p.estLiqPrice) : 'N/A'}
                     </span>

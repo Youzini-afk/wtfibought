@@ -4,10 +4,10 @@ import { ArrowLeft, CalendarDays, Info, Loader2, RefreshCcw, Target, Trophy } fr
 import { quantApi } from '../api';
 import { cn } from '../lib/utils';
 import type { Scorecard as ScorecardData, ScorecardHorizon } from '../types';
+import { tradeSymbolName } from '../lib/orderSide';
 
 // 只展示 quant 实际监控的标的（WATCH_SYMBOLS=BTC/ETH）
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT'] as const;
-const SYM_LABEL: Record<string, string> = { BTCUSDT: 'BTC', ETHUSDT: 'ETH' };
 const HORIZON_LABEL: Record<string, string> = { H6: '6 小时', H12: '12 小时', H24: '24 小时' };
 /** vol-state 三分类的随机基线：胜过 33.3% 才叫有 skill */
 const VOL_STATE_RANDOM_BASELINE = 1 / 3;
@@ -124,7 +124,7 @@ export function Scorecard() {
               <button key={s} onClick={() => setSymbol(s)}
                 className={cn('text-[11px] font-bold px-2.5 py-1 rounded-lg transition-all',
                   symbol === s ? 'border border-border bg-card-2 text-primary' : 'border border-border text-muted-foreground hover:text-foreground')}>
-                {SYM_LABEL[s]}
+                {tradeSymbolName(s)}
               </button>
             ))}
           </div>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { TrendingUp, TrendingDown, ChevronRight, ChevronLeft } from 'lucide-react';
-import { cryptoApi, cryptoOrderApi, futuresApi } from '../api';
+import { cryptoApi, cryptoOrderApi, futuresApi, referenceMarketApi } from '../api';
 import { useUserStore } from '../stores/userStore';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
@@ -9,7 +9,6 @@ import { useToast } from '../components/ui/use-toast';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Skeleton } from '../components/ui/skeleton';
 import { CandleChart } from '../components/CandleChart';
-import TradingViewWidget from '../components/TradingViewWidget';
 import { SpotTradePanel } from '../components/coin/SpotTradePanel';
 import { FuturesOpenPanel } from '../components/coin/FuturesOpenPanel';
 import { FuturesPositionsCard } from '../components/coin/FuturesPositionsCard';
@@ -19,7 +18,7 @@ import { fmtNum } from '../lib/utils';
 import { COIN_MAP, getCoin, DEFAULT_SYMBOL, formatCoinPrice } from '../lib/coinConfig';
 import type { CryptoPosition, FuturesBracket } from '../types';
 
-/** 图表周期：现货/合约统一 K 线（各拉 500 根：5m≈41h / 15m≈5天 / 1h≈20天 / 4h≈83天 / 1d≈1.4年）；TABS 之后一位 = TradingView 高级图 */
+/** 图表周期：现货/合约统一 K 线（各拉 500 根：5m≈41h / 15m≈5天 / 1h≈20天 / 4h≈83天 / 1d≈1.4年）。 */
 const TABS = [
   { label: '5m', interval: '5m' as const, limit: 500 },
   { label: '15m', interval: '15m' as const, limit: 500 },
@@ -27,7 +26,6 @@ const TABS = [
   { label: '4h', interval: '4h' as const, limit: 500 },
   { label: '1d', interval: '1d' as const, limit: 500 },
 ];
-const TV_TAB = TABS.length;
 
 /** feed 只为这三档开了 WS 广播（Kline5m/15m/1h StreamHandler）；不在表里的走价格 tick 驱动最后一根 */
 const KLINE_BROADCAST: readonly string[] = ['5m', '15m', '1h'];
@@ -59,6 +57,13 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const [mode, setMode] = useState<'spot' | 'futures'>('futures');
   const isFuturesMode = mode === 'futures';
   const tick = useCryptoStream(symbol, mode);
+  const isReferenceMarket = cfg.category === 'commodity' || cfg.category === 'tradfi';
+  const historyKlines = useMemo(
+    () => isReferenceMarket
+      ? referenceMarketApi.klines
+      : isFuturesMode ? futuresApi.klines : cryptoApi.klines,
+    [isReferenceMarket, isFuturesMode],
+  );
 
   // 合约档位（开仓面板算强平价 + 持仓卡显示 MMR）
   const [futuresBracketsMap, setFuturesBracketsMap] = useState<Record<string, FuturesBracket[]>>({});
@@ -110,24 +115,22 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
   const [restPrice, setRestPrice] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    const fn = isFuturesMode ? futuresApi.klines : cryptoApi.klines;
-    fn(symbol, '5m', 1)
+    historyKlines(symbol, '5m', 1)
       .then(rows => { if (!cancelled && rows?.length) setRestPrice(Number(rows[rows.length - 1][4])); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [symbol, isFuturesMode]);
+  }, [symbol, historyKlines]);
   const currentPrice = livePrice ?? restPrice;
 
   // 24h 涨跌基准：1h×25 首根收盘（与首页行情卡同口径）
   const [base24h, setBase24h] = useState(0);
   useEffect(() => {
     let cancelled = false;
-    const fn = isFuturesMode ? futuresApi.klines : cryptoApi.klines;
-    fn(symbol, '1h', 25)
+    historyKlines(symbol, '1h', 25)
       .then(rows => { if (!cancelled && rows?.length) setBase24h(Number(rows[0][4])); })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [symbol, isFuturesMode]);
+  }, [symbol, historyKlines]);
   const change = base24h > 0 && currentPrice > 0 ? currentPrice - base24h : 0;
   const changePct = base24h > 0 ? (change / base24h) * 100 : 0;
   const isUp = change >= 0;
@@ -176,11 +179,11 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="microlabel font-semibold">BINANCE</span>
+              <span className="microlabel font-semibold">{isReferenceMarket ? '平行合约' : '平行币市'}</span>
               {/* TradFi 标的：合约 7×24，但流动性跟着标的股票市场走，给个当前时段入口 */}
               {cfg.market && <MarketSessionBadge market={cfg.market} />}
               {cfg.unitLabel && (
-                <span className="text-[11px] text-warning font-semibold">1枚 = 1盎司黄金（{cfg.unitFactor}{cfg.unitLabel}）</span>
+                <span className="text-[11px] text-warning font-semibold">1枚约合 {cfg.unitFactor}{cfg.unitLabel}</span>
               )}
             </div>
           </div>
@@ -221,7 +224,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
             <CardHeader className="pb-2 pt-4 px-4">
               <div className="flex items-center justify-between">
                 <CardTitle>走势</CardTitle>
-                {/* 6 个档位并排（5 周期 + 高级）：手机端收窄 padding/字号硬塞进一行，不换行；sm 以上恢复原尺寸。
+                {/* 5 个周期档位并排：手机端收窄 padding/字号硬塞进一行，不换行；sm 以上恢复原尺寸。
                     py-2 不动，触摸高度保持 32px */}
                 <div className="flex rounded-md border border-border overflow-hidden divide-x divide-border">
                   {TABS.map((tab, i) => (
@@ -229,9 +232,6 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                       {tab.label}
                     </button>
                   ))}
-                  <button onClick={() => setActiveTab(TV_TAB)} className={tabCls(activeTab === TV_TAB)}>
-                    高级
-                  </button>
                 </div>
               </div>
             </CardHeader>
@@ -247,15 +247,13 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                     symbol={symbol}
                     interval={TABS[activeTab].interval}
                     limit={TABS[activeTab].limit}
-                    klinesFn={isFuturesMode ? futuresApi.klines : cryptoApi.klines}
+                    klinesFn={historyKlines}
                     streamLive={klineLive}
                     tick={klineLive ? null : chartTick}
                     indicators
                   />
                 </div>
               )}
-              {/* 高级：TradingView（合约/现货各自 symbol） */}
-              {activeTab === TV_TAB && <div className="flex-1 min-h-[400px] md:min-h-[560px] [@media(max-height:600px)]:min-h-[300px]"><TradingViewWidget symbol={isFuturesMode ? cfg.futuresTvSymbol : cfg.tvSymbol} label={cfg.name} /></div>}
             </CardContent>
           </Card>
 
@@ -266,8 +264,8 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
               <div className="flex items-center gap-3">
                 <span className="text-lg">🔮</span>
                 <div className="text-left">
-                  <div className="text-sm font-semibold">BTC 5分钟涨跌预测 <span className="text-[10px] font-bold text-primary ml-1">NEW</span></div>
-                  <div className="text-[11px] text-muted-foreground">基于 Polymarket 实时概率，预测BTC短期走势</div>
+                  <div className="text-sm font-semibold">{cfg.name} 5分钟涨跌预测 <span className="text-[10px] font-bold text-primary ml-1">NEW</span></div>
+                  <div className="text-[11px] text-muted-foreground">基于外部概率市场，预测{cfg.name}短期走势</div>
                 </div>
               </div>
               <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground transition-colors" />
