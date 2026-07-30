@@ -12,6 +12,7 @@ import { FeedStreamHealthCard } from '../components/FeedStreamHealthCard';
 import { MonitorCarousel } from '../components/MonitorCarousel';
 import { NewApiSettingsCard } from '../components/NewApiSettingsCard';
 import { ShadowStockAdminCard } from '../components/ShadowStockAdminCard';
+import { SiteAppearanceSettingsCard } from '../components/SiteAppearanceSettingsCard';
 import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-react';
 
 const FUNCTION_LABELS: Record<string, string> = {
@@ -338,6 +339,9 @@ export function Admin() {
 
           {/* 影子股票目录、别名与生命周期 */}
           <ShadowStockAdminCard />
+
+          {/* 浏览器标签名称与 favicon */}
+          <SiteAppearanceSettingsCard />
 
           {/* WTFiB 侧 New API SSO、额度换算与提现规则 */}
           <NewApiSettingsCard />

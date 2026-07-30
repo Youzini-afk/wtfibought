@@ -86,7 +86,7 @@ export function Layout({ children }: Props) {
           >
             <TrendingUp className="w-4.5 h-4.5 text-primary" />
             <span className="text-sm font-extrabold tracking-wide">
-              WIIB<span className="text-primary">.</span>
+              WTF
             </span>
           </button>
 

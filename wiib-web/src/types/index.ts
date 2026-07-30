@@ -419,6 +419,24 @@ export interface UpdateNewApiAdminSettings {
   withdrawalTaxBrackets?: string;
 }
 
+// ==================== 浏览器站点外观 ====================
+
+export interface SiteSettings {
+  siteName: string;
+  faviconUrl: string;
+  updatedAt: string | null;
+}
+
+export interface SiteAdminSettings extends SiteSettings {
+  databaseConfigured: boolean;
+}
+
+/** 缺失字段保持不变；恢复默认值应显式提交默认名称和图标路径。 */
+export interface UpdateSiteSettings {
+  siteName?: string;
+  faviconUrl?: string;
+}
+
 export type ExternalQuotaTransferDirection = 'DEPOSIT' | 'WITHDRAWAL';
 export type ExternalQuotaTransferStatus = 'PENDING' | 'APPLYING' | 'COMPLETED' | 'FAILED';
 

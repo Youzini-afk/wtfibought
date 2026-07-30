@@ -13,6 +13,24 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="WIIB" />
     <title>WhatIfIBought</title>
+    <script>
+      // React/API 尚未启动时先应用上次由服务端确认过的品牌，避免刷新时闪回默认标题。
+      try {
+        const brand = JSON.parse(localStorage.getItem('wiib-site-settings') || 'null');
+        if (brand && typeof brand.siteName === 'string' && brand.siteName.trim()
+          && typeof brand.faviconUrl === 'string' && brand.faviconUrl.trim()) {
+          document.title = brand.siteName.trim();
+          const icon = document.querySelector('link[rel~="icon"]');
+          if (icon) {
+            const iconUrl = new URL(brand.faviconUrl.trim(), location.origin);
+            if (iconUrl.origin === location.origin) {
+              iconUrl.searchParams.set('wiib_brand', brand.updatedAt || 'default');
+            }
+            icon.href = iconUrl.href;
+          }
+        }
+      } catch (_) { /* 缓存损坏或不可用时保留静态默认值 */ }
+    </script>
     <!-- ===== 开屏动画（网格溶解）=====
          整段必须内联：它要在 bundle 之前就铺满屏幕，晚一步就是白屏。
          配色全部硬编码——index.css 的 token 跟 bundle 一起到，这时候还不存在，

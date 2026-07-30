@@ -3,6 +3,7 @@ import type { TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnMa
 import type { BacktestStrategyMeta, BacktestTaskStatus, BacktestEventsPage, BacktestKlinesPage, BacktestResultPayload } from '../types';
 import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, PositionHistoryItem, RankingSort } from '../types';
 import type { NewApiAdminSettings, UpdateNewApiAdminSettings } from '../types';
+import type { SiteAdminSettings, SiteSettings, UpdateSiteSettings } from '../types';
 import type { BStockAdminItem, BStockCatalogStatus, BStockCatalogSyncResult, UpdateBStockAdminRequest } from '../types';
 import { registerBStockAliases } from '../lib/orderSide';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, BStockAlias, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
@@ -189,6 +190,11 @@ export const notificationApi = {
   readAll: () => api.post<unknown, void>('/notifications/read-all'),
 };
 
+// 登录页也需要读取，后端对该精确路径免登录；只返回网页名称与 favicon。
+export const siteSettingsApi = {
+  get: () => api.get<unknown, SiteSettings>('/site-settings'),
+};
+
 // ========== 管理接口 ==========
 export const adminApi = {
   bankruptcyCheck: () => api.post<unknown, void>('/admin/task/bankruptcy/check'),
@@ -222,6 +228,10 @@ export const adminApi = {
   getNewApiSettings: () => api.get<unknown, NewApiAdminSettings>('/admin/new-api-settings'),
   updateNewApiSettings: (settings: UpdateNewApiAdminSettings) =>
     api.put<unknown, NewApiAdminSettings>('/admin/new-api-settings', settings),
+  // 浏览器标签名称与 favicon（不修改构建期 PWA manifest）
+  getSiteSettings: () => api.get<unknown, SiteAdminSettings>('/admin/site-settings'),
+  updateSiteSettings: (settings: UpdateSiteSettings) =>
+    api.put<unknown, SiteAdminSettings>('/admin/site-settings', settings),
   // 影子股票目录：真实 symbol 与展示身份分离，只有管理员可见来源字段
   listBStocks: (params: { status?: BStockCatalogStatus; keyword?: string; pageNum?: number; pageSize?: number } = {}) =>
     api.get<unknown, PageResult<BStockAdminItem>>('/admin/bstock', { params }),
