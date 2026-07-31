@@ -51,12 +51,14 @@ api.interceptors.response.use(
 
 // ========== 认证接口 ==========
 export const authApi = {
-  // 登录模式：两个开关都关时走管理员直登
+  // 登录模式：全部正式登录方式关闭时才走管理员直登
   mode: () => api.get<unknown, {
     linuxDoEnabled: boolean;
+    linuxDoAuthorizeUrl: string;
     passwordLoginEnabled: boolean;
     newApiEnabled: boolean;
     newApiAuthorizeUrl: string;
+    localLoginEnabled: boolean;
   }>('/auth/mode'),
   // LinuxDo OAuth回调
   linuxDoCallback: (code: string) => api.get<unknown, string>('/auth/callback/linuxdo', { params: { code } }),

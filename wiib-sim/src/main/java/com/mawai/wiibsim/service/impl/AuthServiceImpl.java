@@ -29,11 +29,14 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.client.RestTemplate;
 
 import java.math.BigDecimal;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 /**
  * 认证服务实现
@@ -182,7 +185,23 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public boolean isLinuxDoEnabled() {
-        return linuxDoConfig.isEnabled();
+        return StringUtils.hasText(getLinuxDoAuthorizeUrl());
+    }
+
+    @Override
+    public String getLinuxDoAuthorizeUrl() {
+        String clientId = normalizedLinuxDoClientId();
+        String redirectUri = normalizedLinuxDoRedirectUri();
+        if (!linuxDoConfig.isEnabled()
+                || !StringUtils.hasText(linuxDoConfig.getClientSecret())
+                || !StringUtils.hasText(clientId)
+                || !StringUtils.hasText(redirectUri)) {
+            return "";
+        }
+        return "https://connect.linux.do/oauth2/authorize"
+                + "?client_id=" + encodeQueryValue(clientId)
+                + "&redirect_uri=" + encodeQueryValue(redirectUri)
+                + "&response_type=code";
     }
 
     @Override
@@ -193,6 +212,12 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public String getNewApiAuthorizeUrl() {
         return newApiIntegrationService.authorizeUrl();
+    }
+
+    @Override
+    public boolean isLocalLoginEnabled() {
+        // client-id 非空代表管理员有意启用 LinuxDo；即使其余配置残缺，也不能降级开放管理员直登。
+        return !linuxDoConfig.isEnabled() && !passwordLoginEnabled && !newApiIntegrationService.isEnabled();
     }
 
     @Override
@@ -217,7 +242,7 @@ public class AuthServiceImpl implements AuthService {
      */
     @Override
     public String localLogin() {
-        if (linuxDoConfig.isEnabled() || passwordLoginEnabled || newApiIntegrationService.isEnabled()) {
+        if (!isLocalLoginEnabled()) {
             throw new BizException("已启用正式登录方式，管理员直登不可用");
         }
         userService.ensureAdminUser();   // 幂等，保证 id=1 存在
@@ -311,9 +336,9 @@ public class AuthServiceImpl implements AuthService {
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "authorization_code");
         form.add("code", code);
-        form.add("client_id", linuxDoConfig.getClientId());
+        form.add("client_id", normalizedLinuxDoClientId());
         form.add("client_secret", linuxDoConfig.getClientSecret());
-        form.add("redirect_uri", linuxDoConfig.getRedirectUri());
+        form.add("redirect_uri", normalizedLinuxDoRedirectUri());
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -337,6 +362,18 @@ public class AuthServiceImpl implements AuthService {
         }
 
         return json.getStr("access_token");
+    }
+
+    private String normalizedLinuxDoClientId() {
+        return linuxDoConfig.getClientId() == null ? "" : linuxDoConfig.getClientId().trim();
+    }
+
+    private String normalizedLinuxDoRedirectUri() {
+        return linuxDoConfig.getRedirectUri() == null ? "" : linuxDoConfig.getRedirectUri().trim();
+    }
+
+    private static String encodeQueryValue(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     /**

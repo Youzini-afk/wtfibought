@@ -25,16 +25,31 @@ function LinuxDoLogo({ className }: { className?: string }) {
   );
 }
 
-const LINUXDO_CONFIG = {
-  clientId: 'toCFytIO9bCHpbUbFKM1mTgvy1ax8tG2',
-  authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
-  redirectUri: 'https://wtfibought.com/login',
+type LoginMode = {
+  linuxDoEnabled: boolean;
+  linuxDoAuthorizeUrl: string;
+  passwordLoginEnabled: boolean;
+  newApiEnabled: boolean;
+  newApiAuthorizeUrl: string;
+  localLoginEnabled: boolean;
 };
-// const LINUXDO_CONFIG = {
-//   clientId: 'NIrMpQ09Jgzjb7r1ZgU3QYnuejk8Z3qS',
-//   authorizeUrl: 'https://connect.linux.do/oauth2/authorize',
-//   redirectUri: 'http://localhost:3000/login',
-// };
+
+async function requestLoginMode(): Promise<LoginMode> {
+  const mode = await authApi.mode();
+  const linuxDoAuthorizeUrl = mode.linuxDoAuthorizeUrl ?? '';
+  const passwordLoginEnabled = mode.passwordLoginEnabled ?? false;
+  const newApiEnabled = mode.newApiEnabled ?? false;
+  return {
+    // 混跑旧后端时不再显示缺少安全授权地址的 LinuxDo 入口。
+    linuxDoEnabled: Boolean(mode.linuxDoEnabled && linuxDoAuthorizeUrl),
+    linuxDoAuthorizeUrl,
+    passwordLoginEnabled,
+    newApiEnabled,
+    newApiAuthorizeUrl: mode.newApiAuthorizeUrl ?? '',
+    localLoginEnabled: mode.localLoginEnabled
+      ?? (!mode.linuxDoEnabled && !passwordLoginEnabled && !newApiEnabled),
+  };
+}
 
 /** 登录前的实时报价角标：匿名 STOMP 流（后端不拒游客），进门先看见"活"的行情 */
 function LiveQuote({ symbol, name }: { symbol: string; name: string }) {
@@ -64,12 +79,8 @@ export function Login() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   // null=模式加载中；两个开关决定展示哪些登录入口
-  const [mode, setMode] = useState<{
-    linuxDoEnabled: boolean;
-    passwordLoginEnabled: boolean;
-    newApiEnabled: boolean;
-    newApiAuthorizeUrl: string;
-  } | null>(null);
+  const [mode, setMode] = useState<LoginMode | null>(null);
+  const [authModeError, setAuthModeError] = useState('');
   const callbackHandled = useRef(false);
   // 账号密码表单
   const [isRegister, setIsRegister] = useState(false);
@@ -122,22 +133,33 @@ export function Login() {
     }
   }, [user, navigate, searchParams]);
 
-  // 拉登录模式：两个开关都关才展示管理员直登；失败兜底回 OAuth（既有行为）
+  // 登录模式加载失败时不猜测可用入口，避免误把用户导向未配置的 OAuth 站点。
   useEffect(() => {
-    authApi.mode()
-      .then(m => setMode({
-        linuxDoEnabled: m.linuxDoEnabled,
-        passwordLoginEnabled: m.passwordLoginEnabled ?? false,
-        newApiEnabled: m.newApiEnabled ?? false,
-        newApiAuthorizeUrl: m.newApiAuthorizeUrl ?? '',
-      }))
-      .catch(() => setMode({
-        linuxDoEnabled: true,
-        passwordLoginEnabled: false,
-        newApiEnabled: false,
-        newApiAuthorizeUrl: '',
-      }));
+    let active = true;
+    void requestLoginMode().then(
+      loadedMode => {
+        if (active) setMode(loadedMode);
+      },
+      () => {
+        if (!active) return;
+        setMode(null);
+        setAuthModeError('登录方式加载失败，请检查网络后重试');
+      },
+    );
+    return () => {
+      active = false;
+    };
   }, []);
+
+  const retryAuthMode = () => {
+    setMode(null);
+    setError('');
+    setAuthModeError('');
+    void requestLoginMode().then(
+      loadedMode => setMode(loadedMode),
+      () => setAuthModeError('登录方式加载失败，请检查网络后重试'),
+    );
+  };
 
   useEffect(() => {
     const code = searchParams.get('code');
@@ -150,11 +172,34 @@ export function Login() {
   }, [searchParams, handleOAuthCallback]);
 
   const handleLinuxDoLogin = () => {
+    if (!mode?.linuxDoAuthorizeUrl) {
+      setError('LinuxDo 登录地址未配置');
+      return;
+    }
+
+    let authorizeUrl: URL;
+    try {
+      authorizeUrl = new URL(mode.linuxDoAuthorizeUrl);
+      const configuredRedirect = authorizeUrl.searchParams.get('redirect_uri');
+      const redirectUrl = configuredRedirect ? new URL(configuredRedirect) : null;
+      const expectedRedirect = new URL('/login', window.location.origin);
+      if (!redirectUrl
+          || redirectUrl.origin !== expectedRedirect.origin
+          || redirectUrl.pathname.replace(/\/+$/, '') !== expectedRedirect.pathname) {
+        setError('LinuxDo 回调地址与当前站点不一致，请联系管理员');
+        return;
+      }
+    } catch {
+      setError('LinuxDo 登录地址配置无效，请联系管理员');
+      return;
+    }
+
     const state = crypto.randomUUID();
     localStorage.setItem('oauth_state', state);
     localStorage.setItem('oauth_provider', 'linuxdo');
     localStorage.setItem('oauth_intent', 'login');
-    window.location.href = `${LINUXDO_CONFIG.authorizeUrl}?client_id=${LINUXDO_CONFIG.clientId}&redirect_uri=${encodeURIComponent(LINUXDO_CONFIG.redirectUri)}&response_type=code&state=${state}`;
+    authorizeUrl.searchParams.set('state', state);
+    window.location.assign(authorizeUrl.toString());
   };
 
   const handleNewApiLogin = () => {
@@ -298,10 +343,22 @@ export function Login() {
               </div>
             )}
 
-            {loading || mode === null ? (
+            {loading ? (
               <div className="h-28 flex flex-col items-center justify-center gap-2 text-muted-foreground">
                 <Loader2 className="w-5 h-5 animate-spin text-primary" />
-                <span className="text-xs font-semibold">{loading ? '登录中...' : '加载中...'}</span>
+                <span className="text-xs font-semibold">登录中...</span>
+              </div>
+            ) : authModeError ? (
+              <div className="h-28 flex flex-col items-center justify-center gap-3 text-center">
+                <span className="text-xs font-semibold text-muted-foreground">{authModeError}</span>
+                <Button variant="outline" className="h-9" onClick={retryAuthMode}>
+                  重新加载登录方式
+                </Button>
+              </div>
+            ) : mode === null ? (
+              <div className="h-28 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+                <Loader2 className="w-5 h-5 animate-spin text-primary" />
+                <span className="text-xs font-semibold">加载中...</span>
               </div>
             ) : (
               <>
@@ -368,12 +425,21 @@ export function Login() {
                   </Button>
                 )}
 
-                {!mode.linuxDoEnabled && !mode.passwordLoginEnabled && !mode.newApiEnabled && (
+                {mode.localLoginEnabled && (
                   <Button className="w-full h-11" onClick={handleLocalLogin}>
                     <LogIn className="w-4 h-4" />
                     进入终端
                   </Button>
                 )}
+
+                {!mode.linuxDoEnabled
+                  && !mode.passwordLoginEnabled
+                  && !mode.newApiEnabled
+                  && !mode.localLoginEnabled && (
+                    <div className="p-3 rounded-md border border-destructive/40 bg-destructive/10 text-destructive text-xs font-semibold text-center">
+                      登录方式配置不完整，请联系管理员
+                    </div>
+                  )}
               </>
             )}
           </div>

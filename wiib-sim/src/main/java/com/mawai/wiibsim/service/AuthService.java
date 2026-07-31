@@ -20,9 +20,19 @@ public interface AuthService {
      */
     boolean isLinuxDoEnabled();
 
+    /**
+     * 由服务端 LinuxDo 配置生成的授权地址，包含与换码阶段完全一致的 redirect_uri。
+     */
+    String getLinuxDoAuthorizeUrl();
+
     boolean isNewApiEnabled();
 
     String getNewApiAuthorizeUrl();
+
+    /**
+     * 仅当所有正式登录方式都未配置时开放管理员直登。
+     */
+    boolean isLocalLoginEnabled();
 
     /**
      * 仅管理员直登：确保 admin(id=1) 存在并登录，返回 Token

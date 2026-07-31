@@ -23,16 +23,18 @@ public class AuthController {
     private final AuthService authService;
 
     /**
-     * 登录模式：前端据此决定展示 LinuxDo 登录还是管理员直登
+     * 登录模式：OAuth 地址统一由服务端配置生成，前端不再保存回调域名。
      */
     @GetMapping("/mode")
     @Operation(summary = "获取登录模式")
     public Result<AuthModeDTO> mode() {
         return Result.ok(new AuthModeDTO(
                 authService.isLinuxDoEnabled(),
+                authService.getLinuxDoAuthorizeUrl(),
                 authService.isPasswordLoginEnabled(),
                 authService.isNewApiEnabled(),
-                authService.getNewApiAuthorizeUrl()));
+                authService.getNewApiAuthorizeUrl(),
+                authService.isLocalLoginEnabled()));
     }
 
     /**
