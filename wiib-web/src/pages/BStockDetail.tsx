@@ -80,7 +80,9 @@ function BStockDetail({ symbol }: { symbol: string }) {
   const isLevBuy = side === 'BUY' && leverage > 1;
   const marginCost = (isLevBuy ? amount / leverage : amount) + commission;   // 买入现金占用
   const proceeds = amount - commission;                                       // 卖出到账
-  const held = position?.quantity ?? 0;
+  const available = position?.quantity ?? 0;
+  const frozen = position?.frozenQuantity ?? 0;
+  const held = available + frozen;
   const chg = info?.changePct ?? 0;
   const up = chg >= 0;
   const sideAllowed = side === 'BUY' ? Boolean(info?.buyAllowed) : Boolean(info?.sellAllowed);
@@ -95,7 +97,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
     if (livePrice <= 0) return;
     const target = side === 'BUY'
       ? (balance * pct * leverage) / (livePrice * (1 + COMMISSION_RATE))
-      : held * pct;
+      : available * pct;
     animateQty(Math.max(0, target), QTY_STEP);
   };
 
@@ -105,7 +107,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
       return;
     }
     if (qtyNum <= 0) { toast('请输入数量', 'error'); return; }
-    if (side === 'SELL' && qtyNum > held) { toast('持仓不足', 'error'); return; }
+    if (side === 'SELL' && qtyNum > available) { toast('可用持仓不足', 'error'); return; }
     setSubmitting(true);
     try {
       if (side === 'BUY') {
@@ -345,6 +347,7 @@ function BStockDetail({ symbol }: { symbol: string }) {
                   <div>
                     <div className="text-base font-bold tabular-nums">{fmtNum(held)} <span className="text-xs text-muted-foreground font-normal">股</span></div>
                     <div className="text-xs text-muted-foreground">均价 {fmtNum(position?.avgCost ?? 0)}</div>
+                    {frozen > 0 && <div className="text-xs text-warning">其中冻结 {fmtNum(frozen)} 股</div>}
                   </div>
                   <div className="text-right">
                     <div className="text-xs text-muted-foreground">现值</div>

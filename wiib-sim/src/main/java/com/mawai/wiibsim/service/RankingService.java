@@ -282,11 +282,11 @@ public class RankingService {
     /** 合约仓位估值同时产出 (margin+未实现盈亏) 与 单独的未实现盈亏，交易盈利计算两者都要 */
     private record FuturesPnL(BigDecimal value, BigDecimal unrealizedPnl) {}
 
-    private static BigDecimal cryptoMarketValue(List<CryptoPosition> positions, Map<String, BigDecimal> priceMap) {
+    private BigDecimal cryptoMarketValue(List<CryptoPosition> positions, Map<String, BigDecimal> priceMap) {
         if (positions == null) return BigDecimal.ZERO;
         BigDecimal sum = BigDecimal.ZERO;
         for (CryptoPosition cp : positions) {
-            BigDecimal price = priceMap.getOrDefault(cp.getSymbol(), BigDecimal.ZERO);
+            BigDecimal price = cryptoPositionService.resolveValuationPrice(cp, priceMap);
             sum = sum.add(price.multiply(cp.getTotalQuantity()));
         }
         return sum;

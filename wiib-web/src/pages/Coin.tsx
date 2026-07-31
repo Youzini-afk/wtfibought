@@ -277,10 +277,11 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
         <Card className="lg:col-span-2 self-start lg:self-auto flex flex-col">
           {/* 现货持仓信息（两种模式都显示） */}
           {position && (position.quantity > 0 || position.frozenQuantity > 0) && (() => {
+            const totalQuantity = position.quantity + (position.frozenQuantity ?? 0);
             const pnlPct = position.avgCost > 0 && currentPrice > 0
               ? ((currentPrice - position.avgCost) / position.avgCost) * 100 : 0;
             const pnlAmount = currentPrice > 0
-              ? (currentPrice - position.avgCost) * position.quantity : 0;
+              ? (currentPrice - position.avgCost) * totalQuantity : 0;
             const isPnlUp = pnlPct >= 0;
             return (
               <div className="px-4 pt-4">
@@ -290,9 +291,9 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                       <Icon className={`w-6 h-6 ${cfg.colorClass}`} />
                       <div>
                         <span className="text-base font-bold">{cfg.name}</span>
-                        <span className="num text-sm font-semibold text-muted-foreground ml-2">{position.quantity} 个</span>
+                        <span className="num text-sm font-semibold text-muted-foreground ml-2">{totalQuantity} 个</span>
                         {cfg.unitLabel && (
-                          <span className="text-xs font-semibold text-warning ml-1.5">约合 {(position.quantity * cfg.unitFactor!).toFixed(1)} {cfg.unitLabel}</span>
+                          <span className="text-xs font-semibold text-warning ml-1.5">约合 {(totalQuantity * cfg.unitFactor!).toFixed(1)} {cfg.unitLabel}</span>
                         )}
                       </div>
                     </div>
@@ -308,7 +309,7 @@ export function Coin({ symbol = DEFAULT_SYMBOL }: { symbol?: string }) {
                   <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs font-semibold text-muted-foreground pt-1">
                     <span>均价 <span className="num text-foreground">${fmtPrice(position.avgCost)}</span></span>
                     <span>现价 <span className="num text-foreground">${fmtPrice(currentPrice)}</span></span>
-                    <span>市值 <span className="num text-foreground">${fmtNum(currentPrice * position.quantity)}</span></span>
+                    <span>市值 <span className="num text-foreground">${fmtNum(currentPrice * totalQuantity)}</span></span>
                     {position.frozenQuantity > 0 && <span>冻结 <span className="num text-warning">{position.frozenQuantity}</span></span>}
                     {position.totalDiscount > 0 && <span>已省 <span className="num text-warning">${fmtNum(position.totalDiscount)}</span></span>}
                   </div>

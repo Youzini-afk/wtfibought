@@ -7,6 +7,7 @@ import com.mawai.wiibcommon.entity.BStock;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 /** bStock 读取服务：静态信息读 bstock 表，实时价/K线走 Binance（REST/Redis）。 */
 public interface BStockService extends IService<BStock> {
@@ -22,6 +23,12 @@ public interface BStockService extends IService<BStock> {
 
     /** 最新价（Redis 优先，未命中回退 REST） */
     BigDecimal price(String symbol);
+
+    /**
+     * 资产估值价：新鲜 feed 优先，批量 REST 次之，最后使用最近一次可信价。
+     * 历史价只用于保持估值连续性，不能用于成交。
+     */
+    Map<String, BigDecimal> valuationPrices(List<String> symbols);
 
     /** 是否 bStock 现货符号（现货引擎据此判卖出瞬时结算 vs crypto 5min） */
     boolean isBStockSymbol(String symbol);

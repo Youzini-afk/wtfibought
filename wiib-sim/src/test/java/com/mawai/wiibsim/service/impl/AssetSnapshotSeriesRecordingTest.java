@@ -14,6 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.math.BigDecimal;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
@@ -53,6 +54,20 @@ class AssetSnapshotSeriesRecordingTest {
         record(7L, dto, firstBucket + 301_000, 1L);
         verify(assetPointMapper, times(2)).upsert(any());
         verify(assetPointMapper).deleteByUserId(7L);
+    }
+
+    @Test
+    void ordinaryAssetChangeRecomputesCurrentBucketWithoutDeletingHistory() {
+        AssetSnapshotDTO dto = snapshot();
+        long bucket = 1_800_000L;
+
+        record(7L, dto, bucket + 1_000, 0L);
+        service.invalidateRealtime(7L);
+        record(7L, dto, bucket + 2_000, 0L);
+        record(7L, dto, bucket + 3_000, 1L);
+
+        verify(assetPointMapper, times(2)).upsert(any());
+        verify(assetPointMapper, never()).deleteByUserId(7L);
     }
 
     private void record(long userId, AssetSnapshotDTO dto, long nowMs, long generation) {

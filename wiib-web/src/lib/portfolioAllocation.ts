@@ -60,13 +60,15 @@ export async function loadPortfolioSpotValuation(): Promise<PortfolioSpotValuati
 
   const cryptoPositions = positions.filter(position => !bstockSymbols.has(position.symbol));
   const cryptoRows = await Promise.all(cryptoPositions.map(async position => {
-    let currentPrice = 0;
+    // 行情短缺时冻结在成本价，避免分布图把真实持仓画成 0；成交接口仍要求实时价。
+    let currentPrice = position.avgCost;
     try {
       const quote = await cryptoApi.price(position.symbol);
       if (quote?.price) currentPrice = Number.parseFloat(quote.price);
     } catch { /* 单个币种缺价不阻断其余分布数据 */ }
-    const marketValue = currentPrice * position.quantity;
-    const costValue = position.avgCost * position.quantity;
+    const totalQuantity = position.quantity + (position.frozenQuantity ?? 0);
+    const marketValue = currentPrice * totalQuantity;
+    const costValue = position.avgCost * totalQuantity;
     const profit = marketValue - costValue;
     return {
       ...position,
@@ -79,9 +81,10 @@ export async function loadPortfolioSpotValuation(): Promise<PortfolioSpotValuati
 
   const bstockRows: BStockValuationRow[] = stockPositions.map(position => {
     const stock = stockMap.get(position.symbol);
-    const currentPrice = stock?.price ?? 0;
-    const marketValue = currentPrice * position.quantity;
-    const costValue = position.avgCost * position.quantity;
+    const currentPrice = stock?.price ?? position.avgCost;
+    const totalQuantity = position.quantity + (position.frozenQuantity ?? 0);
+    const marketValue = currentPrice * totalQuantity;
+    const costValue = position.avgCost * totalQuantity;
     const profit = marketValue - costValue;
     return {
       ...position,

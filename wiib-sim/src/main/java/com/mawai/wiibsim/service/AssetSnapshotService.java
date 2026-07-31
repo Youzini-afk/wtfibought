@@ -20,5 +20,8 @@ public interface AssetSnapshotService {
 
     void purgeIntradayHistory();
 
+    /** 普通资产变动后的轻量失效；保留历史曲线，并允许当前采样桶由正确值覆盖。 */
+    void invalidateRealtime(Long userId);
+
     void invalidateUser(Long userId);
 }

@@ -75,18 +75,15 @@ public class UserProfileService {
         Map<String, BigDecimal> priceMap = cryptoPositionService.fetchCryptoPriceMap();
         List<ProfilePositionDTO> list = new ArrayList<>(positions.size());
         for (CryptoPosition cp : positions) {
-            BigDecimal price = priceMap.get(cp.getSymbol());
+            BigDecimal price = cryptoPositionService.resolveValuationPrice(cp, priceMap);
             ProfilePositionDTO dto = new ProfilePositionDTO();
             dto.setSymbol(cp.getSymbol());
             dto.setQuantity(cp.getTotalQuantity());
             dto.setEntryPrice(cp.getAvgCost());
             dto.setCurrentPrice(price);
-            if (price != null) {
-                BigDecimal value = price.multiply(cp.getTotalQuantity());
-                dto.setValue(value);
-                dto.setProfit(value.subtract(cp.getAvgCost().multiply(cp.getTotalQuantity())));
-            }
-            // 缺价时 value/profit 留 null，前端显示"—"。填 0 会被当成"这仓真的一文不值"
+            BigDecimal value = price.multiply(cp.getTotalQuantity());
+            dto.setValue(value);
+            dto.setProfit(value.subtract(cp.getAvgCost().multiply(cp.getTotalQuantity())));
             list.add(dto);
         }
         return list;

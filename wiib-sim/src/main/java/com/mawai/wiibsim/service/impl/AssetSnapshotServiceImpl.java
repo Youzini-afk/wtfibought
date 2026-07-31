@@ -9,11 +9,14 @@ import com.mawai.wiibcommon.dto.AssetSeriesPointDTO;
 import com.mawai.wiibcommon.dto.AssetSnapshotDTO;
 import com.mawai.wiibcommon.dto.CategoryAveragesDTO;
 import com.mawai.wiibcommon.entity.*;
+import com.mawai.wiibsim.event.UserAssetsChangedEvent;
 import com.mawai.wiibsim.mapper.*;
 import com.mawai.wiibsim.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -71,6 +74,9 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         }
     }
 
+    private record RealtimeCacheKey(Long userId, long generation) {
+    }
+
     private CategorySets loadCategorySets() {
         Set<String> bstock = bstockMapper.selectList(null).stream()
                 .map(BStock::getSymbol)
@@ -85,7 +91,7 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     @org.springframework.beans.factory.annotation.Value("${trading.initial-balance:0}")
     private BigDecimal initialBalance;
 
-    private final Cache<Long, AssetSnapshotDTO> realtimeCache = Caffeine.newBuilder()
+    private final Cache<RealtimeCacheKey, AssetSnapshotDTO> realtimeCache = Caffeine.newBuilder()
             .maximumSize(2000)
             .expireAfterWrite(5, TimeUnit.MINUTES)
             .build();
@@ -145,7 +151,8 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     @Override
     public AssetSnapshotDTO getRealtimeSnapshot(Long userId) {
         long generation = currentSamplingGeneration(userId);
-        AssetSnapshotDTO dto = realtimeCache.get(userId, this::computeRealtimeSnapshot);
+        RealtimeCacheKey cacheKey = new RealtimeCacheKey(userId, generation);
+        AssetSnapshotDTO dto = realtimeCache.get(cacheKey, key -> computeRealtimeSnapshot(key.userId()));
         if (dto != null) recordPointSafely(userId, dto, System.currentTimeMillis(), generation);
         return dto;
     }
@@ -217,10 +224,24 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     }
 
     @Override
+    public void invalidateRealtime(Long userId) {
+        if (userId == null) return;
+        synchronized (sampleLock(userId)) {
+            advanceRealtimeGeneration(userId);
+            // 下一次读取可以 UPSERT 当前五分钟桶，用提交后的正确资产值覆盖成交前旧点。
+            recordedBucketCache.invalidate(userId);
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void onUserAssetsChanged(UserAssetsChangedEvent event) {
+        invalidateRealtime(event.userId());
+    }
+
+    @Override
     public void invalidateUser(Long userId) {
         synchronized (sampleLock(userId)) {
-            samplingGenerationCache.put(userId, currentSamplingGeneration(userId) + 1);
-            realtimeCache.invalidate(userId);
+            advanceRealtimeGeneration(userId);
             recordedBucketCache.invalidate(userId);
             try {
                 // AccountPurgeTx 已在事务内删过一次；这里再次删除用于封住在途旧采样的提交竞态。
@@ -230,6 +251,12 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
             }
         }
         categoryRankCache.invalidateAll();
+    }
+
+    private void advanceRealtimeGeneration(Long userId) {
+        long generation = currentSamplingGeneration(userId);
+        samplingGenerationCache.put(userId, generation + 1);
+        realtimeCache.invalidate(new RealtimeCacheKey(userId, generation));
     }
 
     private Map<Long, CategoryAveragesDTO> buildCategoryRankMap(int days) {
@@ -341,13 +368,10 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
         Map<String, BigDecimal> heldMv = new HashMap<>();   // 分类桶 → 在持市值
         List<CryptoPosition> cryptoPositions = cryptoPositionService.getUserPositions(userId);
         for (CryptoPosition cp : cryptoPositions) {
-            BigDecimal price = cryptoPriceMap.get(cp.getSymbol());
-            if (price != null) {
-                BigDecimal totalQty = cp.getQuantity().add(cp.getFrozenQuantity() != null ? cp.getFrozenQuantity() : BigDecimal.ZERO);
-                BigDecimal mv = price.multiply(totalQty);
-                cryptoMarketValue = cryptoMarketValue.add(mv);
-                heldMv.merge(sets.classify(cp.getSymbol()), mv, BigDecimal::add);
-            }
+            BigDecimal price = cryptoPositionService.resolveValuationPrice(cp, cryptoPriceMap);
+            BigDecimal mv = price.multiply(cp.getTotalQuantity());
+            cryptoMarketValue = cryptoMarketValue.add(mv);
+            heldMv.merge(sets.classify(cp.getSymbol()), mv, BigDecimal::add);
         }
         // 现货真实盈亏 = 在持市值 + 全史净现金流(卖出净得−买入净付)，与排行榜同口径。
         // 曾用"浮盈+(卖−买)"：在持成本被双扣，买入即显示巨亏，已废弃

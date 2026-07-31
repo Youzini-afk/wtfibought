@@ -19,6 +19,9 @@ public interface CryptoPositionService extends IService<CryptoPosition> {
     /** 批量取所有crypto币种实时价格 {symbol -> price}，供排行榜等批量场景 */
     Map<String, BigDecimal> fetchCryptoPriceMap();
 
+    /** 单仓估值价；行情短缺时使用持仓成本价保底，避免资产被静默按 0 计算。 */
+    BigDecimal resolveValuationPrice(CryptoPosition position, Map<String, BigDecimal> priceMap);
+
     void addPosition(Long userId, String symbol, BigDecimal quantity, BigDecimal price, BigDecimal discount);
 
     void reducePosition(Long userId, String symbol, BigDecimal quantity);

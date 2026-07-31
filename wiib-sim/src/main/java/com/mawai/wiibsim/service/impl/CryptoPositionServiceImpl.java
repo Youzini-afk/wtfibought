@@ -8,6 +8,7 @@ import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.config.BinanceProperties;
 import com.mawai.wiibsim.mapper.CryptoPositionMapper;
 import com.mawai.wiibcommon.cache.CacheService;
+import com.mawai.wiibsim.service.BStockService;
 import com.mawai.wiibsim.service.CryptoPositionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -26,6 +28,7 @@ public class CryptoPositionServiceImpl extends ServiceImpl<CryptoPositionMapper,
 
     private final CacheService cacheService;
     private final BinanceProperties binanceProperties;
+    private final BStockService bStockService;
 
     @Override
     public CryptoPosition findByUserAndSymbol(Long userId, String symbol) {
@@ -91,10 +94,8 @@ public class CryptoPositionServiceImpl extends ServiceImpl<CryptoPositionMapper,
         Map<String, BigDecimal> priceMap = fetchCryptoPriceMap();
         BigDecimal total = BigDecimal.ZERO;
         for (CryptoPosition cp : positions) {
-            BigDecimal price = priceMap.get(cp.getSymbol());
-            if (price != null) {
-                total = total.add(price.multiply(cp.getTotalQuantity()));
-            }
+            BigDecimal price = resolveValuationPrice(cp, priceMap);
+            total = total.add(price.multiply(cp.getTotalQuantity()));
         }
         return total.setScale(2, RoundingMode.HALF_UP);
     }
@@ -107,6 +108,30 @@ public class CryptoPositionServiceImpl extends ServiceImpl<CryptoPositionMapper,
         if (configured != null) symbols.addAll(configured);
         symbols.addAll(baseMapper.listDistinctSymbols());
         if (symbols.isEmpty()) return Collections.emptyMap();
-        return cacheService.getCryptoPrices(List.copyOf(symbols));
+        List<String> requested = List.copyOf(symbols);
+        Map<String, BigDecimal> prices = new HashMap<>(cacheService.getCryptoPrices(requested));
+        List<String> missingBStocks = requested.stream()
+                .filter(symbol -> !prices.containsKey(symbol))
+                .filter(bStockService::isBStockSymbol)
+                .toList();
+        if (!missingBStocks.isEmpty()) {
+            prices.putAll(bStockService.valuationPrices(missingBStocks));
+        }
+        return Map.copyOf(prices);
+    }
+
+    @Override
+    public BigDecimal resolveValuationPrice(CryptoPosition position, Map<String, BigDecimal> priceMap) {
+        BigDecimal price = priceMap != null ? priceMap.get(position.getSymbol()) : null;
+        if (price != null && price.signum() > 0) return price;
+
+        // 最后一层只用于估值连续性：行情源同时不可用时按成本价冻结浮盈亏，
+        // 绝不能把真实持仓从总资产中静默丢掉。成交仍然要求实时价，不会走这里。
+        BigDecimal avgCost = position.getAvgCost();
+        if (avgCost != null && avgCost.signum() > 0) return avgCost;
+
+        log.error("持仓缺少行情与成本价，无法可靠估值 userId={} symbol={}",
+                position.getUserId(), position.getSymbol());
+        return BigDecimal.ZERO;
     }
 }
