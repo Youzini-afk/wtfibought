@@ -17,6 +17,7 @@ import { DecryptedText } from '../components/fx/DecryptedText';
 import { ArcGauge } from '../components/fx/ArcGauge';
 import { AssetEquityChart } from '../components/AssetEquityChart';
 import { AssetSeriesControls } from '../components/AssetSeriesControls';
+import { HomeAllocationCard } from '../components/HomeAllocationCard';
 import {
   RefreshCcw, Bell, Gamepad2, List, DollarSign, ArrowRight, Target, Brain, Gift,
 } from 'lucide-react';
@@ -188,7 +189,7 @@ export function Home() {
                 data={assetSeriesKey === assetSeriesQueryKey ? assetSeries : []}
                 range={range}
                 loading={assetSeriesLoading}
-                className="mt-2 h-20 flex-1 min-h-16"
+                className="mt-3 min-h-28 flex-1 sm:min-h-32"
               />
             </SpotlightCard>
 
@@ -210,6 +211,8 @@ export function Home() {
                   )}
                 </CardContent>
               </Card>
+
+              <HomeAllocationCard key={user!.id} user={user!} refreshNonce={refreshNonce} />
 
               {pageVisibility.ai && <Card className="flex-1">
                 <CardContent className="pt-4 pb-4 flex items-center gap-4">

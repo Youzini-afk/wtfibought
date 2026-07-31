@@ -2,35 +2,30 @@ import * as echarts from 'echarts';
 import { useEffect, useRef } from 'react';
 import { getCoin } from '../lib/coinConfig';
 import { useIsDark } from '../hooks/useIsDark';
-
-interface CryptoRow {
-  symbol: string;
-  marketValue: number;
-}
-
-interface FuturesRow {
-  symbol: string;
-  marketValue: number;
-}
-
-interface BStockRow {
-  ticker: string;
-  marketValue: number;
-}
+import type { PortfolioBStockRow, PortfolioCryptoRow, PortfolioFuturesRow } from '../lib/portfolioAllocation';
 
 // bStock 无 coinConfig 配色，用独立蓝青系列循环取色，与币种暖色区分
 const BSTOCK_COLORS = ['#635bff', '#0ea5e9', '#14b8a6', '#6366f1', '#06b6d4', '#3b82f6'];
 
 interface Props {
-  cryptoPositions?: CryptoRow[];
-  bstockRows?: BStockRow[];
-  futuresRows?: FuturesRow[];
+  cryptoPositions?: PortfolioCryptoRow[];
+  bstockRows?: PortfolioBStockRow[];
+  futuresRows?: PortfolioFuturesRow[];
   balance: number;
   gameBalance?: number;
   pendingSettlement?: number;
+  compact?: boolean;
 }
 
-export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresRows = [], balance, gameBalance = 0, pendingSettlement = 0 }: Props) {
+export function PortfolioChart({
+  cryptoPositions = [],
+  bstockRows = [],
+  futuresRows = [],
+  balance,
+  gameBalance = 0,
+  pendingSettlement = 0,
+  compact = false,
+}: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
 
@@ -90,20 +85,21 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
         }
       },
       legend: {
-        bottom: '0%',
+        type: compact ? 'scroll' : 'plain',
+        bottom: compact ? '2%' : '0%',
         left: 'center',
-        textStyle: { color: textColor, fontSize: 11, fontFamily: "'Plus Jakarta Sans Variable', sans-serif" },
-        itemWidth: 10,
-        itemHeight: 10,
-        itemGap: 12,
+        textStyle: { color: textColor, fontSize: compact ? 10 : 11, fontFamily: "'Plus Jakarta Sans Variable', sans-serif" },
+        itemWidth: compact ? 8 : 10,
+        itemHeight: compact ? 8 : 10,
+        itemGap: compact ? 8 : 12,
         icon: 'circle'
       },
       series: [
         {
           name: '资产分布',
           type: 'pie',
-          radius: ['45%', '70%'],
-          center: ['50%', '42%'],
+          radius: compact ? ['46%', '72%'] : ['45%', '70%'],
+          center: ['50%', compact ? '41%' : '42%'],
           avoidLabelOverlap: false,
           itemStyle: {
             borderRadius: 6,
@@ -117,7 +113,7 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
           emphasis: {
             label: {
               show: true,
-              fontSize: 14,
+              fontSize: compact ? 12 : 14,
               fontWeight: 'bold',
               color: isDark ? '#eceef0' : '#17181a',
               fontFamily: "'Plus Jakarta Sans Variable', sans-serif"
@@ -137,12 +133,19 @@ export function PortfolioChart({ cryptoPositions = [], bstockRows = [], futuresR
     });
 
     const onResize = () => chart.resize();
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(onResize);
+    resizeObserver?.observe(chartRef.current);
     window.addEventListener('resize', onResize);
     return () => {
+      resizeObserver?.disconnect();
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, pendingSettlement, isDark]);
+  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, pendingSettlement, compact, isDark]);
 
-  return <div ref={chartRef} className="w-full h-56 sm:h-64 transition-colors duration-300" />;
+  return <div ref={chartRef} className={compact
+    ? 'h-40 w-full transition-colors duration-300 sm:h-44'
+    : 'h-56 w-full transition-colors duration-300 sm:h-64'} />;
 }

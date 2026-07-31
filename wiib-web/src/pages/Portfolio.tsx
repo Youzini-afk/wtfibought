@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
-import { userApi, cryptoOrderApi, cryptoApi, futuresApi, predictionApi, bstockApi } from '../api';
+import { userApi, futuresApi, predictionApi } from '../api';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -36,22 +36,16 @@ import {
   RotateCcw,
   History,
 } from 'lucide-react';
-import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSeriesPoint, AssetSnapshot, CategoryAverages, BStock } from '../types';
+import type { FuturesPosition, PredictionPnl, AssetSeriesPoint, AssetSnapshot, CategoryAverages } from '../types';
 import { formatCoinPrice, getCoin } from '../lib/coinConfig';
 import { tradeSymbolName } from '../lib/orderSide';
 import { useAssetSeriesPreferences } from '../hooks/useAssetSeriesPreferences';
-
-interface CryptoRow extends CryptoPosition {
-  currentPrice: number;
-  marketValue: number;
-  profit: number;
-  profitPct: number;
-}
-
-interface BStockRow extends CryptoRow {
-  name: string;
-  ticker: string;
-}
+import {
+  buildFuturesAllocationRows,
+  loadPortfolioSpotValuation,
+  type BStockValuationRow,
+  type CryptoValuationRow,
+} from '../lib/portfolioAllocation';
 
 function AnimNum({ value, prefix = '', suffix = '', duration = 600 }: { value: number; prefix?: string; suffix?: string; duration?: number }) {
   const ref = useRef<HTMLSpanElement>(null);
@@ -90,8 +84,8 @@ export function Portfolio() {
   const navigate = useNavigate();
   const { user } = useUserStore();
   const { toast } = useToast();
-  const [cryptoRows, setCryptoRows] = useState<CryptoRow[]>([]);
-  const [bstockRows, setBstockRows] = useState<BStockRow[]>([]);
+  const [cryptoRows, setCryptoRows] = useState<CryptoValuationRow[]>([]);
+  const [bstockRows, setBstockRows] = useState<BStockValuationRow[]>([]);
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
   const [predictionPnl, setPredictionPnl] = useState<PredictionPnl | null>(null);
   const [loading, setLoading] = useState(true);
@@ -146,45 +140,9 @@ export function Portfolio() {
   // 现货持仓：crypto_position 里混着 crypto 与 bStock，按 bstock 列表符号拆分
   const loadSpotPositions = useCallback(async () => {
     try {
-      const [cps, blist, bpositions] = await Promise.all([
-        cryptoOrderApi.positions(),
-        bstockApi.list().catch(() => [] as BStock[]),
-        bstockApi.positions().catch(() => [] as CryptoPosition[]),
-      ]);
-      const bmap = new Map<string, BStock>((blist ?? []).map(b => [b.symbol, b]));
-      const all = cps ?? [];
-      const bstockSymbols = new Set((bpositions ?? []).map(position => position.symbol));
-      const missingMetadata = [...bstockSymbols].filter(symbol => !bmap.has(symbol));
-      const recovered = await Promise.all(missingMetadata.map(symbol => bstockApi.detail(symbol).catch(() => null)));
-      for (const stock of recovered) if (stock) bmap.set(stock.symbol, stock);
-
-      // 纯 crypto：逐只取现价
-      const cryptoCps = all.filter(cp => !bstockSymbols.has(cp.symbol));
-      const crows = await Promise.all(cryptoCps.map(async (cp) => {
-        let currentPrice = 0;
-        try {
-          const res = await cryptoApi.price(cp.symbol);
-          if (res && res.price) currentPrice = parseFloat(res.price);
-        } catch { /* skip */ }
-        const marketValue = currentPrice * cp.quantity;
-        const costValue = cp.avgCost * cp.quantity;
-        const profit = marketValue - costValue;
-        const profitPct = costValue > 0 ? (profit / costValue) * 100 : 0;
-        return { ...cp, currentPrice, marketValue, profit, profitPct };
-      }));
-      setCryptoRows(crows);
-
-      // bStock：现价/名称取自 bstock 列表（已含实时价）
-      const brows: BStockRow[] = (bpositions ?? []).map(cp => {
-        const b = bmap.get(cp.symbol)!;
-        const currentPrice = b?.price ?? 0;
-        const marketValue = currentPrice * cp.quantity;
-        const costValue = cp.avgCost * cp.quantity;
-        const profit = marketValue - costValue;
-        const profitPct = costValue > 0 ? (profit / costValue) * 100 : 0;
-        return { ...cp, name: b?.displayName || tradeSymbolName(cp.symbol), ticker: b?.displayCode || 'SHDW', currentPrice, marketValue, profit, profitPct };
-      }).filter(row => Boolean(row.name));
-      setBstockRows(brows);
+      const rows = await loadPortfolioSpotValuation();
+      setCryptoRows(rows.cryptoRows);
+      setBstockRows(rows.bstockRows);
     } catch {
       setCryptoRows([]);
       setBstockRows([]);
@@ -267,12 +225,7 @@ export function Portfolio() {
   const futuresMargin = futuresPositions.reduce((s, f) => s + f.margin, 0);
   const futuresProfit = futuresPositions.reduce((s, f) => s + f.unrealizedPnl, 0);
   const futuresTotal = futuresMargin + futuresProfit;
-  const futuresChartRows = Array.from(
-    futuresPositions.reduce((map, f) => {
-      map.set(f.symbol, (map.get(f.symbol) ?? 0) + f.margin + f.unrealizedPnl);
-      return map;
-    }, new Map<string, number>())
-  ).map(([symbol, marketValue]) => ({ symbol, marketValue }));
+  const futuresChartRows = buildFuturesAllocationRows(futuresPositions);
   const hasPrediction = predictionPnl != null && predictionPnl.totalBets > 0;
   const predictionProfit = predictionPnl?.totalPnl ?? 0;
   const hasCrypto = cryptoRows.length > 0;
