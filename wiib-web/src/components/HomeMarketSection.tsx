@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Landmark, Bitcoin, Gem, Globe, ChevronRight, type LucideProps } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { COIN_MAP, COMMODITY_LIST } from '../lib/coinConfig';
+import { COIN_MAP } from '../lib/coinConfig';
 import { CoinMarketRow, BStockMarketRow } from './MarketRow';
 import { Skeleton } from './ui/skeleton';
 import { bstockApi } from '../api';
@@ -45,6 +45,7 @@ export function HomeMarketSection() {
   }, []);
 
   const cryptoReps = [COIN_MAP.BTCUSDT, COIN_MAP.ETHUSDT];
+  const commodityReps = [COIN_MAP.XAUUSDT, COIN_MAP.CLUSDT];
   // TradFi 代表：SpaceX（话题标的）+ SK海力士（成交最活跃）
   const tradfiReps = [COIN_MAP.SPCXUSDT, COIN_MAP.SKHYNIXUSDT];
 
@@ -63,8 +64,8 @@ export function HomeMarketSection() {
       </div>
 
       <div className="@container pt-card rounded-lg overflow-hidden">
-        <CategoryHeader icon={Gem} title="大宗商品" subtitle="黄金 / 原油" iconColor="text-yellow-500" to="/commodity" />
-        {COMMODITY_LIST.map(c => <CoinMarketRow key={c.symbol} cfg={c} />)}
+        <CategoryHeader icon={Gem} title="大宗商品" subtitle="贵金属 / 能源 / 工业金属" iconColor="text-yellow-500" to="/commodity" />
+        {commodityReps.map(c => <CoinMarketRow key={c.symbol} cfg={c} />)}
       </div>
 
       <div className="@container pt-card rounded-lg overflow-hidden">

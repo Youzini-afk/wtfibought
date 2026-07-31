@@ -16,8 +16,7 @@ import java.util.Map;
  * 档位选择：按"仓位 USDT 名义价值"匹配半开区间 [floor, cap)。
  * 强平公式：MM = notional × MMR − maintAmount。
  * <p>
- * 已配置：BTCUSDT、ETHUSDT、DOGEUSDT、SOLUSDT、XRPUSDT、BNBUSDT、XAUUSDT、CLUSDT，
- * 及 TradFi 股票/ETF 永续：SNDKUSDT、SOXLUSDT、SKHYNIXUSDT、MUUSDT、KORUUSDT、SPCXUSDT。
+ * 已配置：九个加密币种、六个大宗商品，及十个 TradFi 股票/ETF 永续。
  * 新增 symbol 必须先在此处补完档位数据，否则开仓抛 FUTURES_SYMBOL_NOT_CONFIGURED。
  */
 @Component
@@ -146,6 +145,9 @@ public class FuturesLeverageBracketRegistry {
             new Bracket(10, bd("200000000"),    bd("400000000"),    1,   bd("0.5000"),  bd("66731475"))
     );
 
+    // 白银官方最大杠杆为 50x；MMR/名义额分档沿用贵金属表，并对每档最大杠杆做保守封顶。
+    private static final List<Bracket> SILVER_BRACKETS = capLeverage(COMMODITY_BRACKETS, 50);
+
     // TradFi 美股/存储芯片股永续（闪迪 SNDK / 半导体3X SOXL / SK海力士 / 美光 MU）：四者档位完全一致，
     // 11 档，档位1 上限 50K、MMR 起点 1%（股票波动大起点比主流币高）、最大 50x。
     // 数据来源：Binance 主网 /fapi/v1/leverageBracket（实拉 2026-07-23，cum 速算数逐档验算自洽，下同）。
@@ -162,6 +164,9 @@ public class FuturesLeverageBracketRegistry {
             new Bracket(10, bd("50000000"),     bd("100000000"),    2,  bd("0.2500"),  bd("5494825")),
             new Bracket(11, bd("100000000"),    bd("200000000"),    1,  bd("0.5000"),  bd("30494825"))
     );
+
+    // 2026 年新增的主流股票/ETF TradFi 合约官方最大杠杆为 10x；MMR 分档沿用股票表并封顶。
+    private static final List<Bracket> TRADFI_10X_BRACKETS = capLeverage(US_STOCK_BRACKETS, 10);
 
     // KORU（三倍做多韩国ETF）：杠杆ETF自带3倍波动，9 档，MMR 起点即 2%、最大仅 25x（全场最保守）。
     private static final List<Bracket> KORU_BRACKETS = List.of(
@@ -199,14 +204,26 @@ public class FuturesLeverageBracketRegistry {
             Map.entry("SOLUSDT",     SOL_BRACKETS),
             Map.entry("XRPUSDT",     XRP_BRACKETS),
             Map.entry("BNBUSDT",     BNB_BRACKETS),
+            // 新增主流币使用保守的 75x 山寨币档位；实际过滤器仍由 exchangeInfo 启动刷新。
+            Map.entry("ADAUSDT",     BNB_BRACKETS),
+            Map.entry("AVAXUSDT",    BNB_BRACKETS),
+            Map.entry("LINKUSDT",    BNB_BRACKETS),
             Map.entry("XAUUSDT",     COMMODITY_BRACKETS),
             Map.entry("CLUSDT",      COMMODITY_BRACKETS),
+            Map.entry("XAGUSDT",     SILVER_BRACKETS),
+            Map.entry("XPTUSDT",     COMMODITY_BRACKETS),
+            Map.entry("XPDUSDT",     COMMODITY_BRACKETS),
+            Map.entry("COPPERUSDT",  COMMODITY_BRACKETS),
             Map.entry("SNDKUSDT",    US_STOCK_BRACKETS),
             Map.entry("SOXLUSDT",    US_STOCK_BRACKETS),
             Map.entry("SKHYNIXUSDT", US_STOCK_BRACKETS),
             Map.entry("MUUSDT",      US_STOCK_BRACKETS),
             Map.entry("KORUUSDT",    KORU_BRACKETS),
-            Map.entry("SPCXUSDT",    SPCX_BRACKETS)
+            Map.entry("SPCXUSDT",    SPCX_BRACKETS),
+            Map.entry("QQQUSDT",     TRADFI_10X_BRACKETS),
+            Map.entry("SPYUSDT",     TRADFI_10X_BRACKETS),
+            Map.entry("NVDAUSDT",    TRADFI_10X_BRACKETS),
+            Map.entry("TSLAUSDT",    TRADFI_10X_BRACKETS)
     );
 
     /**
@@ -253,6 +270,14 @@ public class FuturesLeverageBracketRegistry {
         Bracket b = findBracket(symbol, notional);
         if (b == null) throw new BizException(ErrorCode.FUTURES_SYMBOL_NOT_CONFIGURED);
         return notional.multiply(b.mmr()).subtract(b.maintAmount());
+    }
+
+    private static List<Bracket> capLeverage(List<Bracket> source, int maxLeverage) {
+        return source.stream()
+                .map(b -> new Bracket(
+                        b.tier(), b.notionalFloor(), b.notionalCap(),
+                        Math.min(b.maxLeverage(), maxLeverage), b.mmr(), b.maintAmount()))
+                .toList();
     }
 
     private static BigDecimal bd(String v) {

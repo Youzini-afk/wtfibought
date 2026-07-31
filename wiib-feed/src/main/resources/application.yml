@@ -57,6 +57,9 @@ binance:
     - SOLUSDT
     - XRPUSDT
     - BNBUSDT
+    - ADAUSDT
+    - AVAXUSDT
+    - LINKUSDT
   # bStock（代币化美股，纯现货无合约）：价并入 Spot 流，5m K线走现货端点单独一条连接
   stock-symbols:
     - MUBUSDT
@@ -69,10 +72,14 @@ binance:
     - AMDBUSDT
     - TSLABUSDT
     - SOXLBUSDT
-  # 大宗商品（TradFi 永续合约，无现货）：黄金/原油，只进合约流
+  # 大宗商品（TradFi 永续合约，无现货）：贵金属/能源/工业金属，只进合约流
   commodity-symbols:
     - XAUUSDT
     - CLUSDT
+    - XAGUSDT
+    - XPTUSDT
+    - XPDUSDT
+    - COPPERUSDT
   # TradFi 合约（美股/ETF 永续，纯合约无现货）：与商品同链路，只进合约流
   tradfi-symbols:
     - SNDKUSDT
@@ -81,6 +88,10 @@ binance:
     - MUUSDT
     - KORUUSDT
     - SPCXUSDT
+    - QQQUSDT
+    - SPYUSDT
+    - NVDAUSDT
+    - TSLAUSDT
   fallback-poll-interval: 5000
 
 # 内部 API 鉴权：/internal/streams（流健康+重试）由共享 InternalApiFilter 校验此 token；

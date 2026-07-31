@@ -39,12 +39,20 @@ public class ReferenceMarketKlineClient extends BaseRestTemplateConfig {
     private static final Map<String, String> PROVIDER_TICKERS = Map.ofEntries(
             Map.entry("XAUUSDT", "GC=F"),
             Map.entry("CLUSDT", "CL=F"),
+            Map.entry("XAGUSDT", "SI=F"),
+            Map.entry("XPTUSDT", "PL=F"),
+            Map.entry("XPDUSDT", "PA=F"),
+            Map.entry("COPPERUSDT", "HG=F"),
             Map.entry("SNDKUSDT", "SNDK"),
             Map.entry("SOXLUSDT", "SOXL"),
             Map.entry("SKHYNIXUSDT", "000660.KS"),
             Map.entry("MUUSDT", "MU"),
             Map.entry("KORUUSDT", "KORU"),
-            Map.entry("SPCXUSDT", "SPCX")
+            Map.entry("SPCXUSDT", "SPCX"),
+            Map.entry("QQQUSDT", "QQQ"),
+            Map.entry("SPYUSDT", "SPY"),
+            Map.entry("NVDAUSDT", "NVDA"),
+            Map.entry("TSLAUSDT", "TSLA")
     );
 
     private static final Map<String, IntervalSpec> INTERVALS = Map.of(

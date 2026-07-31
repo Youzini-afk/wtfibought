@@ -53,10 +53,10 @@
 
 | 品类 | 标的 |
 |---|---|
-| 加密现货 / 永续 | `BTC` `ETH` `DOGE` `SOL` `XRP` `BNB` |
+| 加密现货 / 永续 | `BTC` `ETH` `DOGE` `SOL` `XRP` `BNB` `ADA` `AVAX` `LINK` |
 | bStock 代币化美股（10） | NVDA · TSLA · MU · SNDK · CRCL · MSTR · AMD · SPCX · QQQ · SOXL（Binance 现货，如 `NVDABUSDT`） |
-| 大宗商品 | 黄金 `XAUUSDT` · 原油 `CLUSDT`（TradFi 永续，无现货） |
-| TradFi 合约 | 闪迪 `SNDK` · `SOXL` · SK海力士 `SKHYNIX` · 美光 `MU` · `KORU` · SpaceX `SPCX`（美股/ETF 永续，无现货，盈亏归股票桶） |
+| 大宗商品 | 黄金 `XAU` · 原油 `CL` · 白银 `XAG` · 铂金 `XPT` · 钯金 `XPD` · 铜 `COPPER`（TradFi 永续，无现货） |
+| TradFi 合约 | 闪迪 `SNDK` · `SOXL` · SK海力士 `SKHYNIX` · 美光 `MU` · `KORU` · SpaceX `SPCX` · 纳指 ETF `QQQ` · 标普 ETF `SPY` · 英伟达 `NVDA` · 特斯拉 `TSLA`（美股/ETF 永续，无现货，盈亏归股票桶） |
 | 策略实盘篮子 | FIBO: `BTC/ETH` · LIQFADE: `BTC/ETH/DOGE` · SQZMOM: `SOL/DOGE/XRP` · TURTLE: `SOL/ETH/DOGE/BNB` |
 
 ---
@@ -66,9 +66,9 @@
 ### 交易系统
 
 - **bStock 代币化美股**：真实 Binance 现货行情（价与实时 5m 蜡烛来自 feed→Redis 实时流，K 线历史代理 REST），含公司基本面；下单挂靠统一保证金账户。
-- **加密货币现货**：BTC/ETH/DOGE/SOL/XRP，接入 Binance 实时行情，市价 / 限价单。
+- **加密货币现货**：BTC/ETH/DOGE/SOL/XRP/BNB/ADA/AVAX/LINK，接入 Binance 实时行情，市价 / 限价单。
 - **永续合约**：全仓 / 逐仓双模式（全仓为主，整个余额钱包为仓位兜底，强平线随净值与全部仓位浮盈亏实时变化），多 / 空双向，1-150 倍分档杠杆（对齐 Binance 档位表），maker 0.02% / taker 0.04%，真实资金费率（每 8h 按 Binance premiumIndex 双向收付，拉取失败回退 0.01%），自动强平。
-- **大宗商品**：黄金 / 原油 TradFi 永续。
+- **大宗商品**：黄金 / 原油 / 白银 / 铂金 / 钯金 / 铜 TradFi 永续。
 - **保证金 / 计息 / 爆仓 / 破产恢复**：借款买入统一保证金账户，交易日 17:00 计息 + 爆仓检查，09:00 破产用户幂等恢复。
 - **BTC 5 分钟涨跌预测**：接入 Polymarket 盘口 + Chainlink BTC 价格线，5 分钟窗口自动结算（结算基准 = Polymarket 开 / 收盘价，Chainlink 仅前端价格线展示），动态手续费。
 

@@ -1,5 +1,23 @@
 import { fmtNum } from './utils';
-import {Bitcoin, Coins, Cpu, Flag, Fuel, HardDrive, MemoryStick, Rocket, type LucideProps} from 'lucide-react';
+import {
+  Bitcoin,
+  Cable,
+  Car,
+  ChartNoAxesCombined,
+  CircleDot,
+  Coins,
+  Cpu,
+  Flag,
+  Fuel,
+  Gem,
+  HardDrive,
+  Landmark,
+  Link2,
+  MemoryStick,
+  MountainSnow,
+  Rocket,
+  type LucideProps,
+} from 'lucide-react';
 import type {ComponentType} from "react";
 import {Bnb, Doge, Eth, Sol, Xrp} from './coinIcons';
 import type {MarketId} from './marketSession';
@@ -24,7 +42,7 @@ export interface CoinCfg {
   // 实物换算（如 XAU 黄金盎司/克数）
   unitLabel?: string;
   unitFactor?: number;
-  // 分类：不填=crypto；commodity=大宗商品（金/油）；tradfi=美股/ETF 永续（均为纯合约）
+  // 分类：不填=crypto；commodity=大宗商品；tradfi=美股/ETF 永续（均为纯合约）
   category?: 'crypto' | 'commodity' | 'tradfi';
   // 纯合约标的（无现货）：交易页只出合约，不出现货买卖
   futuresOnly?: boolean;
@@ -69,6 +87,24 @@ export const COIN_MAP: Record<string, CoinCfg> = {
     colorClass: 'text-yellow-400', bgClass: 'bg-yellow-400/10', hoverBgClass: 'hover:bg-yellow-400/20', gradientClass: 'from-yellow-400/5',
     chartColor: '#f0b90b', desc: '币南币 / USDT 模拟交易',
   },
+  ADAUSDT: {
+    symbol: 'ADAUSDT', displayCode: 'ADQ', name: '艾哒币', pair: 'ADQ / USDT', tvSymbol: 'BINANCE:ADAUSDT', futuresTvSymbol: 'BINANCE:ADAUSDT.P',
+    priceDecimals: 4, icon: CircleDot,
+    colorClass: 'text-blue-400', bgClass: 'bg-blue-400/10', hoverBgClass: 'hover:bg-blue-400/20', gradientClass: 'from-blue-400/5',
+    chartColor: '#60a5fa', desc: '艾哒币 / USDT 模拟交易',
+  },
+  AVAXUSDT: {
+    symbol: 'AVAXUSDT', displayCode: 'AVQ', name: '雪团币', pair: 'AVQ / USDT', tvSymbol: 'BINANCE:AVAXUSDT', futuresTvSymbol: 'BINANCE:AVAXUSDT.P',
+    priceDecimals: 3, icon: MountainSnow,
+    colorClass: 'text-red-400', bgClass: 'bg-red-400/10', hoverBgClass: 'hover:bg-red-400/20', gradientClass: 'from-red-400/5',
+    chartColor: '#f87171', desc: '雪团币 / USDT 模拟交易',
+  },
+  LINKUSDT: {
+    symbol: 'LINKUSDT', displayCode: 'LNKX', name: '链环币', pair: 'LNKX / USDT', tvSymbol: 'BINANCE:LINKUSDT', futuresTvSymbol: 'BINANCE:LINKUSDT.P',
+    priceDecimals: 3, icon: Link2,
+    colorClass: 'text-cyan-500', bgClass: 'bg-cyan-500/10', hoverBgClass: 'hover:bg-cyan-500/20', gradientClass: 'from-cyan-500/5',
+    chartColor: '#06b6d4', desc: '链环币 / USDT 模拟交易',
+  },
   XAUUSDT: {
     symbol: 'XAUUSDT', displayCode: 'XFY', name: '黄金糕', pair: 'XFY / USDT', tvSymbol: 'TVC:GOLD', futuresTvSymbol: 'BINANCE:XAUUSDT.P',
     icon: Coins,
@@ -80,6 +116,30 @@ export const COIN_MAP: Record<string, CoinCfg> = {
     icon: Fuel,
     colorClass: 'text-stone-500', bgClass: 'bg-stone-500/10', hoverBgClass: 'hover:bg-stone-500/20', gradientClass: 'from-stone-500/5',
     chartColor: '#78716c', desc: '能源影子合约', category: 'commodity', futuresOnly: true,
+  },
+  XAGUSDT: {
+    symbol: 'XAGUSDT', displayCode: 'XSG', name: '白银糖', pair: 'XSG / USDT', tvSymbol: 'TVC:SILVER', futuresTvSymbol: 'BINANCE:XAGUSDT.P',
+    icon: Coins,
+    colorClass: 'text-slate-300', bgClass: 'bg-slate-300/10', hoverBgClass: 'hover:bg-slate-300/20', gradientClass: 'from-slate-300/5',
+    chartColor: '#cbd5e1', desc: '贵金属影子合约', category: 'commodity', futuresOnly: true,
+  },
+  XPTUSDT: {
+    symbol: 'XPTUSDT', displayCode: 'XPF', name: '铂金片', pair: 'XPF / USDT', tvSymbol: 'TVC:PLATINUM', futuresTvSymbol: 'BINANCE:XPTUSDT.P',
+    icon: Gem,
+    colorClass: 'text-zinc-300', bgClass: 'bg-zinc-300/10', hoverBgClass: 'hover:bg-zinc-300/20', gradientClass: 'from-zinc-300/5',
+    chartColor: '#d4d4d8', desc: '贵金属影子合约', category: 'commodity', futuresOnly: true,
+  },
+  XPDUSDT: {
+    symbol: 'XPDUSDT', displayCode: 'XPK', name: '钯金牌', pair: 'XPK / USDT', tvSymbol: 'TVC:PALLADIUM', futuresTvSymbol: 'BINANCE:XPDUSDT.P',
+    icon: Landmark,
+    colorClass: 'text-neutral-300', bgClass: 'bg-neutral-300/10', hoverBgClass: 'hover:bg-neutral-300/20', gradientClass: 'from-neutral-300/5',
+    chartColor: '#a3a3a3', desc: '贵金属影子合约', category: 'commodity', futuresOnly: true,
+  },
+  COPPERUSDT: {
+    symbol: 'COPPERUSDT', displayCode: 'CPQ', name: '铜线圈', pair: 'CPQ / USDT', tvSymbol: 'COMEX:HG1!', futuresTvSymbol: 'BINANCE:COPPERUSDT.P',
+    priceDecimals: 3, icon: Cable,
+    colorClass: 'text-orange-700', bgClass: 'bg-orange-700/10', hoverBgClass: 'hover:bg-orange-700/20', gradientClass: 'from-orange-700/5',
+    chartColor: '#c2410c', desc: '工业金属影子合约', category: 'commodity', futuresOnly: true,
   },
   SNDKUSDT: {
     symbol: 'SNDKUSDT', displayCode: 'SNJV', name: '闪递', pair: 'SNJV / USDT', tvSymbol: 'NASDAQ:SNDK', futuresTvSymbol: 'BINANCE:SNDKUSDT.P',
@@ -116,6 +176,30 @@ export const COIN_MAP: Record<string, CoinCfg> = {
     icon: Rocket,
     colorClass: 'text-violet-500', bgClass: 'bg-violet-500/10', hoverBgClass: 'hover:bg-violet-500/20', gradientClass: 'from-violet-500/5',
     chartColor: '#8b5cf6', desc: '太空科技影子合约', category: 'tradfi', futuresOnly: true, market: 'US',
+  },
+  QQQUSDT: {
+    symbol: 'QQQUSDT', displayCode: 'NQBX', name: '纳百通', pair: 'NQBX / USDT', tvSymbol: 'NASDAQ:QQQ', futuresTvSymbol: 'BINANCE:QQQUSDT.P',
+    icon: ChartNoAxesCombined,
+    colorClass: 'text-fuchsia-500', bgClass: 'bg-fuchsia-500/10', hoverBgClass: 'hover:bg-fuchsia-500/20', gradientClass: 'from-fuchsia-500/5',
+    chartColor: '#d946ef', desc: '科技指数影子合约', category: 'tradfi', futuresOnly: true, market: 'US',
+  },
+  SPYUSDT: {
+    symbol: 'SPYUSDT', displayCode: 'SPYX', name: '标普灵', pair: 'SPYX / USDT', tvSymbol: 'AMEX:SPY', futuresTvSymbol: 'BINANCE:SPYUSDT.P',
+    icon: Landmark,
+    colorClass: 'text-teal-500', bgClass: 'bg-teal-500/10', hoverBgClass: 'hover:bg-teal-500/20', gradientClass: 'from-teal-500/5',
+    chartColor: '#14b8a6', desc: '宽基指数影子合约', category: 'tradfi', futuresOnly: true, market: 'US',
+  },
+  NVDAUSDT: {
+    symbol: 'NVDAUSDT', displayCode: 'NVXX', name: '英伟呆', pair: 'NVXX / USDT', tvSymbol: 'NASDAQ:NVDA', futuresTvSymbol: 'BINANCE:NVDAUSDT.P',
+    icon: Cpu,
+    colorClass: 'text-lime-500', bgClass: 'bg-lime-500/10', hoverBgClass: 'hover:bg-lime-500/20', gradientClass: 'from-lime-500/5',
+    chartColor: '#84cc16', desc: '算力科技影子合约', category: 'tradfi', futuresOnly: true, market: 'US',
+  },
+  TSLAUSDT: {
+    symbol: 'TSLAUSDT', displayCode: 'TSLX', name: '特撕拉', pair: 'TSLX / USDT', tvSymbol: 'NASDAQ:TSLA', futuresTvSymbol: 'BINANCE:TSLAUSDT.P',
+    icon: Car,
+    colorClass: 'text-rose-500', bgClass: 'bg-rose-500/10', hoverBgClass: 'hover:bg-rose-500/20', gradientClass: 'from-rose-500/5',
+    chartColor: '#f43f5e', desc: '电动科技影子合约', category: 'tradfi', futuresOnly: true, market: 'US',
   },
 };
 

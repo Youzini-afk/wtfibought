@@ -27,23 +27,37 @@ public final class TradeFilterDefaults {
             Map.entry("SOLUSDT",     f("0.01",  "5")),
             Map.entry("XRPUSDT",     f("0.1",   "5")),
             Map.entry("BNBUSDT",     f("0.01",  "5")),
+            Map.entry("ADAUSDT",     f("1",     "5")),
+            Map.entry("AVAXUSDT",    f("1",     "5")),
+            Map.entry("LINKUSDT",    f("0.01",  "5")),
             Map.entry("XAUUSDT",     f("0.001", "5")),
             Map.entry("CLUSDT",      f("0.01",  "5")),
-            // TradFi 股票/ETF 永续：六标的官方口径一致（step 0.01 / minNotional 5，实拉 2026-07-23）
+            Map.entry("XAGUSDT",     f("0.001", "5")),
+            Map.entry("XPTUSDT",     f("0.001", "5")),
+            Map.entry("XPDUSDT",     f("0.001", "5")),
+            Map.entry("COPPERUSDT",  f("0.1",   "5")),
+            // TradFi 股票/ETF 永续：官方口径一致（step 0.01 / minNotional 5）
             Map.entry("SNDKUSDT",    f("0.01",  "5")),
             Map.entry("SOXLUSDT",    f("0.01",  "5")),
             Map.entry("SKHYNIXUSDT", f("0.01",  "5")),
             Map.entry("MUUSDT",      f("0.01",  "5")),
             Map.entry("KORUUSDT",    f("0.01",  "5")),
-            Map.entry("SPCXUSDT",    f("0.01",  "5")));
+            Map.entry("SPCXUSDT",    f("0.01",  "5")),
+            Map.entry("QQQUSDT",     f("0.01",  "5")),
+            Map.entry("SPYUSDT",     f("0.01",  "5")),
+            Map.entry("NVDAUSDT",    f("0.01",  "5")),
+            Map.entry("TSLAUSDT",    f("0.01",  "5")));
 
-    public static final Map<String, Filter> SPOT = Map.of(
-            "BTCUSDT",  f("0.00001", "5"),
-            "ETHUSDT",  f("0.0001",  "5"),
-            "DOGEUSDT", f("1",       "1"),
-            "SOLUSDT",  f("0.001",   "5"),
-            "XRPUSDT",  f("0.1",     "5"),
-            "BNBUSDT",  f("0.001",   "5"));
+    public static final Map<String, Filter> SPOT = Map.ofEntries(
+            Map.entry("BTCUSDT",  f("0.00001", "5")),
+            Map.entry("ETHUSDT",  f("0.0001",  "5")),
+            Map.entry("DOGEUSDT", f("1",       "1")),
+            Map.entry("SOLUSDT",  f("0.001",   "5")),
+            Map.entry("XRPUSDT",  f("0.1",     "5")),
+            Map.entry("BNBUSDT",  f("0.001",   "5")),
+            Map.entry("ADAUSDT",  f("0.1",     "5")),
+            Map.entry("AVAXUSDT", f("0.01",    "5")),
+            Map.entry("LINKUSDT", f("0.01",    "5")));
 
     /** 未配置 symbol 返回 null，调用方按"不校验"处理 */
     public static Filter futures(String symbol) {

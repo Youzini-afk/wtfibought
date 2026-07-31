@@ -18,7 +18,7 @@ public class BinanceProperties {
     private List<String> symbols;
     /** bStock（代币化美股）符号：纯现货、无合约。单列一组，只并入现货价/现货K线订阅，绝不进合约/深度/强平流。 */
     private List<String> stockSymbols;
-    /** 大宗商品（TradFi 永续：黄金/原油）符号：纯合约、无现货。只并入合约流，绝不进现货流。 */
+    /** 大宗商品（TradFi 永续：贵金属/能源/工业金属）符号：纯合约、无现货。只并入合约流，绝不进现货流。 */
     private List<String> commoditySymbols;
     /** TradFi 合约（美股/ETF 永续：闪迪/美光/SpaceX 等）符号：纯合约、无现货，流处理同大宗商品。 */
     private List<String> tradfiSymbols;

@@ -12,7 +12,7 @@ export function CommoditySelect() {
           </div>
           <h1 className="text-xl font-bold">大宗商品</h1>
         </div>
-        <p className="text-[11px] text-muted-foreground">TradFi 永续合约 · 黄金 / 原油 · 24/7</p>
+        <p className="text-[11px] text-muted-foreground">TradFi 永续合约 · 贵金属 / 能源 / 工业金属 · 24/7</p>
       </div>
       <CoinMarketGrid list={COMMODITY_LIST} />
     </div>

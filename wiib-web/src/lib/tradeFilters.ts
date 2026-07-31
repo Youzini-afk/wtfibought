@@ -14,15 +14,26 @@ const DEFAULTS: TradeFilterMap = {
     SOLUSDT:  { stepSize: 0.01,   minQty: 0.01,   minNotional: 5 },
     XRPUSDT:  { stepSize: 0.1,    minQty: 0.1,    minNotional: 5 },
     BNBUSDT:  { stepSize: 0.01,   minQty: 0.01,   minNotional: 5 },
+    ADAUSDT:  { stepSize: 1,      minQty: 1,      minNotional: 5 },
+    AVAXUSDT: { stepSize: 1,      minQty: 1,      minNotional: 5 },
+    LINKUSDT: { stepSize: 0.01,   minQty: 0.01,   minNotional: 5 },
     XAUUSDT:  { stepSize: 0.001,  minQty: 0.001,  minNotional: 5 },
     CLUSDT:   { stepSize: 0.01,   minQty: 0.01,   minNotional: 5 },
-    // TradFi 股票/ETF 永续：六标的官方口径一致（实拉 2026-07-23）
+    XAGUSDT:    { stepSize: 0.001, minQty: 0.001, minNotional: 5 },
+    XPTUSDT:    { stepSize: 0.001, minQty: 0.001, minNotional: 5 },
+    XPDUSDT:    { stepSize: 0.001, minQty: 0.001, minNotional: 5 },
+    COPPERUSDT: { stepSize: 0.1,   minQty: 0.1,   minNotional: 5 },
+    // TradFi 股票/ETF 永续：官方口径一致
     SNDKUSDT:    { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
     SOXLUSDT:    { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
     SKHYNIXUSDT: { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
     MUUSDT:      { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
     KORUUSDT:    { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
     SPCXUSDT:    { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
+    QQQUSDT:     { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
+    SPYUSDT:     { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
+    NVDAUSDT:    { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
+    TSLAUSDT:    { stepSize: 0.01, minQty: 0.01, minNotional: 5 },
   },
   spot: {
     BTCUSDT:  { stepSize: 0.00001, minQty: 0.00001, minNotional: 5 },
@@ -31,6 +42,9 @@ const DEFAULTS: TradeFilterMap = {
     SOLUSDT:  { stepSize: 0.001,   minQty: 0.001,   minNotional: 5 },
     XRPUSDT:  { stepSize: 0.1,     minQty: 0.1,     minNotional: 5 },
     BNBUSDT:  { stepSize: 0.001,   minQty: 0.001,   minNotional: 5 },
+    ADAUSDT:  { stepSize: 0.1,     minQty: 0.1,     minNotional: 5 },
+    AVAXUSDT: { stepSize: 0.01,    minQty: 0.01,    minNotional: 5 },
+    LINKUSDT: { stepSize: 0.01,    minQty: 0.01,    minNotional: 5 },
   },
 };
 

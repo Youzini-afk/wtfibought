@@ -13,12 +13,20 @@ class ReferenceMarketKlineClientTest {
     void mapsEveryConfiguredReferenceSymbolWithoutPublishingTheTicker() {
         assertThat(ReferenceMarketKlineClient.providerTicker("XAUUSDT")).isEqualTo("GC=F");
         assertThat(ReferenceMarketKlineClient.providerTicker("CLUSDT")).isEqualTo("CL=F");
+        assertThat(ReferenceMarketKlineClient.providerTicker("XAGUSDT")).isEqualTo("SI=F");
+        assertThat(ReferenceMarketKlineClient.providerTicker("XPTUSDT")).isEqualTo("PL=F");
+        assertThat(ReferenceMarketKlineClient.providerTicker("XPDUSDT")).isEqualTo("PA=F");
+        assertThat(ReferenceMarketKlineClient.providerTicker("COPPERUSDT")).isEqualTo("HG=F");
         assertThat(ReferenceMarketKlineClient.providerTicker("SNDKUSDT")).isEqualTo("SNDK");
         assertThat(ReferenceMarketKlineClient.providerTicker("SOXLUSDT")).isEqualTo("SOXL");
         assertThat(ReferenceMarketKlineClient.providerTicker("SKHYNIXUSDT")).isEqualTo("000660.KS");
         assertThat(ReferenceMarketKlineClient.providerTicker("MUUSDT")).isEqualTo("MU");
         assertThat(ReferenceMarketKlineClient.providerTicker("KORUUSDT")).isEqualTo("KORU");
         assertThat(ReferenceMarketKlineClient.providerTicker("SPCXUSDT")).isEqualTo("SPCX");
+        assertThat(ReferenceMarketKlineClient.providerTicker("QQQUSDT")).isEqualTo("QQQ");
+        assertThat(ReferenceMarketKlineClient.providerTicker("SPYUSDT")).isEqualTo("SPY");
+        assertThat(ReferenceMarketKlineClient.providerTicker("NVDAUSDT")).isEqualTo("NVDA");
+        assertThat(ReferenceMarketKlineClient.providerTicker("TSLAUSDT")).isEqualTo("TSLA");
         assertThatThrownBy(() -> ReferenceMarketKlineClient.providerTicker("BTCUSDT"))
                 .isInstanceOf(IllegalArgumentException.class);
     }

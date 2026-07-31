@@ -122,10 +122,17 @@ binance:
     - SOLUSDT
     - XRPUSDT
     - BNBUSDT
-  # 大宗商品符号：五分类盈亏归集判定用（TradFi 永续：黄金/原油）
+    - ADAUSDT
+    - AVAXUSDT
+    - LINKUSDT
+  # 大宗商品符号：五分类盈亏归集判定用（TradFi 永续：贵金属/能源/工业金属）
   commodity-symbols:
     - XAUUSDT
     - CLUSDT
+    - XAGUSDT
+    - XPTUSDT
+    - XPDUSDT
+    - COPPERUSDT
   # TradFi 合约（美股/ETF 永续，纯合约无现货）：盈亏归入 bstock（股票）桶
   tradfi-symbols:
     - SNDKUSDT
@@ -134,6 +141,10 @@ binance:
     - MUUSDT
     - KORUUSDT
     - SPCXUSDT
+    - QQQUSDT
+    - SPYUSDT
+    - NVDAUSDT
+    - TSLAUSDT
   fallback-poll-interval: 5000
 
 # 大宗商品/TradFi 历史图参考源。交易与实时价仍走内部 Binance symbol；此源只补历史 OHLCV。
