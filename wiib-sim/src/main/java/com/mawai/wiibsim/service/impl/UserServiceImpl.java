@@ -3,6 +3,7 @@ package com.mawai.wiibsim.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.spring.service.impl.ServiceImpl;
 import com.mawai.wiibcommon.dto.UserDTO;
+import com.mawai.wiibcommon.constant.UserAccess;
 import com.mawai.wiibcommon.entity.FuturesPosition;
 import com.mawai.wiibcommon.entity.User;
 import com.mawai.wiibcommon.entity.UserLedger;
@@ -187,6 +188,9 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         dto.setId(user.getId());
         dto.setUsername(user.getUsername());
         dto.setAvatar(user.getAvatar());
+        dto.setRole(UserAccess.normalizeRole(user.getId(), user.getRole()));
+        dto.setStatus(UserAccess.normalizeStatus(user.getStatus()));
+        dto.setLastLoginAt(user.getLastLoginAt());
         dto.setBalance(user.getBalance());
         dto.setFrozenBalance(frozenBalance);
         dto.setGameBalance(user.getGameBalance() != null ? user.getGameBalance() : BigDecimal.ZERO);
@@ -202,6 +206,13 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements Us
         dto.setProfit(profit);
         dto.setProfitPct(profitPct);
         return dto;
+    }
+
+    @Override
+    public void markLogin(Long userId) {
+        if (baseMapper.updateLastLoginAt(userId) == 0) {
+            throw new BizException(ErrorCode.USER_NOT_FOUND);
+        }
     }
 
     @Override

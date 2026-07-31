@@ -11,8 +11,8 @@ import { Button } from '../components/ui/button';
 import { Dialog, DialogHeader, DialogContent, DialogFooter } from '../components/ui/dialog';
 import { cn, fmtDateTime } from '../lib/utils';
 import type { CommentItem } from '../types';
+import { isAdminUser } from '../lib/userAccess';
 
-const ADMIN_USER_ID = 1;
 const MAX_LEN = 500;
 const ROOT_PAGE_SIZE = 20;
 const CHILD_PAGE_SIZE = 10;
@@ -273,7 +273,7 @@ export function Comments() {
   const user = useUserStore(s => s.user);
 
   const currentUserId = user?.id ?? null;
-  const isAdmin = currentUserId === ADMIN_USER_ID;
+  const isAdmin = isAdminUser(user);
   // 路由已挡住未登录，这里为 null 只可能是 fetchUser 还没回来
   const ready = currentUserId != null;
   const focusId = params.get('focus');

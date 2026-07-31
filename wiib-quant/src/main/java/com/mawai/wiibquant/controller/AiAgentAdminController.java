@@ -37,7 +37,7 @@ import java.util.Set;
 @RestController
 @RequestMapping("/api/admin/ai-agent")
 @RequiredArgsConstructor
-@RequireAdmin // 整个 AI Agent 管理控制器仅管理员(userId=1)可访问
+@RequireAdmin // 整个 AI Agent 管理控制器仅平台所有者与管理员可访问
 public class AiAgentAdminController {
 
     /** Responses API 的思考档位合法值（none=完全关思考，仅部分模型支持如 grok-4.3） */

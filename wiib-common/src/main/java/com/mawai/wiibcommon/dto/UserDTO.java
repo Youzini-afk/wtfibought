@@ -2,6 +2,7 @@ package com.mawai.wiibcommon.dto;
 
 import lombok.Data;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 /**
  * 用户DTO
@@ -17,6 +18,15 @@ public class UserDTO {
 
     /** 头像 */
     private String avatar;
+
+    /** 本地角色：1=用户，10=管理员，100=平台所有者 */
+    private Integer role;
+
+    /** 账户状态：1=正常，2=停用 */
+    private Integer status;
+
+    /** 最近一次成功登录时间 */
+    private LocalDateTime lastLoginAt;
 
     /** 余额钱包（交易） */
     private BigDecimal balance;

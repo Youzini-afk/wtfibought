@@ -9,6 +9,7 @@ import { VolTimeline } from './VolTimeline';
 import { AnalysisCard } from './AnalysisCard';
 import type { QuantDeepAnalysisView, QuantSnapshotSeriesPoint, QuantSnapshotView } from '../../types';
 import { tradeSymbolName } from '../../lib/orderSide';
+import { isAdminUser } from '../../lib/userAccess';
 
 // 只展示 quant 实际监控的标的（WATCH_SYMBOLS=BTC/ETH）
 const SYMBOLS = ['BTCUSDT', 'ETHUSDT'] as const;
@@ -28,7 +29,7 @@ const REFRESH_MS = 60_000;
  */
 export function Workbench() {
   // 数据区全员可看；Supervisor 对话按 token 计费，仅管理员可用（后端 @RequireAdmin 同步门禁）
-  const isAdmin = useUserStore(s => s.user)?.id === 1;
+  const isAdmin = useUserStore(state => isAdminUser(state.user));
   const [symbol, setSymbol] = useState<string>('BTCUSDT');
   const [hours, setHours] = useState<number>(24);
   const [series, setSeries] = useState<QuantSnapshotSeriesPoint[]>([]);

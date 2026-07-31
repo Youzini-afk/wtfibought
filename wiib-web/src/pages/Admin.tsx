@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { adminApi } from '../api';
 import type { AiKeyConfig, AiModelAssignment, InviteCode } from '../types';
@@ -14,7 +14,8 @@ import { NewApiSettingsCard } from '../components/NewApiSettingsCard';
 import { ShadowStockAdminCard } from '../components/ShadowStockAdminCard';
 import { SiteAppearanceSettingsCard } from '../components/SiteAppearanceSettingsCard';
 import { PageVisibilitySettingsCard } from '../components/PageVisibilitySettingsCard';
-import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban } from 'lucide-react';
+import { isAdminUser } from '../lib/userAccess';
+import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban, Users } from 'lucide-react';
 
 const FUNCTION_LABELS: Record<string, string> = {
   behavior: '行为分析',
@@ -61,6 +62,7 @@ function AssignmentSwitch({ checked, disabled, label, onChange }: {
 
 export function Admin() {
   const { user } = useUserStore();
+  const navigate = useNavigate();
   const { toast } = useToast();
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [quantSymbol, setQuantSymbol] = useState('BTCUSDT');
@@ -124,7 +126,7 @@ export function Admin() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      if (user?.id === 1) {
+      if (isAdminUser(user)) {
         void fetchInterestRate();
         void fetchAiKeys();
         void fetchAssignments();
@@ -137,7 +139,7 @@ export function Admin() {
   // 外层守卫保证 token 存在，user 为 null 只能是 fetchUser 还没回来 —— 等它。
   // 早先这里 !user 也一起弹，管理员刷新本页会被自己的代码踢回首页（user 没持久化，刷新必为 null）
   if (!user) return null;
-  if (user.id !== 1) return <Navigate to="/" replace />;
+  if (!isAdminUser(user)) return null;
 
   const handleAction = async (action: () => Promise<unknown>, name: string) => {
     setActionLoading(name);
@@ -290,7 +292,15 @@ export function Admin() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
-      <h1 className="text-2xl font-bold">任务管理</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold">管理后台</h1>
+          <p className="mt-1 text-xs text-muted-foreground">站点运行、用户与内容配置</p>
+        </div>
+        <Button onClick={() => navigate('/admin/users')}>
+          <Users className="h-4 w-4" /> 用户管理
+        </Button>
+      </div>
 
       {/* feed 数据流健康：独立于任务状态加载，管理员进页即见 */}
       <FeedStreamHealthCard />

@@ -2,6 +2,8 @@ package com.mawai.wiibcommon.aspect;
 
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
+import com.mawai.wiibcommon.constant.UserAccess;
+import com.mawai.wiibcommon.util.UserSessionAccess;
 
 import cn.dev33.satoken.stp.StpUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -19,18 +21,18 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class RequireAdminAspect {
 
-    /** 管理员固定为 userId=1（全站唯一管理员/平台所有者账号） */
-    private static final long ADMIN_USER_ID = 1L;
-
     @Around("@within(com.mawai.wiibcommon.annotation.RequireAdmin) "
             + "|| @annotation(com.mawai.wiibcommon.annotation.RequireAdmin)")
     public Object around(ProceedingJoinPoint point) throws Throwable {
         // 未登录会在此抛 NotLoginException → 全局处理器转 401
         long userId = StpUtil.getLoginIdAsLong();
-        if (userId != ADMIN_USER_ID) {
-            log.warn("非管理员访问被拦截: userId={}, method={}", userId, point.getSignature().toShortString());
+        int role = UserSessionAccess.roleFor(userId);
+        if (!UserAccess.isAdmin(role)) {
+            log.warn("非管理员访问被拦截: userId={}, role={}, method={}",
+                    userId, role, point.getSignature().toShortString());
             throw new BizException(ErrorCode.FORBIDDEN);
         }
         return point.proceed();
     }
+
 }

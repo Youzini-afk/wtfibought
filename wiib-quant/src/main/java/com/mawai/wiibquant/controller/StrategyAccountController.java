@@ -24,7 +24,7 @@ import java.util.List;
  * 三策略模拟盘账户监控 + 受控平仓。
  *
  * <p>前缀挂 /api/ai 下复用既有网关分流（nginx 零改动）。查看对所有登录用户开放；
- * 平仓是干预性写操作，仅 userId=1（平台所有者）可执行——前端同步只对 id=1 渲染按钮，
+ * 平仓是干预性写操作，仅平台所有者或管理员可执行——前端同步只对管理员渲染按钮，
  * 此处校验是真正的门，前端隐藏只是体验。</p>
  */
 @Slf4j
@@ -57,7 +57,7 @@ public class StrategyAccountController {
     }
 
     @PostMapping("/{strategyId}/close")
-    @Operation(summary = "手动整仓市价平（仅 userId=1）")
+    @Operation(summary = "手动整仓市价平（仅管理员）")
     @RequireAdmin // 平仓是干预性写操作，仅管理员可执行
     public Result<Void> close(@PathVariable String strategyId, @RequestBody ClosePositionRequest request) {
         if (request == null || request.getPositionId() == null) {

@@ -14,8 +14,8 @@ import { cn, fmtDateTime, fmtNum } from '../lib/utils';
 import type { FuturesPosition, StrategyAccountView, StrategyClosedPosition, StrategySignalState } from '../types';
 import type { TnEquityPoint } from '../types/testnet';
 import { tradeSymbolName } from '../lib/orderSide';
+import { isAdminUser } from '../lib/userAccess';
 
-const ADMIN_USER_ID = 1;
 const REFRESH_MS = 60_000;
 
 /** 策略展示名与一句话说明（id 来自 TradingStrategySpi.id()）+ 专属点缀色（图标底/识别用，不入图表） */
@@ -299,13 +299,13 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
 
 /**
  * 四策略账户监控：FIBO / LIQFADE / SQZMOM / TURTLE 各绑独立模拟盘账户（盈亏归因互不污染）。
- * PC 2×2 田字格对比，移动端竖排。平仓按钮仅 userId=1 渲染，后端二次校验才是真正的门。
+ * PC 2×2 田字格对比，移动端竖排。平仓按钮仅管理员渲染，后端二次校验才是真正的门。
  */
 export function Strategies() {
   const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   const { toast } = useToast();
   const user = useUserStore(s => s.user);
-  const isAdmin = user?.id === ADMIN_USER_ID;
+  const isAdmin = isAdminUser(user);
 
   const [views, setViews] = useState<StrategyAccountView[]>([]);
   const [signals, setSignals] = useState<StrategySignalState[]>([]);
@@ -335,7 +335,7 @@ export function Strategies() {
     return () => clearInterval(timer);
   }, [load]);
 
-  // 点击即市价整仓平（服务端实时取仓位数量+userId==1 校验），无二次确认
+  // 点击即市价整仓平（服务端实时取仓位数量并校验管理员角色），无二次确认
   const handleClose = useCallback(async (strategyId: string, pos: FuturesPosition) => {
     if (closingId != null) return;
     setClosingId(pos.id);

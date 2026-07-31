@@ -1,6 +1,6 @@
 package com.mawai.wiibquant.controller;
 
-import cn.dev33.satoken.stp.StpUtil;
+import com.mawai.wiibcommon.annotation.RequireAdmin;
 import com.mawai.wiibcommon.util.Result;
 import com.mawai.wiibquant.agent.binance.BinanceFuturesTestnetClient;
 import com.mawai.wiibquant.agent.binance.model.OrderResponse;
@@ -23,31 +23,22 @@ import java.util.Objects;
 /**
  * Binance Testnet 手动交易：上线/联调前人工开平仓冒烟，验证下单链路(签名→下单→持仓)通不通。
  *
- * <p>仅 admin(userId==1) 可调；symbol 受 {@link BinanceFuturesTestnetClient} 白名单约束；市价+限价都支持。
+ * <p>仅平台所有者或管理员可调；symbol 受 {@link BinanceFuturesTestnetClient} 白名单约束；市价+限价都支持。
  * 与自动策略执行 {@link com.mawai.wiibquant.agent.strategy.execution.TestnetExecutionService} 互不感知，
  * 手动冒烟期间建议关闭 strategy.execution.enabled，避免两套状态机互相干扰。</p>
  */
 @Slf4j
 @RestController
+@RequireAdmin
 @RequestMapping("/api/testnet/manual")
 @RequiredArgsConstructor
 public class TestnetTradeController {
 
     private final BinanceFuturesTestnetClient client;
 
-    /** 仅 1 号用户放行；未登录/token 无效/非 1 号都判非管理员(不抛异常，避免 500 与误触发前端登录跳转)。 */
-    private boolean notAdmin() {
-        try {
-            return StpUtil.getLoginIdAsLong() != 1L;
-        } catch (Exception e) {
-            return true;
-        }
-    }
-
     /** 手动下单：MARKET 立即成交 / LIMIT 挂单。传 leverage 则先调杠杆再下单。 */
     @PostMapping("/order")
     public Result<OrderResponse> order(@RequestBody ManualOrderRequest req) {
-        if (notAdmin()) return Result.fail("仅管理员可操作");
         try {
             if (req.getSymbol() == null || req.getSide() == null || req.getType() == null) {
                 return Result.fail("symbol/side/type 必填");
@@ -89,7 +80,6 @@ public class TestnetTradeController {
     /** 一键市价平仓：查持仓→反向 MARKET reduceOnly 全平。无持仓则提示。 */
     @PostMapping("/close")
     public Result<OrderResponse> close(@RequestParam String symbol) {
-        if (notAdmin()) return Result.fail("仅管理员可操作");
         try {
             List<PositionRisk> risks = client.getPositionRisk(symbol);
             BigDecimal amt = risks == null ? BigDecimal.ZERO : risks.stream()
@@ -121,7 +111,6 @@ public class TestnetTradeController {
     /** 撤销该 symbol 全部挂单(清场，方便重测)。 */
     @PostMapping("/cancel-all")
     public Result<SimpleAck> cancelAll(@RequestParam String symbol) {
-        if (notAdmin()) return Result.fail("仅管理员可操作");
         try {
             SimpleAck ack = client.cancelAllOpenOrders(symbol);
             log.info("[TestnetManual] 撤全部挂单 symbol={}", symbol);

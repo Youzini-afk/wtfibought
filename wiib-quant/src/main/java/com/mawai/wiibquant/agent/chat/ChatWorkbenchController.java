@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 @RestController
 @RequestMapping("/api/ai/workbench")
 @RequiredArgsConstructor
-@RequireAdmin // 暂只对管理员(userId=1)开放：LLM 对话按 token 计费，放开前先观察成本
+@RequireAdmin // 暂只对平台所有者与管理员开放：LLM 对话按 token 计费，放开前先观察成本
 public class ChatWorkbenchController {
 
     private final ChatAgentFactory chatAgentFactory;

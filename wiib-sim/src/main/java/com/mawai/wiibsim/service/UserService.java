@@ -49,6 +49,9 @@ public interface UserService extends IService<User> {
      */
     UserDTO getUserPortfolio(Long userId);
 
+    /** 成功登录后记录最近登录时间。 */
+    void markLogin(Long userId);
+
     /**
      * 更新用户余额（带乐观锁重试）
      *

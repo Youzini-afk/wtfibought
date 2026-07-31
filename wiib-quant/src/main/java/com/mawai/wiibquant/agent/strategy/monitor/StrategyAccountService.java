@@ -92,7 +92,7 @@ public class StrategyAccountService {
     }
 
     /**
-     * 受控整仓市价平（调用方已完成 userId==1 校验）：服务端实时拉仓位确认 OPEN 并取当前数量，
+     * 受控整仓市价平（调用方已完成管理员校验）：服务端实时拉仓位确认 OPEN 并取当前数量，
      * 不信前端传的 qty。平掉后策略状态机由 SimExecutionService 的对账轮询自动回 FLAT，无需通知。
      */
     public void closePosition(String strategyId, Long positionId) {

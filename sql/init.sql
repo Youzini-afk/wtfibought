@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS "user" (
     avatar VARCHAR(256),
     password_hash VARCHAR(60),
     invite_code_id BIGINT,
+    role INT NOT NULL DEFAULT 1,
+    status INT NOT NULL DEFAULT 1,
+    last_login_at TIMESTAMP,
     balance DECIMAL(18,2) NOT NULL DEFAULT 0.00,
     frozen_balance DECIMAL(18,2) NOT NULL DEFAULT 0,
     game_balance DECIMAL(18,2) NOT NULL DEFAULT 0,
@@ -40,6 +43,9 @@ COMMENT ON COLUMN "user".username IS '用户名（全局唯一，密码登录按
 COMMENT ON COLUMN "user".avatar IS '头像URL';
 COMMENT ON COLUMN "user".password_hash IS 'BCrypt密码哈希（定长60，OAuth用户为空）';
 COMMENT ON COLUMN "user".invite_code_id IS '注册用的邀请码ID（可追溯，OAuth用户为空）';
+COMMENT ON COLUMN "user".role IS '本地角色：1=用户，10=管理员，100=平台所有者（仅id=1）';
+COMMENT ON COLUMN "user".status IS '账户状态：1=正常，2=停用';
+COMMENT ON COLUMN "user".last_login_at IS '最近一次成功登录时间';
 COMMENT ON COLUMN "user".balance IS '余额钱包（交易：现货/B股/合约/杠杆，全仓保证金池）';
 COMMENT ON COLUMN "user".frozen_balance IS '冻结余额（限价买单冻结，属余额钱包）';
 COMMENT ON COLUMN "user".game_balance IS '游戏钱包（Mines/扑克/21点/预测市场，与全仓风险隔离）';
@@ -55,6 +61,22 @@ COMMENT ON COLUMN "user".created_at IS '创建时间';
 COMMENT ON COLUMN "user".updated_at IS '更新时间';
 
 CREATE INDEX IF NOT EXISTS idx_user_bankrupt ON "user"(is_bankrupt, bankrupt_reset_date);
+
+-- 用户管理审计：只记录字段级变更，不记录密码、Token 或请求正文
+CREATE TABLE IF NOT EXISTS admin_user_audit (
+    id BIGSERIAL PRIMARY KEY,
+    operator_user_id BIGINT NOT NULL,
+    target_user_id BIGINT NOT NULL,
+    action VARCHAR(32) NOT NULL,
+    before_value VARCHAR(255),
+    after_value VARCHAR(255),
+    reason VARCHAR(200) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_admin_user_audit_target
+    ON admin_user_audit(target_user_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_admin_user_audit_operator
+    ON admin_user_audit(operator_user_id, id DESC);
 
 -- ============================================
 -- 1b. 邀请码表（邀请码注册模式：有码才能注册本地账号）
@@ -820,6 +842,13 @@ COMMENT ON COLUMN "user".muted_until IS '禁言到期时间，NULL或已过期=�
 -- 排行榜用户详情页的公开开关。DEFAULT TRUE 让存量用户和新用户都是开着的（需求：默认开启）
 ALTER TABLE "user" ADD COLUMN IF NOT EXISTS profile_public BOOLEAN NOT NULL DEFAULT TRUE;
 COMMENT ON COLUMN "user".profile_public IS '是否允许别人查看自己的持仓与交易历史。关掉只挡详情页，仍照常上排行榜（榜上只有总资产/收益率）';
+
+-- 用户后台：存量用户均为普通用户，id=1 永远是平台所有者。
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS role INT NOT NULL DEFAULT 1;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS status INT NOT NULL DEFAULT 1;
+ALTER TABLE "user" ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMP;
+UPDATE "user" SET role = 100, status = 1 WHERE id = 1;
+CREATE INDEX IF NOT EXISTS idx_user_admin_filter ON "user"(status, role, id DESC);
 
 -- 额度经济接入：已有库重跑 init.sql 时也取消新用户/21点独立筹码的默认赠送。
 ALTER TABLE "user" ALTER COLUMN balance SET DEFAULT 0.00;

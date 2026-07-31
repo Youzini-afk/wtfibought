@@ -5,6 +5,7 @@ import type { LedgerEntry, LedgerBizTypeOption, PublicTrade, UserProfile, Positi
 import type { NewApiAdminSettings, UpdateNewApiAdminSettings } from '../types';
 import type { SiteAdminSettings, SiteSettings, UpdateSiteSettings } from '../types';
 import type { BStockAdminItem, BStockCatalogStatus, BStockCatalogSyncResult, UpdateBStockAdminRequest } from '../types';
+import type { AdminUserAudit, AdminUserItem, AdminUserStats, AdminUserUpdateRequest, UserRole, UserStatus } from '../types';
 import { registerBStockAliases } from '../lib/orderSide';
 import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, BStockAlias, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, AssetSeriesPoint, AssetSeriesRange, AssetSeriesInterval, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
@@ -200,6 +201,20 @@ export const siteSettingsApi = {
 
 // ========== 管理接口 ==========
 export const adminApi = {
+  // 用户管理：服务端同样受 @RequireAdmin 保护，不能靠前端隐藏作为权限边界
+  listUsers: (params: {
+    keyword?: string;
+    role?: UserRole;
+    status?: UserStatus;
+    pageNum?: number;
+    pageSize?: number;
+  } = {}) => api.get<unknown, PageResult<AdminUserItem>>('/admin/users', { params }),
+  userStats: () => api.get<unknown, AdminUserStats>('/admin/users/stats'),
+  userPortfolio: (id: number) => api.get<unknown, User>(`/admin/users/${id}/portfolio`),
+  userAudits: (id: number, params: { pageNum?: number; pageSize?: number } = {}) =>
+    api.get<unknown, PageResult<AdminUserAudit>>(`/admin/users/${id}/audits`, { params }),
+  updateUser: (id: number, request: AdminUserUpdateRequest) =>
+    api.put<unknown, AdminUserItem>(`/admin/users/${id}`, request),
   bankruptcyCheck: () => api.post<unknown, void>('/admin/task/bankruptcy/check'),
   accrueInterest: () => api.post<unknown, void>('/admin/task/margin/accrue-interest'),
   getDailyInterestRate: () => api.get<unknown, number>('/admin/task/margin/daily-interest-rate'),
@@ -227,7 +242,7 @@ export const adminApi = {
   generateInviteCodes: (maxUses: number, count: number) =>
     api.post<unknown, InviteCode[]>('/admin/invite-code/generate', { maxUses, count }),
   disableInviteCode: (id: number) => api.post<unknown, void>(`/admin/invite-code/${id}/disable`),
-  // WTFiB 侧 New API SSO / 额度桥接运行时设置（仅 userId=1）
+  // WTFiB 侧 New API SSO / 额度桥接运行时设置（仅管理员）
   getNewApiSettings: () => api.get<unknown, NewApiAdminSettings>('/admin/new-api-settings'),
   updateNewApiSettings: (settings: UpdateNewApiAdminSettings) =>
     api.put<unknown, NewApiAdminSettings>('/admin/new-api-settings', settings),
@@ -529,7 +544,7 @@ export const strategyAccountApi = {
   overview: () => api.get<unknown, StrategyAccountView[]>('/ai/strategies/overview'),
   /** 各策略×币种实时信号状态（通道位置/压缩计数/签名命中） */
   signals: () => api.get<unknown, StrategySignalState[]>('/ai/strategies/signals'),
-  /** 整仓市价平（后端仅 userId=1 放行） */
+  /** 整仓市价平（后端仅管理员放行） */
   close: (strategyId: string, positionId: number) =>
     api.post<unknown, void>(`/ai/strategies/${strategyId}/close`, { positionId }),
 };

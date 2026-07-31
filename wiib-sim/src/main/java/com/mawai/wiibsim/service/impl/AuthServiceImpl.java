@@ -6,6 +6,8 @@ import cn.hutool.json.JSONObject;
 import cn.hutool.json.JSONUtil;
 import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibcommon.entity.User;
+import com.mawai.wiibcommon.constant.UserAccess;
+import com.mawai.wiibcommon.util.UserSessionAccess;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibsim.config.LinuxDoConfig;
@@ -129,6 +131,7 @@ public class AuthServiceImpl implements AuthService {
                 }
                 log.info("新用户注册: {} LinuxDoId={}", username, linuxDoId);
             } else {
+                assertActive(user);
                 // 更新用户信息
                 user.setUsername(username);
                 user.setAvatar(avatar);
@@ -141,8 +144,7 @@ public class AuthServiceImpl implements AuthService {
             }
 
             // 4. 登录（Sa-Token）
-            StpUtil.login(user.getId());
-            String token = StpUtil.getTokenValue();
+            String token = loginUser(user);
 
             log.info("用户登录成功: {} UserId={}", username, user.getId());
 
@@ -161,6 +163,11 @@ public class AuthServiceImpl implements AuthService {
     @Override
     public UserDTO getCurrentUser() {
         Long userId = StpUtil.getLoginIdAsLong();
+        User user = userService.getById(userId);
+        if (user == null) throw new BizException(ErrorCode.USER_NOT_FOUND);
+        assertActive(user);
+        // 兼容升级前已存在的会话，并在每次应用冷启动取本人资料时校准服务端角色。
+        UserSessionAccess.bindRole(user.getId(), user.getRole());
         return userService.getUserPortfolio(userId);
     }
 
@@ -192,10 +199,10 @@ public class AuthServiceImpl implements AuthService {
     public String handleNewApiCallback(String code) {
         try {
             User user = newApiIntegrationService.resolveSsoUser(code);
-            StpUtil.login(user.getId());
+            String token = loginUser(user);
             log.info("New API SSO 登录成功 username={} userId={} newApiUserId={}",
                     user.getUsername(), user.getId(), user.getNewApiUserId());
-            return StpUtil.getTokenValue();
+            return token;
         } catch (BizException e) {
             throw e;
         } catch (Exception e) {
@@ -214,8 +221,7 @@ public class AuthServiceImpl implements AuthService {
             throw new BizException("已启用正式登录方式，管理员直登不可用");
         }
         userService.ensureAdminUser();   // 幂等，保证 id=1 存在
-        StpUtil.login(1L);
-        String token = StpUtil.getTokenValue();
+        String token = loginUser(userService.getById(UserAccess.OWNER_USER_ID));
         log.info("管理员直登成功 UserId=1");
         return token;
     }
@@ -258,9 +264,9 @@ public class AuthServiceImpl implements AuthService {
         }
         // 非零兼容配置仍补期初账；默认 0 不产生虚假的赠送流水。
         userService.recordInitialGrant(user.getId(), initialBalance);
-        StpUtil.login(user.getId());
+        String token = loginUser(user);
         log.info("邀请码注册成功: {} UserId={} inviteCodeId={}", name, user.getId(), codeId);
-        return StpUtil.getTokenValue();
+        return token;
     }
 
     @Override
@@ -274,9 +280,28 @@ public class AuthServiceImpl implements AuthService {
                 || password == null || !BCrypt.checkpw(password, user.getPasswordHash())) {
             throw new BizException("用户名或密码错误");
         }
-        StpUtil.login(user.getId());
+        String token = loginUser(user);
         log.info("密码登录成功: {} UserId={}", user.getUsername(), user.getId());
+        return token;
+    }
+
+    /**
+     * 所有登录方式共用的最终闸门：停用账户不能签发新会话；角色只写服务端 Session，
+     * 客户端无法伪造。角色/状态发生管理变更时会踢掉旧 Token，重新登录后刷新此值。
+     */
+    private String loginUser(User user) {
+        if (user == null) throw new BizException(ErrorCode.USER_NOT_FOUND);
+        assertActive(user);
+        userService.markLogin(user.getId());
+        StpUtil.login(user.getId());
+        UserSessionAccess.bindRole(user.getId(), user.getRole());
         return StpUtil.getTokenValue();
+    }
+
+    private void assertActive(User user) {
+        if (UserAccess.normalizeStatus(user.getStatus()) == UserAccess.STATUS_DISABLED) {
+            throw new BizException(ErrorCode.USER_DISABLED);
+        }
     }
 
     /**

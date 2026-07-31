@@ -12,6 +12,7 @@ import { TickerStrip } from './TickerStrip';
 import { OfflineBanner } from './OfflineBanner';
 import { cn } from '../lib/utils';
 import { bstockApi } from '../api';
+import { isAdminUser } from '../lib/userAccess';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
@@ -119,7 +120,7 @@ export function Layout({ children }: Props) {
                 两边都不显示，否则每次刷新都要闪一下"登录"再变回用户名 */}
             {user ? (
               <div className="flex items-center gap-2">
-                {user.id === 1 && (
+                {isAdminUser(user) && (
                   <Button
                     variant="ghost"
                     size="sm"

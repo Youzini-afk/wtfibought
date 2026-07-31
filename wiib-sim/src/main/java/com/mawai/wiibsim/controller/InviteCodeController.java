@@ -20,7 +20,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/admin/invite-code")
 @RequiredArgsConstructor
-@RequireAdmin // 仅管理员(userId=1)可访问
+@RequireAdmin // 仅平台所有者与管理员可访问
 public class InviteCodeController {
 
     private final InviteCodeMapper inviteCodeMapper;

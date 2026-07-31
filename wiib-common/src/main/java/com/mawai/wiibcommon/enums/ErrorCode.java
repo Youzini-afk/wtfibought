@@ -24,6 +24,7 @@ public enum ErrorCode {
     ORDER_NOT_FOUND(1007, "订单不存在"),
     ORDER_CANNOT_CANCEL(1008, "订单无法取消"),
     DUPLICATE_REQUEST(1009, "重复请求"),
+    USER_DISABLED(1010, "账号已停用，请联系管理员"),
     LIMIT_PRICE_INVALID(1011, "限价无效"),
 
     // 并发控制错误码 1100+

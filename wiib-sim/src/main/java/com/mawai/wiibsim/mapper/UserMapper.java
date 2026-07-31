@@ -62,8 +62,8 @@ public interface UserMapper extends BaseMapper<User> {
      * linux_do_id 用固定哨兵占位（不会与真实 LinuxDo 数字 id 冲突）；
      * 其余 NOT NULL 列走 DB 默认值；ON CONFLICT 保证并发/重复调用安全。
      */
-    @Insert("INSERT INTO \"user\" (id, linux_do_id, username, balance) " +
-            "VALUES (1, 'local-admin', 'admin', #{balance}) " +
+    @Insert("INSERT INTO \"user\" (id, linux_do_id, username, balance, role, status) " +
+            "VALUES (1, 'local-admin', 'admin', #{balance}, 100, 1) " +
             "ON CONFLICT (id) DO NOTHING")
     int insertAdmin(@Param("balance") BigDecimal balance);
 
@@ -93,8 +93,20 @@ public interface UserMapper extends BaseMapper<User> {
     int resetToInitial(@Param("userId") long userId, @Param("initialBalance") BigDecimal initialBalance);
 
     /** 禁言到期时间（留言板管理用）。只动这一列，且 resetToInitial 刻意不复位它——禁言要扛过重置 */
-    @Update("UPDATE \"user\" SET muted_until = #{mutedUntil}, updated_at = NOW() WHERE id = #{userId}")
+    @Update("UPDATE \"user\" SET muted_until = #{mutedUntil,jdbcType=TIMESTAMP}, updated_at = NOW() WHERE id = #{userId}")
     int updateMutedUntil(@Param("userId") long userId, @Param("mutedUntil") LocalDateTime mutedUntil);
+
+    /** 管理端仅更新账户状态；资金字段绝不参与实体回写。 */
+    @Update("UPDATE \"user\" SET status = #{status}, updated_at = NOW() WHERE id = #{userId}")
+    int updateStatus(@Param("userId") long userId, @Param("status") int status);
+
+    /** 管理端仅更新角色；OWNER 角色仍由服务层限制为 id=1。 */
+    @Update("UPDATE \"user\" SET role = #{role}, updated_at = NOW() WHERE id = #{userId}")
+    int updateRole(@Param("userId") long userId, @Param("role") int role);
+
+    /** 成功登录后写入活跃时间，不触碰任何资料或资金字段。 */
+    @Update("UPDATE \"user\" SET last_login_at = NOW(), updated_at = NOW() WHERE id = #{userId}")
+    int updateLastLoginAt(@Param("userId") long userId);
 
     /**
      * 原子更新可用余额，返回变动后余额；null=余额不足没改成。

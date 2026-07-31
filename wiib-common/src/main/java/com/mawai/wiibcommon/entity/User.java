@@ -36,6 +36,18 @@ public class User {
     /** 注册用的邀请码ID（可追溯，OAuth用户为空） */
     private Long inviteCodeId;
 
+    /** 本地角色：1=用户，10=管理员，100=平台所有者（仅 id=1） */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Integer role;
+
+    /** 账户状态：1=正常，2=停用 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private Integer status;
+
+    /** 最近一次成功登录时间 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
+    private LocalDateTime lastLoginAt;
+
     /** 余额钱包（交易：现货/B股/合约/杠杆，也是全仓保证金池）。
         updateStrategy=NEVER：资金字段禁止随实体更新——否则 updateById 会把读取时刻的旧值
         整行写回，覆盖掉期间发生的交易（AuthServiceImpl 登录更新资料时踩过）。
@@ -82,6 +94,7 @@ public class User {
     private LocalDate bankruptResetDate;
 
     /** 禁言到期时间，NULL 或已过期=未禁言。到期自动解禁；重置账户刻意不清它 */
+    @TableField(updateStrategy = FieldStrategy.NEVER)
     private LocalDateTime mutedUntil;
 
     /**

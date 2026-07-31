@@ -20,7 +20,7 @@ import java.time.LocalDate;
 @RestController
 @RequestMapping("/api/admin/task")
 @RequiredArgsConstructor
-@RequireAdmin // 整个任务管理控制器仅管理员(userId=1)可访问
+@RequireAdmin // 整个任务管理控制器仅平台所有者与管理员可访问
 public class TaskController {
 
     private final TradingConfig tradingConfig;

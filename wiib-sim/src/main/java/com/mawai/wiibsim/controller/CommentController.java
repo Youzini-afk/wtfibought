@@ -6,6 +6,9 @@ import com.mawai.wiibcommon.dto.CommentDTO;
 import com.mawai.wiibcommon.enums.ErrorCode;
 import com.mawai.wiibcommon.exception.BizException;
 import com.mawai.wiibcommon.util.Result;
+import com.mawai.wiibcommon.util.UserSessionAccess;
+import com.mawai.wiibsim.dto.AdminUserUpdateRequest;
+import com.mawai.wiibsim.service.AdminUserService;
 import com.mawai.wiibsim.service.CommentService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,10 +36,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class CommentController {
 
-    /** 管理员固定为 userId=1，与 RequireAdminAspect 同一口径 */
-    private static final long ADMIN_USER_ID = 1L;
-
     private final CommentService commentService;
+    private final AdminUserService adminUserService;
 
     @Data
     public static class PostRequest {
@@ -57,6 +58,8 @@ public class CommentController {
         private Long userId;
         /** 禁言天数：-1=永久，0=立即解禁 */
         private Integer days;
+        /** 可选管理原因；旧前端未传时使用留言板管理作为审计原因 */
+        private String reason;
     }
 
     @GetMapping
@@ -114,18 +117,22 @@ public class CommentController {
     @DeleteMapping("/{id}")
     @Operation(summary = "删除评论（本人或管理员）")
     public Result<Void> delete(@CurrentUserId Long userId, @PathVariable long id) {
-        commentService.delete(id, userId, userId == ADMIN_USER_ID);
+        commentService.delete(id, userId, UserSessionAccess.currentIsAdmin());
         return Result.ok(null);
     }
 
     @PostMapping("/mute")
     @RequireAdmin
     @Operation(summary = "禁言用户（管理员）")
-    public Result<Void> mute(@RequestBody MuteRequest req) {
+    public Result<Void> mute(@CurrentUserId Long operatorId, @RequestBody MuteRequest req) {
         if (req.getUserId() == null || req.getDays() == null) {
             throw new BizException(ErrorCode.PARAM_ERROR);
         }
-        commentService.mute(req.getUserId(), req.getDays());
+        AdminUserUpdateRequest update = new AdminUserUpdateRequest();
+        update.setMuteDays(req.getDays());
+        update.setReason(req.getReason() == null || req.getReason().isBlank()
+                ? "留言板管理" : req.getReason());
+        adminUserService.update(operatorId, req.getUserId(), update);
         return Result.ok(null);
     }
 }

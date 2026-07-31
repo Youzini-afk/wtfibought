@@ -1,10 +1,17 @@
+export type UserRole = 1 | 10 | 100;
+export type UserStatus = 1 | 2;
+
 export interface User {
   id: number;
   username: string;
   avatar?: string;
+  role: UserRole;
+  status: UserStatus;
+  lastLoginAt?: string;
   balance: number;
   /** 游戏钱包：Mines/扑克/21点兑现/预测市场专用，和交易 balance 分离 */
   gameBalance: number;
+  protectedPrincipal: number;
   frozenBalance: number;
   positionMarketValue: number;
   pendingSettlement: number;
@@ -25,6 +32,63 @@ export interface PageResult<T> {
   size: number;
   current: number;
   pages: number;
+}
+
+export interface AdminUserItem {
+  id: number;
+  username: string;
+  avatar?: string;
+  role: UserRole;
+  status: UserStatus;
+  linuxDoId?: string;
+  newApiUserId?: number;
+  loginProvider: 'SYSTEM' | 'NEW_API' | 'LINUX_DO' | 'PASSWORD' | 'LOCAL';
+  balance: number;
+  frozenBalance: number;
+  gameBalance: number;
+  protectedPrincipal: number;
+  marginLoanPrincipal: number;
+  marginInterestAccrued: number;
+  bankrupt: boolean;
+  bankruptCount: number;
+  mutedUntil?: string;
+  muted: boolean;
+  profilePublic: boolean;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+  systemAccount: boolean;
+  manageable: boolean;
+  roleEditable: boolean;
+}
+
+export interface AdminUserStats {
+  total: number;
+  active: number;
+  disabled: number;
+  admins: number;
+  muted: number;
+  bankrupt: number;
+}
+
+export interface AdminUserAudit {
+  id: number;
+  operatorUserId: number;
+  operatorUsername?: string;
+  targetUserId: number;
+  action: 'STATUS' | 'ROLE' | 'MUTE';
+  beforeValue?: string;
+  afterValue?: string;
+  reason: string;
+  createdAt: string;
+}
+
+export interface AdminUserUpdateRequest {
+  status?: UserStatus;
+  role?: Exclude<UserRole, 100>;
+  /** 0=解禁，-1=永久禁言，正数=天数；不传表示不修改 */
+  muteDays?: number;
+  reason: string;
 }
 
 /**

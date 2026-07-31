@@ -15,6 +15,7 @@ import { userApi } from '../api';
 import { Trophy, Gamepad2, Sun, Moon, LogOut, ChevronRight, User, LineChart, Monitor, RotateCcw, MessageSquare, Bell, Receipt, ShieldCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import type { PageVisibilityKey } from '../types';
+import { isAdminUser } from '../lib/userAccess';
 
 interface MeNavItem {
   icon: typeof Receipt;
@@ -75,7 +76,7 @@ export function Me() {
   };
 
   const allItems: MeNavItem[] = [
-    ...(user?.id === 1
+    ...(isAdminUser(user)
       ? [{ icon: ShieldCheck, label: '管理后台', to: '/admin', color: 'text-primary' }]
       : []),
     // 账单没进顶栏/底栏（导航已经满了），手机端只有这一个入口，放第一位

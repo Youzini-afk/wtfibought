@@ -11,7 +11,7 @@ import com.mawai.wiibsim.service.BStockAdminService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
-/** 仅 userId=1 可维护；普通用户只读公开影子市场接口。 */
+/** 仅平台所有者与管理员可维护；普通用户只读公开影子市场接口。 */
 @RestController
 @RequireAdmin
 @RequiredArgsConstructor

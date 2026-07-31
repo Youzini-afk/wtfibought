@@ -17,6 +17,7 @@ import { Ranking } from './pages/Ranking';
 import { Comments } from './pages/Comments';
 import { Login } from './pages/Login';
 import { Admin } from './pages/Admin';
+import { AdminUsers } from './pages/AdminUsers';
 import { Blackjack } from './pages/Blackjack';
 import { Mines } from './pages/Mines';
 import { VideoPoker } from './pages/VideoPoker';
@@ -34,6 +35,7 @@ import { useUserStore } from './stores/userStore';
 import { useSiteSettingsStore } from './stores/siteSettingsStore';
 import type { PageVisibilityKey } from './types';
 import { userApi } from './api';
+import { isAdminUser } from './lib/userAccess';
 
 declare global {
   interface Window {
@@ -65,6 +67,14 @@ function RequirePage({ page, children }: { page: PageVisibilityKey; children: Re
 function RequireVisibilityReady({ children }: { children: ReactNode }) {
   const ready = useSiteSettingsStore(state => state.visibilityReady);
   return ready ? <>{children}</> : null;
+}
+
+/** 管理路由体验层守卫；真正权限仍由后端 @RequireAdmin 强制执行。 */
+function RequireAdminRoute({ children }: { children: ReactNode }) {
+  const user = useUserStore(state => state.user);
+  if (!user) return null;
+  if (!isAdminUser(user)) return <Navigate to="/" replace />;
+  return <>{children}</>;
 }
 
 function App() {
@@ -124,7 +134,8 @@ function App() {
                   <Route path="/ranking" element={<RequirePage page="ranking"><Ranking /></RequirePage>} />
                   <Route path="/user/:id" element={<RequirePage page="ranking"><UserProfile /></RequirePage>} />
                   <Route path="/comments" element={<RequirePage page="comments"><Comments /></RequirePage>} />
-                  <Route path="/admin" element={<Admin />} />
+                  <Route path="/admin" element={<RequireAdminRoute><Admin /></RequireAdminRoute>} />
+                  <Route path="/admin/users" element={<RequireAdminRoute><AdminUsers /></RequireAdminRoute>} />
                   <Route path="/games" element={<RequirePage page="games"><Games /></RequirePage>} />
                   <Route path="/me" element={<Me />} />
                   <Route path="/blackjack" element={<RequirePage page="games"><Blackjack /></RequirePage>} />

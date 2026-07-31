@@ -15,6 +15,7 @@ import type {
   TnOverview, TnTrade, TnDailyCell, TnEquityPoint, TnFillStats, TnPosition, TnOpenOrder,
 } from '../types/testnet';
 import { tradeSymbolName } from '../lib/orderSide';
+import { isAdminUser } from '../lib/userAccess';
 
 const SYMBOLS = ['ALL', 'BTCUSDT', 'ETHUSDT'] as const;
 
@@ -395,8 +396,8 @@ export function TestnetMonitor() {
         </div>
       )}
 
-      {/* 接口自检面板（仅 admin=1 可见；后端再做一次 admin 门控） */}
-      {user?.id === 1 && <ManualTradePanel onDone={load} />}
+      {/* 接口自检面板只对管理员可见；后端 @RequireAdmin 再做一次门控。 */}
+      {isAdminUser(user) && <ManualTradePanel onDone={load} />}
 
       {/* 空态提示 */}
       {isEmpty && (
