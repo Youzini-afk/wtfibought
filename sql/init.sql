@@ -896,7 +896,7 @@ CREATE TABLE IF NOT EXISTS user_ledger (
     delta         DECIMAL(18,2) NOT NULL,
     balance_after DECIMAL(18,2) NOT NULL,
     fee           DECIMAL(18,2),
-    ref_type      VARCHAR(16),
+    ref_type      TEXT,
     ref_id        BIGINT,
     symbol        VARCHAR(32),
     remark        VARCHAR(128),
