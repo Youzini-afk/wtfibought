@@ -107,6 +107,11 @@ export function Portfolio() {
   const [resetOpen, setResetOpen] = useState(false);
   const [confirmName, setConfirmName] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [user?.avatar]);
 
   useEffect(() => {
     if (panel === 'profit' && !profitLoaded) {
@@ -305,8 +310,13 @@ export function Portfolio() {
           {/* 头部行：头像+用户名 / 切换按钮 */}
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 sm:mb-5">
             <div className="flex items-center gap-3">
-              {user.avatar ? (
-                <img src={user.avatar} alt="" className="w-10 h-10 rounded-full ring-1 ring-primary/30 ring-offset-1 ring-offset-card" />
+              {user.avatar && !avatarFailed ? (
+                <img
+                  src={user.avatar}
+                  alt=""
+                  className="w-10 h-10 rounded-full object-cover ring-1 ring-primary/30 ring-offset-1 ring-offset-card"
+                  onError={() => setAvatarFailed(true)}
+                />
               ) : (
                 <div className="w-10 h-10 rounded-full bg-primary/15 flex items-center justify-center ring-1 ring-primary/20">
                   <Wallet className="w-5 h-5 text-primary" />

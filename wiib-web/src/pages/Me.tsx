@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUserStore } from '../stores/userStore';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
@@ -33,6 +33,11 @@ export function Me() {
 
   const [resetOpen, setResetOpen] = useState(false);
   const [confirmName, setConfirmName] = useState('');
+  const [avatarFailed, setAvatarFailed] = useState(false);
+
+  useEffect(() => {
+    setAvatarFailed(false);
+  }, [user?.avatar]);
   const [resetting, setResetting] = useState(false);
 
   // 通知：手机端顶栏信封是 hidden md:flex 看不到，这里是手机用户唯一的通知入口。
@@ -93,9 +98,18 @@ export function Me() {
       <Card>
         <CardContent className="pt-5">
           <div className="flex items-center gap-4">
-            <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-primary/20 to-accent/10 flex items-center justify-center">
-              <User className="w-6 h-6 text-primary" />
-            </div>
+            {user.avatar && !avatarFailed ? (
+              <img
+                src={user.avatar}
+                alt=""
+                className="w-12 h-12 rounded-2xl object-cover ring-1 ring-primary/30"
+                onError={() => setAvatarFailed(true)}
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-2xl bg-linear-to-br from-primary/20 to-accent/10 flex items-center justify-center">
+                <User className="w-6 h-6 text-primary" />
+              </div>
+            )}
             <div className="flex-1 min-w-0">
               <div className="font-bold text-lg truncate">{user.username}</div>
               <div className="text-xs text-muted-foreground">ID: {user.id}</div>

@@ -22,6 +22,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -67,9 +68,11 @@ public class NewApiIntegrationService {
 
         String baseUsername = preferredUsername(identity);
         for (int attempt = 0; attempt < 6; attempt++) {
+            String username = availableUsername(baseUsername, identity.userId(), null, attempt);
+            if (username == null) continue;
             User user = new User();
             user.setNewApiUserId(identity.userId());
-            user.setUsername(candidateUsername(baseUsername, identity.userId(), attempt));
+            user.setUsername(username);
             user.setAvatar(blankToNull(identity.avatarUrl()));
             user.setBalance(BigDecimal.ZERO);
             try {
@@ -79,7 +82,10 @@ public class NewApiIntegrationService {
                 return user;
             } catch (DuplicateKeyException e) {
                 User concurrent = userService.findByNewApiUserId(identity.userId());
-                if (concurrent != null) return concurrent;
+                if (concurrent != null) {
+                    updateExternalProfile(concurrent, identity);
+                    return concurrent;
+                }
             }
         }
         throw new BizException("无法创建 New API 关联账户，请稍后重试");
@@ -97,6 +103,7 @@ public class NewApiIntegrationService {
         NewApiIdentity identity = client.exchangeCode(code.trim());
         validateIdentity(identity);
         User bound = accountBindingService.bind(localUserId, identity);
+        updateExternalProfile(bound, identity);
         log.info("New API SSO 绑定成功 username={} userId={} newApiUserId={}",
                 bound.getUsername(), bound.getId(), identity.userId());
         return bound;
@@ -261,10 +268,43 @@ public class NewApiIntegrationService {
     }
 
     private void updateExternalProfile(User user, NewApiIdentity identity) {
+        String originalUsername = user.getUsername();
+        String originalAvatar = user.getAvatar();
+        String baseUsername = preferredUsername(identity);
         String avatar = blankToNull(identity.avatarUrl());
-        if ((avatar == null && user.getAvatar() == null) || (avatar != null && avatar.equals(user.getAvatar()))) return;
-        user.setAvatar(avatar);
-        userService.updateById(user);
+        for (int attempt = 0; attempt < 6; attempt++) {
+            String username = availableUsername(baseUsername, identity.userId(), user.getId(), attempt);
+            if (username == null) continue;
+            if (Objects.equals(username, originalUsername) && Objects.equals(avatar, originalAvatar)) return;
+
+            user.setUsername(username);
+            user.setAvatar(avatar);
+            try {
+                if (userService.updateById(user)) return;
+                log.warn("同步 New API 用户资料时本地用户已变化 userId={}", user.getId());
+                user.setUsername(originalUsername);
+                user.setAvatar(originalAvatar);
+                return;
+            } catch (DuplicateKeyException e) {
+                // Another account claimed this display name after the pre-check; try a stable suffixed name.
+                user.setUsername(originalUsername);
+                user.setAvatar(originalAvatar);
+            }
+        }
+
+        // An extremely crowded display-name namespace must not prevent login.
+        // Keep the stable local login name, but still try to refresh the avatar.
+        if (!Objects.equals(avatar, originalAvatar)) {
+            user.setUsername(originalUsername);
+            user.setAvatar(avatar);
+            try {
+                if (!userService.updateById(user)) {
+                    user.setAvatar(originalAvatar);
+                }
+            } catch (DuplicateKeyException e) {
+                user.setAvatar(originalAvatar);
+            }
+        }
     }
 
     private String preferredUsername(NewApiIdentity identity) {
@@ -275,12 +315,18 @@ public class NewApiIntegrationService {
         return cleaned.length() <= 48 ? cleaned : cleaned.substring(0, 48);
     }
 
-    private String candidateUsername(String base, long newApiUserId, int attempt) {
-        if (attempt == 0 && userService.findByUsername(base) == null) return base;
-        String suffix = attempt <= 1 ? "_" + newApiUserId : "_" + newApiUserId + "_" + attempt;
-        int baseLength = Math.max(1, 64 - suffix.length());
-        String prefix = base.length() <= baseLength ? base : base.substring(0, baseLength);
-        return prefix + suffix;
+    private String availableUsername(String base, long newApiUserId, Long currentUserId, int attempt) {
+        String candidate;
+        if (attempt == 0) {
+            candidate = base;
+        } else {
+            String suffix = attempt == 1 ? "_" + newApiUserId : "_" + newApiUserId + "_" + attempt;
+            int baseLength = Math.max(1, 64 - suffix.length());
+            String prefix = base.length() <= baseLength ? base : base.substring(0, baseLength);
+            candidate = prefix + suffix;
+        }
+        User owner = userService.findByUsername(candidate);
+        return owner == null || Objects.equals(owner.getId(), currentUserId) ? candidate : null;
     }
 
     private BigDecimal normalizeAmount(BigDecimal amount) {

@@ -164,34 +164,65 @@ class NewApiIntegrationServiceTest {
 
     @Test
     void existingSsoBindingIsReused() {
-        NewApiIdentity identity = new NewApiIdentity(42L, "tester", "Tester", "", 1000L, 500000L);
+        NewApiIdentity identity = new NewApiIdentity(
+                42L, "tester", "Tester", "https://youzi.today/api/user/avatar/42/hash.png", 1000L, 500000L);
         User existing = new User();
         existing.setId(7L);
         existing.setNewApiUserId(42L);
-        existing.setUsername("tester");
+        existing.setUsername("legacy-user");
         when(client.exchangeCode("one-time-code")).thenReturn(identity);
         when(userService.findByNewApiUserId(42L)).thenReturn(existing);
+        when(userService.updateById(existing)).thenReturn(true);
 
         User resolved = service.resolveSsoUser("one-time-code");
 
         assertThat(resolved).isSameAs(existing);
+        assertThat(resolved.getUsername()).isEqualTo("Tester");
+        assertThat(resolved.getAvatar()).isEqualTo("https://youzi.today/api/user/avatar/42/hash.png");
+        verify(userService).updateById(existing);
         verify(userService, never()).save(any(User.class));
     }
 
     @Test
     void authenticatedAccountBindingExchangesAndValidatesOneTimeCode() {
-        NewApiIdentity identity = new NewApiIdentity(42L, "tester", "Tester", "", 1000L, 500000L);
+        NewApiIdentity identity = new NewApiIdentity(
+                42L, "tester", "Tester", "https://youzi.today/api/user/avatar/42/hash.png", 1000L, 500000L);
         User bound = new User();
         bound.setId(7L);
         bound.setUsername("legacy-user");
         bound.setNewApiUserId(42L);
         when(client.exchangeCode("bind-code")).thenReturn(identity);
         when(accountBindingService.bind(7L, identity)).thenReturn(bound);
+        when(userService.updateById(bound)).thenReturn(true);
 
         User result = service.bindSsoUser(7L, " bind-code ");
 
         assertThat(result).isSameAs(bound);
+        assertThat(result.getUsername()).isEqualTo("Tester");
+        assertThat(result.getAvatar()).isEqualTo("https://youzi.today/api/user/avatar/42/hash.png");
         verify(accountBindingService).bind(7L, identity);
+        verify(userService).updateById(bound);
+    }
+
+    @Test
+    void profileSyncUsesStableSuffixWhenDisplayNameAlreadyBelongsToAnotherUser() {
+        NewApiIdentity identity = new NewApiIdentity(42L, "tester", "Tester", "", 1000L, 500000L);
+        User existing = new User();
+        existing.setId(7L);
+        existing.setNewApiUserId(42L);
+        existing.setUsername("legacy-user");
+        User nameOwner = new User();
+        nameOwner.setId(8L);
+        nameOwner.setUsername("Tester");
+        when(client.exchangeCode("one-time-code")).thenReturn(identity);
+        when(userService.findByNewApiUserId(42L)).thenReturn(existing);
+        when(userService.findByUsername("Tester")).thenReturn(nameOwner);
+        when(userService.updateById(existing)).thenReturn(true);
+
+        User resolved = service.resolveSsoUser("one-time-code");
+
+        assertThat(resolved.getUsername()).isEqualTo("Tester_42");
+        verify(userService).updateById(existing);
     }
 
     @Test

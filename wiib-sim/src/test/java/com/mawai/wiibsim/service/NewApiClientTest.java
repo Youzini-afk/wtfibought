@@ -1,6 +1,7 @@
 package com.mawai.wiibsim.service;
 
 import com.mawai.wiibsim.config.NewApiIntegrationConfig;
+import com.mawai.wiibsim.dto.NewApiIdentity;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -73,10 +74,37 @@ class NewApiClientTest {
         verifyNoInteractions(restTemplate);
     }
 
+    @Test
+    void exchangeCodeResolvesNewApiRelativeAvatarAgainstMainSite() {
+        NewApiClient client = new NewApiClient(config, restTemplate);
+        NewApiIntegrationConfig.Settings settings = settings(true, "https://ir.youzi.today");
+        when(config.snapshot()).thenReturn(settings);
+        byte[] response = ("{\"success\":true,\"data\":{"
+                + "\"user_id\":42,\"username\":\"main-user\",\"display_name\":\"Main User\","
+                + "\"avatar_url\":\"/api/user/avatar/42/hash.png\","
+                + "\"quota\":1000,\"quota_per_unit\":500000}}")
+                .getBytes(StandardCharsets.UTF_8);
+        when(restTemplate.exchange(
+                eq("https://ir.youzi.today/api/external-app/token"),
+                eq(HttpMethod.POST),
+                any(HttpEntity.class),
+                eq(byte[].class))).thenReturn(ResponseEntity.ok(response));
+
+        NewApiIdentity identity = client.exchangeCode("one-time-code");
+
+        assertThat(identity.displayName()).isEqualTo("Main User");
+        assertThat(identity.avatarUrl())
+                .isEqualTo("https://ir.youzi.today/api/user/avatar/42/hash.png");
+    }
+
     private NewApiIntegrationConfig.Settings settings(boolean enabled) {
+        return settings(enabled, "https://youzi.today");
+    }
+
+    private NewApiIntegrationConfig.Settings settings(boolean enabled, String baseUrl) {
         return new NewApiIntegrationConfig.Settings(
                 enabled,
-                "https://youzi.today",
+                baseUrl,
                 "wtfib",
                 "test-secret-12345678",
                 new BigDecimal("500000"),

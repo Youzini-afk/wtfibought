@@ -463,6 +463,11 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
       <DialogFooter>
         <Button variant="ghost" size="sm" onClick={handleClose}>关闭</Button>
         {info?.enabled && info.bound && (
+          <Button variant="outline" size="sm" onClick={handleBind}>
+            <RefreshCw className="h-4 w-4" />同步主站资料
+          </Button>
+        )}
+        {info?.enabled && info.bound && (
           <Button size="sm" disabled={submitDisabled} onClick={handleSubmit}>
             {submitting
               ? '提交中…'

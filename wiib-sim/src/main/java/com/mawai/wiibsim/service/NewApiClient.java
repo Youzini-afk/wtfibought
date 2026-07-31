@@ -19,6 +19,7 @@ import org.springframework.web.client.RestTemplate;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -31,6 +32,7 @@ import java.util.Optional;
 @Component
 public class NewApiClient {
     private static final ObjectMapper MAPPER = new ObjectMapper();
+    private static final int MAX_AVATAR_URL_LENGTH = 256;
 
     private final NewApiIntegrationConfig config;
     private final RestTemplate restTemplate;
@@ -42,17 +44,40 @@ public class NewApiClient {
     }
 
     public NewApiIdentity exchangeCode(String code) {
+        NewApiIntegrationConfig.Settings settings = config.snapshot();
         JsonNode root = post(
-                "/api/external-app/token", Map.of("code", code), config.snapshot(), false);
+                "/api/external-app/token", Map.of("code", code), settings, false);
         JsonNode data = requiredData(root);
         return new NewApiIdentity(
                 data.path("user_id").asLong(),
                 data.path("username").asText(""),
                 data.path("display_name").asText(""),
-                data.path("avatar_url").asText(""),
+                resolveAvatarUrl(data.path("avatar_url").asText(""), settings),
                 data.path("quota").asLong(),
                 data.path("quota_per_unit").asLong()
         );
+    }
+
+    /**
+     * New API stores local avatars as paths such as /api/user/avatar/1/hash.png.
+     * Resolve them against the configured main-site origin before exposing the
+     * identity to the rest of WTFiB, otherwise browsers request the path from
+     * the WTFiB host and render a broken image.
+     */
+    static String resolveAvatarUrl(String rawAvatarUrl, NewApiIntegrationConfig.Settings settings) {
+        if (rawAvatarUrl == null || rawAvatarUrl.isBlank() || settings == null) return "";
+        try {
+            URI avatar = URI.create(rawAvatarUrl.trim());
+            URI resolved = avatar.isAbsolute()
+                    ? avatar
+                    : URI.create(settings.normalizedBaseUrl() + "/").resolve(avatar);
+            String scheme = resolved.getScheme();
+            if (!("http".equalsIgnoreCase(scheme) || "https".equalsIgnoreCase(scheme))) return "";
+            String value = resolved.toString();
+            return value.length() <= MAX_AVATAR_URL_LENGTH ? value : "";
+        } catch (IllegalArgumentException ignored) {
+            return "";
+        }
     }
 
     NewApiQuotaResult debitForReconciliation(String operationId,
