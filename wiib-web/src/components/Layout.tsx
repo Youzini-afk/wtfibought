@@ -3,6 +3,7 @@ import { useClickOutside } from '../hooks/useClickOutside';
 import { useEffect, useState, useRef } from 'react';
 import { useUserStore } from '../stores/userStore';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
+import { compactSiteBrand } from '../lib/siteBrand';
 import { useTheme } from '../hooks/useTheme';
 import { useSystemHealth, type HealthLevel } from '../hooks/useSystemHealth';
 import { Button } from './ui/button';
@@ -47,6 +48,7 @@ export function Layout({ children }: Props) {
   const location = useLocation();
   const { user, token, logout } = useUserStore();
   const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
+  const siteName = useSiteSettingsStore(state => state.settings.siteName);
   const visibilityReady = useSiteSettingsStore(state => state.visibilityReady);
   const visiblePages = visibilityReady ? pageVisibility : null;
   const { toggleTheme, isDark } = useTheme();
@@ -71,11 +73,11 @@ export function Layout({ children }: Props) {
             className="flex items-center gap-2 cursor-pointer shrink-0 focus-visible:outline-none"
             onClick={() => navigate('/')}
             aria-label="返回首页"
-            title="WhatIfIBought"
+            title={siteName}
           >
             <TrendingUp className="w-4.5 h-4.5 text-primary" />
             <span className="text-sm font-extrabold tracking-wide">
-              WTF
+              {compactSiteBrand(siteName)}
             </span>
           </button>
 

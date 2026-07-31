@@ -3,8 +3,10 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import NumberFlow from '@number-flow/react';
 import { authApi, externalWalletApi } from '../api';
 import { useUserStore } from '../stores/userStore';
+import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { useCryptoStream } from '../hooks/useCryptoStream';
 import { tradeSymbolName } from '../lib/orderSide';
+import { compactSiteBrand, splitSiteBrand } from '../lib/siteBrand';
 import { DecryptedText } from '../components/fx/DecryptedText';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -56,6 +58,9 @@ export function Login() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, setToken, fetchUser } = useUserStore();
+  const siteName = useSiteSettingsStore(state => state.settings.siteName);
+  const shortBrand = compactSiteBrand(siteName);
+  const [brandLineOne, brandLineTwo] = splitSiteBrand(siteName);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   // null=模式加载中；两个开关决定展示哪些登录入口
@@ -236,19 +241,22 @@ export function Login() {
       {/* 左：品牌面板（桌面） */}
       <div className="hidden lg:flex relative flex-col justify-between p-14 border-r border-border/60">
         <div className="flex items-baseline gap-3">
-          <span className="text-lg font-extrabold tracking-wide">WIIB<span className="text-primary">.</span></span>
+          <span className="text-lg font-extrabold tracking-wide">{shortBrand}<span className="text-primary">.</span></span>
           <span className="microlabel font-semibold">SIMULATED TRADING TERMINAL</span>
         </div>
 
         <div className="space-y-8">
           <h1 className="text-5xl xl:text-6xl font-extrabold tracking-tight leading-[1.08] uppercase">
-            <DecryptedText text="What If" speed={45} />
-            <br />
-            <span className="text-primary"><DecryptedText text="I Bought" speed={45} /></span>
+            <DecryptedText text={brandLineOne} speed={45} />
+            {brandLineTwo && (
+              <>
+                <br />
+                <span className="text-primary"><DecryptedText text={brandLineTwo} speed={45} /></span>
+              </>
+            )}
           </h1>
           <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-            虚拟资金 · 真实行情。股票、加密货币、永续合约与 AI 量化研判，
-            零风险体验"如果当初买了会怎样"。
+            虚拟资金 · 真实行情。股票、加密货币、永续合约与 AI 量化研判。
           </p>
           {/* 实时行情角标：未登录也在跳动 */}
           <div className="flex flex-wrap gap-3">
@@ -269,7 +277,7 @@ export function Login() {
         <div className="w-full max-w-sm">
           {/* 移动端顶部品牌 */}
           <div className="lg:hidden text-center mb-8">
-            <div className="text-2xl font-extrabold tracking-wide">WIIB<span className="text-primary">.</span></div>
+            <div className="text-2xl font-extrabold tracking-wide">{shortBrand}<span className="text-primary">.</span></div>
             <div className="microlabel font-semibold mt-1.5">SIMULATED TRADING TERMINAL</div>
           </div>
 
