@@ -62,16 +62,62 @@ binance:
     - LINKUSDT
   # bStock（代币化美股，纯现货无合约）：价并入 Spot 流，5m K线走现货端点单独一条连接
   stock-symbols:
-    - MUBUSDT
-    - SPCXBUSDT
-    - SNDKBUSDT
-    - CRCLBUSDT
-    - QQQBUSDT
-    - MSTRBUSDT
-    - NVDABUSDT
+    - AAOIBUSDT
+    - AAPLBUSDT
+    - AMATBUSDT
     - AMDBUSDT
-    - TSLABUSDT
+    - AMZNBUSDT
+    - ARMBUSDT
+    - AVGOBUSDT
+    - AXTIBUSDT
+    - BABABUSDT
+    - BEBUSDT
+    - CBRSBUSDT
+    - COINBUSDT
+    - CRCLBUSDT
+    - CRWVBUSDT
+    - DELLBUSDT
+    - DRAMBUSDT
+    - EWYBUSDT
+    - FLNCBUSDT
+    - GLWBUSDT
+    - GOOGLBUSDT
+    - GSBUSDT
+    - HOODBUSDT
+    - IBMBUSDT
+    - INTCBUSDT
+    - INTWBUSDT
+    - KORUBUSDT
+    - LITEBUSDT
+    - METABUSDT
+    - MRVLBUSDT
+    - MSFTBUSDT
+    - MSTRBUSDT
+    - MUBUSDT
+    - MUUBUSDT
+    - MVLLBUSDT
+    - NBISBUSDT
+    - NOKBUSDT
+    - NVDABUSDT
+    - ORCLBUSDT
+    - PLTRBUSDT
+    - PYPLBUSDT
+    - QCOMBUSDT
+    - QNTBUSDT
+    - QQQBUSDT
+    - RKLBBUSDT
+    - SKHYBUSDT
+    - SMHBUSDT
+    - SNDKBUSDT
+    - SNXXBUSDT
     - SOXLBUSDT
+    - SOXSBUSDT
+    - SPCXBUSDT
+    - SPYBUSDT
+    - TQQQBUSDT
+    - TSLABUSDT
+    - TSMBUSDT
+    - WDCBUSDT
   # 大宗商品（TradFi 永续合约，无现货）：贵金属/能源/工业金属，只进合约流
   commodity-symbols:
     - XAUUSDT

@@ -93,6 +93,11 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
 
     private BigDecimal getCryptoPrice(String symbol) {
         BigDecimal price = cacheService.getCryptoPrice(symbol);
+        // bStock 列表/详情本来就能走 Binance REST；交易也应在 feed 冷启动或短暂断流时
+        // 复用同一条可信报价链。普通 crypto 仍只接受 feed 的新鲜缓存，避免扩大交易语义。
+        if (price == null && bStockService.isBStockSymbol(symbol)) {
+            price = bStockService.price(symbol);
+        }
         if (price == null) throw new BizException(ErrorCode.CRYPTO_PRICE_UNAVAILABLE);
         return price;
     }
@@ -109,13 +114,15 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     @Ledger(SPOT_BUY)
     public CryptoOrderResponse buy(Long userId, CryptoOrderRequest request) {
         validateRequest(request);
+        // 缓存缺失时 bStock 可能回源 REST；必须在目录行锁之前完成网络 I/O，
+        // 避免上游变慢时长期占着 SELECT ... FOR UPDATE 阻塞后台启停和其它交易。
+        BigDecimal price = getCryptoPrice(request.getSymbol());
         // 目录行锁一直持有到本事务提交，与后台暂停/退役形成确定先后顺序；
         // 同时放在核心现货服务，避免通用 crypto 接口绕过 bStock 专属控制器。
         if (!bStockService.lockAndCheckBuyAllowed(request.getSymbol())) {
             throw new BizException(ErrorCode.BSTOCK_BUY_UNAVAILABLE);
         }
         User user = getAndValidateUser(userId);
-        BigDecimal price = getCryptoPrice(request.getSymbol());
         // 交易过滤器（对齐Binance exchangeInfo）：步长对齐 + 名义额≥minNotional（限价按挂单价估）
         boolean isMarketBuy = OrderType.MARKET.getCode().equals(request.getOrderType());
         tradeFilterRegistry.validateSpotBuy(request.getSymbol(), request.getQuantity(),
@@ -176,6 +183,8 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
     @Transactional(rollbackFor = Exception.class)
     public CryptoOrderResponse sell(Long userId, CryptoOrderRequest request) {
         validateRequest(request);
+        // 同买入：可能发生的 REST 回源必须先于目录悲观锁。
+        BigDecimal price = getCryptoPrice(request.getSymbol());
         // PAUSED/RETIRED 仍可平仓；只有上游行情不可用时阻止用残留价格成交。
         if (!bStockService.lockAndCheckSellAllowed(request.getSymbol())) {
             throw new BizException(ErrorCode.BSTOCK_SELL_UNAVAILABLE);
@@ -188,8 +197,6 @@ public class CryptoOrderServiceImpl extends ServiceImpl<CryptoOrderMapper, Crypt
         }
         // 卖出=减持：豁免最小名义额；部分卖查步长，全量卖豁免（尘埃持仓能清干净）
         tradeFilterRegistry.validateSpotSell(request.getSymbol(), request.getQuantity(), position.getQuantity());
-
-        BigDecimal price = getCryptoPrice(request.getSymbol());
 
         if (OrderType.MARKET.getCode().equals(request.getOrderType())) {
             BigDecimal amount = price.multiply(request.getQuantity()).setScale(2, RoundingMode.HALF_UP);

@@ -80,7 +80,13 @@ public class BStockServiceImpl extends ServiceImpl<BStockMapper, BStock> impleme
         // Redis 未命中（如刚启动 WS 未推）→ 回退 REST
         try {
             String json = binanceRestClient.getTickerPrice(symbol);
-            if (json != null) return JSON.parseObject(json).getBigDecimal("price");
+            if (json != null) {
+                BigDecimal restPrice = JSON.parseObject(json).getBigDecimal("price");
+                if (restPrice != null && restPrice.signum() > 0) {
+                    // REST ticker 不带事件时间，不能冒充 WS 新 tick 覆盖共享 Redis；仅供本次请求使用。
+                    return restPrice;
+                }
+            }
         } catch (Exception e) {
             log.warn("获取{}最新价失败: {}", symbol, e.getMessage());
         }
