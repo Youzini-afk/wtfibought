@@ -924,12 +924,19 @@ CREATE TABLE IF NOT EXISTS site_runtime_config (
     id              SMALLINT PRIMARY KEY CHECK (id = 1),
     site_name       VARCHAR(80) NOT NULL DEFAULT 'WhatIfIBought',
     favicon_url     VARCHAR(512) NOT NULL DEFAULT '/favicon.ico',
+    currency_name   VARCHAR(32) NOT NULL DEFAULT 'USDT',
+    currency_code   VARCHAR(16) NOT NULL DEFAULT 'USDT',
+    currency_symbol VARCHAR(16) NOT NULL DEFAULT '$',
     daily_welcome_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     page_visibility JSONB NOT NULL DEFAULT '{"market":true,"portfolio":true,"ledger":true,"ai":true,"ranking":true,"games":true,"testnet":true,"strategies":true,"comments":true}'::JSONB,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ALTER TABLE site_runtime_config
     ADD COLUMN IF NOT EXISTS daily_welcome_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE site_runtime_config
+    ADD COLUMN IF NOT EXISTS currency_name VARCHAR(32) NOT NULL DEFAULT 'USDT',
+    ADD COLUMN IF NOT EXISTS currency_code VARCHAR(16) NOT NULL DEFAULT 'USDT',
+    ADD COLUMN IF NOT EXISTS currency_symbol VARCHAR(16) NOT NULL DEFAULT '$';
 INSERT INTO site_runtime_config (id, site_name, favicon_url)
 VALUES (1, 'WhatIfIBought', '/favicon.ico')
 ON CONFLICT (id) DO NOTHING;

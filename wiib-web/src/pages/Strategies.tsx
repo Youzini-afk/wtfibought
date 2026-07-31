@@ -15,6 +15,7 @@ import type { FuturesPosition, StrategyAccountView, StrategyClosedPosition, Stra
 import type { TnEquityPoint } from '../types/testnet';
 import { tradeSymbolName } from '../lib/orderSide';
 import { isAdminUser } from '../lib/userAccess';
+import { useCurrency } from '../hooks/useCurrency';
 
 const REFRESH_MS = 60_000;
 
@@ -28,10 +29,11 @@ const STRATEGY_META: Record<string, { name: string; desc: string; accent: string
 
 
 function PnlText({ value, className }: { value: number | null | undefined; className?: string }) {
+  const currency = useCurrency();
   if (value == null) return <span className={className}>-</span>;
   return (
     <span className={cn(value >= 0 ? 'text-gain' : 'text-loss', className)}>
-      {value >= 0 ? '+' : ''}{fmtNum(value)}
+      {currency.formatSigned(value)}
     </span>
   );
 }
@@ -43,6 +45,7 @@ function PositionCard({ pos, canClose, closing, onClose }: {
   closing: boolean;
   onClose: (pos: FuturesPosition) => void;
 }) {
+  const currency = useCurrency();
   const isLong = pos.side === 'LONG';
   const sl = pos.stopLosses?.[0]?.price;
   const tp = pos.takeProfits?.[0]?.price;
@@ -62,7 +65,7 @@ function PositionCard({ pos, canClose, closing, onClose }: {
         <span className="text-muted-foreground">数量 <span className="font-bold text-foreground tabular-nums">{pos.quantity}</span></span>
         <span className="text-muted-foreground">开仓 <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.entryPrice)}</span></span>
         <span className="text-muted-foreground">标记 <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.markPrice)}</span></span>
-        <span className="text-muted-foreground">保证金 <span className="font-bold text-foreground tabular-nums">{fmtNum(pos.margin)}</span></span>
+        <span className="text-muted-foreground">保证金 <span className="font-bold text-foreground tabular-nums">{currency.format(pos.margin)}</span></span>
         {sl != null && <span className="text-muted-foreground">SL <span className="font-bold text-loss tabular-nums">{fmtNum(sl)}</span></span>}
         {tp != null && <span className="text-muted-foreground">TP <span className="font-bold text-gain tabular-nums">{fmtNum(tp)}</span></span>}
       </div>
@@ -154,6 +157,7 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
   closingId: number | null;
   onClose: (strategyId: string, pos: FuturesPosition) => void;
 }) {
+  const currency = useCurrency();
   const meta = STRATEGY_META[view.strategyId] || { name: view.strategyId, desc: '', accent: '#F97316' };
   const [tradePage, setTradePage] = useState(0);
 
@@ -200,9 +204,9 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
           {/* Stats：内凹"仪表窗"，主数字加大一档，标签退后 */}
           <div className="grid grid-cols-2 gap-2.5">
             <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
-              <div className="text-lg font-black tabular-nums truncate leading-tight">${fmtNum(view.equity)}</div>
+              <div className="text-lg font-black tabular-nums truncate leading-tight">{currency.format(view.equity)}</div>
               <div className="text-[10px] text-muted-foreground flex items-center gap-1 mt-1">
-                <Wallet className="w-3 h-3" /> 权益 · 可用 ${fmtNum(view.balance, 0)}
+                <Wallet className="w-3 h-3" /> 权益 · 可用 {currency.format(view.balance, 0)}
               </div>
             </div>
             <div className="rounded-md border border-border bg-card-2 px-3 py-2.5">
@@ -238,7 +242,11 @@ function StrategyColumn({ view, signals, canClose, closingId, onClose }: {
           {/* 收益曲线 */}
           {equityPoints.length > 0 ? (
             <div className="rounded-lg border border-border bg-card-2 px-1 py-2">
-              <EquityChart points={equityPoints} />
+              <EquityChart
+                points={equityPoints}
+                formatAmount={currency.format}
+                formatSignedAmount={currency.formatSigned}
+              />
             </div>
           ) : (
             <EmptyState icon={TrendingUp} title="暂无收益曲线" hint="首笔平仓后自动出现" className="py-8" />

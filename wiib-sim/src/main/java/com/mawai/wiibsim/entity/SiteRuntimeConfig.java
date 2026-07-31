@@ -10,6 +10,9 @@ public class SiteRuntimeConfig {
     private Integer id;
     private String siteName;
     private String faviconUrl;
+    private String currencyName;
+    private String currencyCode;
+    private String currencySymbol;
     private Boolean dailyWelcomeEnabled;
     private String pageVisibilityJson;
     private LocalDateTime updatedAt;

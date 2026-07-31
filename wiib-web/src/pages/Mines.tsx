@@ -5,14 +5,16 @@ import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
 import { WalletTransferModal } from '../components/WalletTransferModal';
 import { Wallet, TrendingUp, Pickaxe, ArrowLeftRight } from 'lucide-react';
-import { cn, fmtNum } from '../lib/utils';
+import { cn } from '../lib/utils';
 import type { MinesGameState, MinesStatus } from '../types';
+import { useCurrency } from '../hooks/useCurrency';
 
 const BET_PRESETS = [10, 50, 100, 500, 1000, 5000];
 
 const fmtMult = (n: number) => n.toFixed(2);
 
 export function Mines() {
+  const currency = useCurrency();
   const { toast } = useToast();
   const [status, setStatus] = useState<MinesStatus | null>(null);
   const [game, setGame] = useState<MinesGameState | null>(null);
@@ -134,7 +136,7 @@ export function Mines() {
             <div className="text-xs text-muted-foreground">游戏钱包</div>
             <div className="text-xl font-bold tabular-nums flex items-center gap-1.5">
               <Wallet className="w-4 h-4 text-muted-foreground" />
-              {fmtNum(balance)}
+              {currency.format(balance)}
             </div>
           </div>
           <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
@@ -156,7 +158,7 @@ export function Mines() {
           <div className="text-right">
             <div className="text-xs text-muted-foreground">可得</div>
             <div className="text-xl font-bold tabular-nums text-emerald-400">
-              {fmtNum(game.potentialPayout)}
+              {currency.format(game.potentialPayout)}
             </div>
           </div>
         )}
@@ -171,9 +173,9 @@ export function Mines() {
             : 'bg-red-500/20 text-red-400 border border-red-500/30'
         )}>
           {game.result === 'CASHED_OUT' ? (
-            <span>提现成功 +{fmtNum(game.payout ?? 0)} ({fmtMult(game.currentMultiplier)}×)</span>
+            <span>提现成功 {currency.formatSigned(game.payout ?? 0)} ({fmtMult(game.currentMultiplier)}×)</span>
           ) : (
-            <span>踩雷了！失去 {fmtNum(game.betAmount)}</span>
+            <span>踩雷了！失去 {currency.format(game.betAmount)}</span>
           )}
         </div>
       )}
@@ -292,7 +294,7 @@ export function Mines() {
           <div className="text-center">
             <div className="text-xs text-muted-foreground mb-1">当前可提现</div>
             <div className="text-3xl font-bold tabular-nums text-emerald-400">
-              {game.revealed.length > 0 ? fmtNum(game.potentialPayout) : fmtNum(0)}
+              {currency.format(game.revealed.length > 0 ? game.potentialPayout : 0)}
             </div>
             {game.nextMultiplier && (
               <div className="text-xs text-muted-foreground mt-1 flex items-center justify-center gap-1">
@@ -306,7 +308,7 @@ export function Mines() {
             disabled={acting || game.revealed.length === 0}
             className="w-full h-12 text-base bg-emerald-600 hover:bg-emerald-500 border-emerald-500/30 text-white"
           >
-            提现 {game.revealed.length > 0 ? fmtNum(game.potentialPayout) : ''}
+            提现 {game.revealed.length > 0 ? currency.format(game.potentialPayout) : ''}
           </Button>
         </div>
       ) : null}

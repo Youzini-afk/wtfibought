@@ -27,6 +27,9 @@ export const DEFAULT_PAGE_VISIBILITY: PageVisibility = {
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   siteName: 'WhatIfIBought',
   faviconUrl: '/favicon.ico',
+  currencyName: 'USDT',
+  currencyCode: 'USDT',
+  currencySymbol: '$',
   dailyWelcomeEnabled: true,
   pageVisibility: { ...DEFAULT_PAGE_VISIBILITY },
   updatedAt: null,
@@ -57,6 +60,15 @@ export function normalizeSiteSettings(value: unknown): SiteSettings | null {
   return {
     siteName: settings.siteName.trim(),
     faviconUrl: settings.faviconUrl.trim(),
+    currencyName: typeof settings.currencyName === 'string' && settings.currencyName.trim()
+      ? settings.currencyName.trim()
+      : DEFAULT_SITE_SETTINGS.currencyName,
+    currencyCode: typeof settings.currencyCode === 'string' && settings.currencyCode.trim()
+      ? settings.currencyCode.trim()
+      : DEFAULT_SITE_SETTINGS.currencyCode,
+    currencySymbol: typeof settings.currencySymbol === 'string' && settings.currencySymbol.trim()
+      ? settings.currencySymbol.trim()
+      : DEFAULT_SITE_SETTINGS.currencySymbol,
     dailyWelcomeEnabled: typeof settings.dailyWelcomeEnabled === 'boolean'
       ? settings.dailyWelcomeEnabled
       : true,

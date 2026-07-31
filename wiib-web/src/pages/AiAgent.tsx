@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { BehaviorAnalysisReport } from '../types';
+import { useCurrency } from '../hooks/useCurrency';
 
 type Tab = 'behavior' | 'workbench';
 
@@ -57,11 +58,12 @@ function Metric({ label, value, tone }: { label: string; value: ReactNode; tone?
 }
 
 /** 带符号盈亏文本 + 颜色 tone */
-function pnl(v: number): { text: string; tone: 'gain' | 'loss' } {
-  return { text: `${v >= 0 ? '+' : ''}${v.toFixed(2)}`, tone: v >= 0 ? 'gain' : 'loss' };
+function pnl(v: number, formatSigned: (value: number) => string): { text: string; tone: 'gain' | 'loss' } {
+  return { text: formatSigned(v), tone: v >= 0 ? 'gain' : 'loss' };
 }
 
 export function AiAgent() {
+  const currency = useCurrency();
   const { toast } = useToast();
   // 工作台数据区全员可看（Supervisor 对话在 Workbench 内部按管理员单独门禁）
   const [tab, setTab] = useState<Tab>('workbench');
@@ -148,7 +150,7 @@ export function AiAgent() {
                 <div className="grid grid-cols-2 gap-2.5">
                   <div className="rounded-md border border-border bg-card-2 px-3.5 py-3">
                     <div className="text-xl sm:text-2xl font-black tabular-nums truncate leading-tight">
-                      ${behaviorReport.overview.totalAssets.toLocaleString()}
+                      {currency.formatCompact(behaviorReport.overview.totalAssets)}
                     </div>
                     <div className="text-[10px] text-muted-foreground mt-1">总资产</div>
                   </div>
@@ -167,7 +169,7 @@ export function AiAgent() {
                     <div className="flex flex-wrap gap-2">
                       {behaviorReport.overview.distribution.map((d, i) => (
                         <span key={i} className="border border-border rounded-full px-2.5 py-1 text-[11px] font-bold tabular-nums">
-                          <span className="text-muted-foreground">{d.category}</span> ${d.value.toLocaleString()}
+                          <span className="text-muted-foreground">{d.category}</span> {currency.formatCompact(d.value)}
                         </span>
                       ))}
                     </div>
@@ -182,7 +184,7 @@ export function AiAgent() {
                     <CategoryBlock icon={BarChart3} title="股票">
                       <Metric label="持仓" value={behaviorReport.tradeBehavior.stock.positionCount} />
                       <Metric label="订单" value={behaviorReport.tradeBehavior.stock.orderCount} />
-                      <Metric label="买入额" value={`$${behaviorReport.tradeBehavior.stock.totalBuyAmount.toLocaleString()}`} />
+                      <Metric label="买入额" value={currency.formatCompact(behaviorReport.tradeBehavior.stock.totalBuyAmount)} />
                       <Metric label="偏好" value={behaviorReport.tradeBehavior.stock.preference} />
                     </CategoryBlock>
                   )}
@@ -190,15 +192,15 @@ export function AiAgent() {
                     <CategoryBlock icon={Coins} title="加密货币">
                       <Metric label="持仓" value={behaviorReport.tradeBehavior.crypto.positionCount} />
                       <Metric label="杠杆" value={behaviorReport.tradeBehavior.crypto.leverageUsage} />
-                      <Metric label="买入" value={`$${behaviorReport.tradeBehavior.crypto.totalBuyAmount.toLocaleString()}`} />
-                      <Metric label="卖出" value={`$${behaviorReport.tradeBehavior.crypto.totalSellAmount.toLocaleString()}`} />
+                      <Metric label="买入" value={currency.formatCompact(behaviorReport.tradeBehavior.crypto.totalBuyAmount)} />
+                      <Metric label="卖出" value={currency.formatCompact(behaviorReport.tradeBehavior.crypto.totalSellAmount)} />
                     </CategoryBlock>
                   )}
                   {behaviorReport.tradeBehavior.futures.orderCount > 0 && (
                     <CategoryBlock icon={Rocket} title="永续合约">
                       <Metric label="订单" value={behaviorReport.tradeBehavior.futures.orderCount} />
                       <Metric label="方向" value={behaviorReport.tradeBehavior.futures.direction} />
-                      <Metric label="平仓盈亏" {...(() => { const p = pnl(behaviorReport.tradeBehavior.futures.realizedPnl); return { value: p.text, tone: p.tone }; })()} />
+                      <Metric label="平仓盈亏" {...(() => { const p = pnl(behaviorReport.tradeBehavior.futures.realizedPnl, currency.formatSigned); return { value: p.text, tone: p.tone }; })()} />
                       <Metric label="平均杠杆" value={`${behaviorReport.tradeBehavior.futures.avgLeverage}x`} />
                     </CategoryBlock>
                   )}
@@ -206,7 +208,7 @@ export function AiAgent() {
                     <CategoryBlock icon={Target} title="预测交易">
                       <Metric label="频率" value={`${behaviorReport.tradeBehavior.prediction.frequency}次`} />
                       <Metric label="胜率" value={`${behaviorReport.tradeBehavior.prediction.winRate}%`} />
-                      <Metric label="净盈亏" {...(() => { const p = pnl(behaviorReport.tradeBehavior.prediction.netProfit); return { value: p.text, tone: p.tone }; })()} />
+                      <Metric label="净盈亏" {...(() => { const p = pnl(behaviorReport.tradeBehavior.prediction.netProfit, currency.formatSigned); return { value: p.text, tone: p.tone }; })()} />
                       <Metric label="偏好" value={behaviorReport.tradeBehavior.prediction.directionPreference} />
                     </CategoryBlock>
                   )}
@@ -220,7 +222,7 @@ export function AiAgent() {
                     {behaviorReport.gameBehavior.blackjack.totalHands > 0 && (
                       <CategoryBlock icon={Dices} title="Blackjack">
                         <Metric label="局数" value={behaviorReport.gameBehavior.blackjack.totalHands} />
-                        <Metric label="最大赢" value={`$${behaviorReport.gameBehavior.blackjack.biggestWin}`} />
+                        <Metric label="最大赢" value={currency.format(behaviorReport.gameBehavior.blackjack.biggestWin)} />
                         <Metric label="胜" value={behaviorReport.gameBehavior.blackjack.totalWon} tone="gain" />
                         <Metric label="负" value={behaviorReport.gameBehavior.blackjack.totalLost} tone="loss" />
                       </CategoryBlock>
@@ -228,13 +230,13 @@ export function AiAgent() {
                     {behaviorReport.gameBehavior.mines.frequency > 0 && (
                       <CategoryBlock icon={Bomb} title="矿工游戏">
                         <Metric label="频率" value={`${behaviorReport.gameBehavior.mines.frequency}次`} />
-                        <Metric label="净盈亏" {...(() => { const p = pnl(behaviorReport.gameBehavior.mines.netProfit); return { value: p.text, tone: p.tone }; })()} />
+                        <Metric label="净盈亏" {...(() => { const p = pnl(behaviorReport.gameBehavior.mines.netProfit, currency.formatSigned); return { value: p.text, tone: p.tone }; })()} />
                       </CategoryBlock>
                     )}
                     {behaviorReport.gameBehavior.videoPoker.frequency > 0 && (
                       <CategoryBlock icon={Gem} title="视频扑克">
                         <Metric label="频率" value={`${behaviorReport.gameBehavior.videoPoker.frequency}次`} />
-                        <Metric label="净盈亏" {...(() => { const p = pnl(behaviorReport.gameBehavior.videoPoker.netProfit); return { value: p.text, tone: p.tone }; })()} />
+                        <Metric label="净盈亏" {...(() => { const p = pnl(behaviorReport.gameBehavior.videoPoker.netProfit, currency.formatSigned); return { value: p.text, tone: p.tone }; })()} />
                       </CategoryBlock>
                     )}
                   </div>

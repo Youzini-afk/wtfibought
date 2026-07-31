@@ -24,11 +24,12 @@ import {
 import type { BuffStatus, AssetSeriesPoint, AssetSnapshot, QuantSnapshotView } from '../types';
 import { useUserStore } from '../stores/userStore';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
-import { cn, fmtMoney } from '../lib/utils';
+import { cn } from '../lib/utils';
 import { orderSideView, tradeSymbolName } from '../lib/orderSide';
 import type { PageVisibilityKey } from '../types';
 import { useAssetSeriesPreferences } from '../hooks/useAssetSeriesPreferences';
 import { shouldShowDailyNotice } from '../lib/dailyNotice';
+import { useCurrency } from '../hooks/useCurrency';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -52,6 +53,7 @@ export function Home() {
   const { user } = useUserStore();
   const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
   const dailyWelcomeEnabled = useSiteSettingsStore(state => state.settings.dailyWelcomeEnabled);
+  const currency = useCurrency();
   // 路由已挡住未登录，user 为 null 只可能是 fetchUser 还没回来。
   // 行情/成交那几块不依赖 user，先渲染出来，本人相关的卡等 user 到了再补
   const ready = !!user;
@@ -158,7 +160,7 @@ export function Home() {
           <div className="grid lg:grid-cols-[1.7fr_1fr] gap-4 items-stretch">
             <SpotlightCard className="p-4 flex flex-col">
               <div className="flex items-center gap-2">
-                <span className="microlabel font-semibold">总资产 · USD</span>
+                <span className="microlabel font-semibold">总资产 · {currency.code}</span>
                 <span className={cn(
                   'ml-auto num text-[11px] font-bold px-2 py-0.5 rounded-full',
                   isProfit ? 'bg-gain/10 text-gain' : 'bg-loss/10 text-loss',
@@ -167,7 +169,7 @@ export function Home() {
                 </span>
               </div>
               <div className="mt-1.5 flex items-baseline gap-1">
-                <span className="num text-lg text-muted-foreground">$</span>
+                <span className="num text-lg text-muted-foreground">{currency.symbol}</span>
                 <NumberFlow
                   value={user!.totalAssets}
                   format={{ minimumFractionDigits: 2, maximumFractionDigits: 2 }}
@@ -175,9 +177,9 @@ export function Home() {
                 />
               </div>
               <div className="mt-1 text-xs text-muted-foreground">
-                可用 <span className="num font-semibold text-foreground">${fmtMoney(user!.balance)}</span>
+                可用 <span className="num font-semibold text-foreground">{currency.formatCompact(user!.balance)}</span>
                 <span className={cn('num font-semibold ml-3', isProfit ? 'text-gain' : 'text-loss')}>
-                  {isProfit ? '+' : ''}${fmtMoney(user!.profit)}
+                  {isProfit ? '+' : ''}{currency.formatCompact(user!.profit)}
                 </span>
                 <span className="ml-1">总盈亏</span>
               </div>
@@ -202,7 +204,7 @@ export function Home() {
                   <div className="microlabel font-semibold mb-1.5">今日盈亏</div>
                   {todayProfit != null ? (
                     <div className={cn('num text-xl font-bold', todayUp ? 'text-gain' : 'text-loss')}>
-                      {todayUp ? '+' : ''}{fmtMoney(todayProfit)}
+                      {todayUp ? '+' : ''}{currency.formatCompact(todayProfit)}
                       {realtime?.dailyProfitPct != null && (
                         <span className="text-xs ml-2 font-semibold">
                           {todayUp ? '+' : ''}{realtime.dailyProfitPct.toFixed(2)}%

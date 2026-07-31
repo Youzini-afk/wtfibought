@@ -8,6 +8,7 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Input } from './ui/input';
 import { useToast } from './ui/use-toast';
+import { useCurrency } from '../hooks/useCurrency';
 
 type FormState = {
   enabled: boolean;
@@ -150,6 +151,7 @@ function secretSourceLabel(source: NewApiAdminSettings['appSecretSource']): stri
 }
 
 export function NewApiSettingsCard() {
+  const currency = useCurrency();
   const { toast } = useToast();
   const [settings, setSettings] = useState<NewApiAdminSettings | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -386,7 +388,7 @@ export function NewApiSettingsCard() {
             </div>
           </SettingField>
 
-          <SettingField title="额度换算" envName={managed('quotaPerUnit')} hint="主站多少额度等于 WTFiB 内 1.00；必须与主站 QuotaPerUnit 一致。">
+          <SettingField title="额度换算" envName={managed('quotaPerUnit')} hint={`主站多少额度等于 WTFiB 内 1 ${currency.code}；必须与主站 QuotaPerUnit 一致。`}>
             <Input
               type="number"
               min="1"

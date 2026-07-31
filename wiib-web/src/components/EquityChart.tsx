@@ -2,18 +2,28 @@ import { useEffect, useRef } from 'react';
 import * as echarts from 'echarts';
 import { useIsDark } from '../hooks/useIsDark';
 import { chartUi, cssVar, rgba } from '../lib/chartTheme';
-import { fmtDateTime } from '../lib/utils';
+import { escapeHtml, fmtDateTime } from '../lib/utils';
 import type { TnEquityPoint } from '../types/testnet';
 
 interface Props {
   points: TnEquityPoint[];
+  formatAmount?: (value: number, decimals?: number) => string;
+  formatSignedAmount?: (value: number, decimals?: number) => string;
 }
+
+const defaultFormatAmount = (value: number, decimals = 2) => `$${value.toFixed(decimals)}`;
+const defaultFormatSignedAmount = (value: number, decimals = 2) =>
+  `${value >= 0 ? '+' : ''}$${value.toFixed(decimals)}`;
 
 /**
  * 累计已实现盈亏曲线。带 0 轴参考线；终值为正用 gain 色、为负用 loss 色，
  * 末点实心标记收口。轴/网格/tooltip 走 chartTheme，亮暗模式自动匹配拟物底色。
  */
-export function EquityChart({ points }: Props) {
+export function EquityChart({
+  points,
+  formatAmount = defaultFormatAmount,
+  formatSignedAmount = defaultFormatSignedAmount,
+}: Props) {
   const ref = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
 
@@ -37,8 +47,7 @@ export function EquityChart({ points }: Props) {
         formatter: (params: { value: [number, number] }[]) => {
           const p = params[0];
           const v = p.value[1] as number;
-          const sign = v >= 0 ? '+' : '';
-          return `${fmtDateTime(p.value[0])}<br/><b>累计盈亏 ${sign}$${v.toFixed(2)}</b>`;
+          return `${fmtDateTime(p.value[0])}<br/><b>累计盈亏 ${escapeHtml(formatSignedAmount(v))}</b>`;
         },
       },
       xAxis: {
@@ -49,7 +58,7 @@ export function EquityChart({ points }: Props) {
       },
       yAxis: {
         type: 'value',
-        axisLabel: { fontSize: 10, color: ui.axisLabel, formatter: (v: number) => `$${v.toFixed(0)}` },
+        axisLabel: { fontSize: 10, color: ui.axisLabel, formatter: (v: number) => formatAmount(v, 0) },
         splitLine: { lineStyle: { color: ui.gridLine, opacity: 0.6 } },
       },
       series: [
@@ -95,7 +104,7 @@ export function EquityChart({ points }: Props) {
     const onResize = () => chart.resize();
     window.addEventListener('resize', onResize);
     return () => { chart.dispose(); window.removeEventListener('resize', onResize); };
-  }, [points, isDark]);
+  }, [points, isDark, formatAmount, formatSignedAmount]);
 
   return <div ref={ref} style={{ width: '100%', height: 220 }} />;
 }

@@ -1,7 +1,7 @@
-import { fmtNum } from '../lib/utils';
 import { useMemo } from 'react';
 import { ArrowLeftRight, Landmark } from 'lucide-react';
 import { Button } from './ui/button';
+import { useCurrency } from '../hooks/useCurrency';
 
 export interface WalletAsset {
   name: string;
@@ -42,6 +42,7 @@ export function PortfolioWallet({
   onTransfer,
   onExternalWallet,
 }: Props) {
+  const currency = useCurrency();
   const cards = useMemo(() => {
     type C = {
       key: string; name: string; label: string;
@@ -55,9 +56,9 @@ export function PortfolioWallet({
       key: 'balance',
       name: username,
       label: '余额钱包',
-      detail: 'USDT',
-      masked: `≈ ${compact(balance)}`,
-      full: fmtNum(balance),
+      detail: currency.code,
+      masked: `≈ ${currency.symbol}${compact(balance)}`,
+      full: currency.format(balance),
       bg: '#ffffff',
       isDark: true,
     };
@@ -66,9 +67,9 @@ export function PortfolioWallet({
       key: 'game',
       name: 'GAME',
       label: '游戏钱包',
-      detail: 'USDT',
-      masked: `≈ ${compact(gameBalance)}`,
-      full: fmtNum(gameBalance),
+      detail: currency.code,
+      masked: `≈ ${currency.symbol}${compact(gameBalance)}`,
+      full: currency.format(gameBalance),
       bg: 'linear-gradient(135deg, #7c3aed, #a855f7)',
     };
 
@@ -77,14 +78,14 @@ export function PortfolioWallet({
       name: a.name,
       label: '总持仓',
       detail: a.count,
-      masked: `≈ ${compact(a.value)}`,
-      full: fmtNum(a.value),
-      sub: `${a.profit >= 0 ? '+' : ''}${fmtNum(a.profit)}`,
+      masked: `≈ ${currency.symbol}${compact(a.value)}`,
+      full: currency.format(a.value),
+      sub: currency.formatSigned(a.profit),
       bg: a.bg,
     }));
 
     return [...assetCards, gameCard, balanceCard];
-  }, [assets, balance, gameBalance, username]);
+  }, [assets, balance, currency, gameBalance, username]);
 
   const count = cards.length;
   const stackGap = Math.min(25, Math.max(15, Math.floor(75 / Math.max(count - 1, 1))));
@@ -140,7 +141,7 @@ export function PortfolioWallet({
                         {c.detail.map(item => (
                           <div key={item.label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, opacity: 0.9 }}>
                             <span style={{ opacity: 0.7 }}>{item.label}</span>
-                            <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{fmtNum(item.value)}</span>
+                            <span style={{ fontWeight: 600, fontFamily: 'monospace' }}>{currency.format(item.value)}</span>
                           </div>
                         ))}
                       </div>
@@ -178,9 +179,9 @@ export function PortfolioWallet({
           <div className="pocket-content">
             <div style={{ position: 'relative', height: 24, width: '100%' }}>
               <div className="balance-stars">******</div>
-              <div className="balance-real">{fmtNum(totalAssets)}</div>
+              <div className="balance-real">{currency.format(totalAssets)}</div>
             </div>
-            <div style={{ color: '#698263', fontSize: 12, fontWeight: 500 }}>总资产</div>
+            <div style={{ color: '#698263', fontSize: 12, fontWeight: 500 }}>总资产 · {currency.code}</div>
             <div className="eye-icon-wrapper">
               <svg
                 className="eye-icon eye-slash"

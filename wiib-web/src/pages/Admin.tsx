@@ -13,6 +13,7 @@ import { MonitorCarousel } from '../components/MonitorCarousel';
 import { NewApiSettingsCard } from '../components/NewApiSettingsCard';
 import { ShadowStockAdminCard } from '../components/ShadowStockAdminCard';
 import { SiteAppearanceSettingsCard } from '../components/SiteAppearanceSettingsCard';
+import { CurrencySettingsCard } from '../components/CurrencySettingsCard';
 import { PageVisibilitySettingsCard } from '../components/PageVisibilitySettingsCard';
 import { isAdminUser } from '../lib/userAccess';
 import { RefreshCw, Calendar, Plus, Trash2, Pencil, Save, Ban, Users } from 'lucide-react';
@@ -395,6 +396,9 @@ export function Admin() {
 
           {/* 浏览器标签名称与 favicon */}
           <SiteAppearanceSettingsCard />
+
+          {/* 站内余额、资产与盈亏的架空展示货币 */}
+          <CurrencySettingsCard />
 
           {/* 普通用户前台功能页开关 */}
           <PageVisibilitySettingsCard />

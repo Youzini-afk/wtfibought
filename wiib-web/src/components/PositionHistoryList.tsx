@@ -7,6 +7,7 @@ import { Skeleton } from './ui/skeleton';
 import { Button } from './ui/button';
 import { EmptyState } from './EmptyState';
 import type { PositionFill, PositionHistoryItem } from '../types';
+import { useCurrency } from '../hooks/useCurrency';
 
 /**
  * 列宽模板。表头和数据行必须共用同一份，各写各的迟早错位。
@@ -33,16 +34,18 @@ function Cell({ label, className, children }: { label: string; className?: strin
 }
 
 function Pnl({ value, className }: { value: number; className?: string }) {
+  const currency = useCurrency();
   const up = value >= 0;
   return (
     <span className={cn('num', up ? 'text-gain' : 'text-loss', className)}>
-      {up ? '+' : ''}{fmtNum(value)}
+      {currency.formatSigned(value)}
     </span>
   );
 }
 
 /** 一笔成交明细。分批平仓就是靠这几行还原出「0.4@110 / 0.6@120」的完整过程 */
 function FillRow({ fill, symbol }: { fill: PositionFill; symbol: string }) {
+  const currency = useCurrency();
   const { label, tone } = orderSideView(fill.orderSide);
   const trigger = FILL_TRIGGER[fill.status];
   return (
@@ -67,7 +70,7 @@ function FillRow({ fill, symbol }: { fill: PositionFill; symbol: string }) {
         {formatCoinPrice(symbol, fill.price)}
       </span>
       <span className="num text-[10px] text-muted-foreground ml-auto shrink-0">
-        费 {fmtNum(fill.commission)}
+        费 {currency.format(fill.commission)}
       </span>
       {/* 开/加仓单没有已实现盈亏，留空位对齐，不填 0 冒充"这笔不赚不亏" */}
       <span className="num text-[11px] font-semibold w-20 text-right shrink-0">
@@ -80,6 +83,7 @@ function FillRow({ fill, symbol }: { fill: PositionFill; symbol: string }) {
 }
 
 function Row({ item }: { item: PositionHistoryItem }) {
+  const currency = useCurrency();
   const [open, setOpen] = useState(false);
   const long = item.side === 'LONG';
   const liquidated = item.status === 'LIQUIDATED';
@@ -176,13 +180,13 @@ function Row({ item }: { item: PositionHistoryItem }) {
           {/* 盈亏构成：已实现盈亏已经把手续费和资金费减完了，这里摊开是为了看清钱花在哪 */}
           <div className="flex flex-wrap gap-x-5 gap-y-1 px-3 py-2.5 border-t border-border/30">
             <span className="text-[10px] text-muted-foreground">
-              投入保证金 <span className="num text-foreground">{fmtNum(item.investedMargin)}</span>
+              投入保证金 <span className="num text-foreground">{currency.format(item.investedMargin)}</span>
             </span>
             <span className="text-[10px] text-muted-foreground">
-              手续费 <span className="num text-loss">-{fmtNum(item.commission)}</span>
+              手续费 <span className="num text-loss">-{currency.format(item.commission)}</span>
             </span>
             <span className="text-[10px] text-muted-foreground">
-              资金费 <span className="num text-loss">-{fmtNum(item.fundingFeeTotal)}</span>
+              资金费 <span className="num text-loss">-{currency.format(item.fundingFeeTotal)}</span>
             </span>
             <span className="text-[10px] text-muted-foreground">
               平仓时间 <span className="num text-foreground">{fmtDateTime(item.closedAt)}</span>

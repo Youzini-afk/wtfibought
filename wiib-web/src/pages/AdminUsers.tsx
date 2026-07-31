@@ -17,7 +17,7 @@ import { adminApi } from '../api';
 import { useToast } from '../components/ui/use-toast';
 import { useUserStore } from '../stores/userStore';
 import { isOwnerUser, USER_ROLE, USER_STATUS } from '../lib/userAccess';
-import { fmtMoney } from '../lib/utils';
+import { useCurrency } from '../hooks/useCurrency';
 import type {
   AdminUserAudit,
   AdminUserItem,
@@ -92,6 +92,7 @@ function UserAvatar({ user }: { user: AdminUserItem }) {
 }
 
 export function AdminUsers() {
+  const currency = useCurrency();
   const navigate = useNavigate();
   const currentUser = useUserStore(state => state.user);
   const { toast } = useToast();
@@ -380,8 +381,8 @@ export function AdminUsers() {
                           </div>
                         </td>
                         <td className="px-2 py-3">
-                          <div className="num font-semibold">余额 ${fmtMoney(user.balance)}</div>
-                          <div className="num text-[10px] text-muted-foreground">游戏 ${fmtMoney(user.gameBalance)} · 冻结 ${fmtMoney(user.frozenBalance)}</div>
+                          <div className="num font-semibold">余额 {currency.formatCompact(user.balance)}</div>
+                          <div className="num text-[10px] text-muted-foreground">游戏 {currency.formatCompact(user.gameBalance)} · 冻结 {currency.formatCompact(user.frozenBalance)}</div>
                         </td>
                         <td className="px-2 py-3">
                           <div className="font-medium">{PROVIDER_LABEL[user.loginProvider]}</div>
@@ -421,7 +422,7 @@ export function AdminUsers() {
                     </div>
                     <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
                       <span className="text-muted-foreground">{ROLE_LABEL[user.role]}{user.muted ? ' · 禁言中' : ''}{user.bankrupt ? ' · 破产中' : ''}</span>
-                      <span className="num">${fmtMoney(user.balance + user.frozenBalance + user.gameBalance)}</span>
+                      <span className="num">{currency.formatCompact(user.balance + user.frozenBalance + user.gameBalance)}</span>
                     </div>
                   </button>
                 ))}
@@ -466,14 +467,14 @@ export function AdminUsers() {
               ) : (
                 <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {[
-                    ['总资产', portfolio ? `$${fmtMoney(portfolio.totalAssets)}` : '—'],
-                    ['余额钱包', `$${fmtMoney(selected.balance)}`],
-                    ['游戏钱包', `$${fmtMoney(selected.gameBalance)}`],
-                    ['冻结余额', `$${fmtMoney(selected.frozenBalance)}`],
-                    ['持仓市值', portfolio ? `$${fmtMoney(portfolio.positionMarketValue)}` : '—'],
-                    ['待结算', portfolio ? `$${fmtMoney(portfolio.pendingSettlement)}` : '—'],
-                    ['受保护本金', `$${fmtMoney(selected.protectedPrincipal)}`],
-                    ['杠杆本息', `$${fmtMoney(selected.marginLoanPrincipal + selected.marginInterestAccrued)}`],
+                    ['总资产', portfolio ? currency.formatCompact(portfolio.totalAssets) : '—'],
+                    ['余额钱包', currency.formatCompact(selected.balance)],
+                    ['游戏钱包', currency.formatCompact(selected.gameBalance)],
+                    ['冻结余额', currency.formatCompact(selected.frozenBalance)],
+                    ['持仓市值', portfolio ? currency.formatCompact(portfolio.positionMarketValue) : '—'],
+                    ['待结算', portfolio ? currency.formatCompact(portfolio.pendingSettlement) : '—'],
+                    ['受保护本金', currency.formatCompact(selected.protectedPrincipal)],
+                    ['杠杆本息', currency.formatCompact(selected.marginLoanPrincipal + selected.marginInterestAccrued)],
                   ].map(([label, value]) => (
                     <div key={label} className="rounded-lg border border-border bg-muted/20 p-2.5">
                       <div className="text-[10px] text-muted-foreground">{label}</div>

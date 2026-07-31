@@ -6,10 +6,10 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from './ui/dialog';
 import { ArrowLeft, ArrowRight, Gamepad2, Wallet } from 'lucide-react';
-import { fmtNum } from '../lib/utils';
 import { formatCoinPrice } from '../lib/coinConfig';
 import type { WalletTransferPreview } from '../types';
 import { tradeSymbolName } from '../lib/orderSide';
+import { useCurrency } from '../hooks/useCurrency';
 
 type Direction = 'TO_GAME' | 'TO_BALANCE';
 
@@ -22,6 +22,7 @@ interface Props {
 
 /** 余额钱包 ⇌ 游戏钱包 双向划转弹窗，各页面共用 */
 export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
+  const currency = useCurrency();
   const user = useUserStore(s => s.user);
   const fetchUser = useUserStore(s => s.fetchUser);
   const { toast } = useToast();
@@ -65,7 +66,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
     setSubmitting(true);
     try {
       await walletApi.transfer(direction, amt);
-      toast(`已划转 ${fmtNum(amt)}，到账 ${fmtNum(receiveAmt)} 至${toGame ? '游戏钱包' : '余额钱包'}`, 'success');
+      toast(`已划转 ${currency.format(amt)}，到账 ${currency.format(receiveAmt)} 至${toGame ? '游戏钱包' : '余额钱包'}`, 'success');
       setAmount('');
       await fetchUser();
       onSuccess?.();
@@ -93,7 +94,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
               <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
                 <Wallet className="w-3 h-3" /> 余额钱包
               </div>
-              <div className="text-base font-bold tabular-nums mt-1">{fmtNum(balance)}</div>
+              <div className="text-base font-bold tabular-nums mt-1">{currency.format(balance)}</div>
             </div>
             <button
               onClick={() => setDirection(d => d === 'TO_GAME' ? 'TO_BALANCE' : 'TO_GAME')}
@@ -111,7 +112,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
               <div className="text-xs text-muted-foreground flex items-center justify-center gap-1">
                 <Gamepad2 className="w-3 h-3" /> 游戏钱包
               </div>
-              <div className="text-base font-bold tabular-nums mt-1">{fmtNum(gameBalance)}</div>
+              <div className="text-base font-bold tabular-nums mt-1">{currency.format(gameBalance)}</div>
             </div>
           </div>
 
@@ -141,7 +142,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
 
           {amt > 0 && (
             <div className="text-xs text-muted-foreground text-center tabular-nums">
-              手续费 1%：{fee.toFixed(2)} ｜ 到账：{receiveAmt.toFixed(2)}
+              手续费 1%：{currency.format(fee)} ｜ 到账：{currency.format(receiveAmt)}
             </div>
           )}
 
@@ -151,7 +152,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
               <div className="rounded-md border border-border bg-card-2 p-3 space-y-1.5 text-xs">
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">划转后账户净值</span>
-                  <span className="font-mono tabular-nums">{fmtNum(preview.equityAfter)}</span>
+                  <span className="font-mono tabular-nums">{currency.format(preview.equityAfter)}</span>
                 </div>
                 {preview.positions?.map(p => (
                   <div key={p.positionId} className="flex justify-between">
@@ -169,7 +170,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
                       className="font-mono tabular-nums text-primary hover:underline underline-offset-2"
                       onClick={() => setAmount(String(preview.maxTransferable))}
                     >
-                      {fmtNum(preview.maxTransferable)}
+                      {currency.format(preview.maxTransferable)}
                     </button>
                   </div>
                 )}
@@ -182,7 +183,7 @@ export function WalletTransferModal({ open, onClose, onSuccess }: Props) {
                   className="font-mono tabular-nums text-primary hover:underline underline-offset-2"
                   onClick={() => setAmount(String(preview.maxTransferable ?? 0))}
                 >
-                  {fmtNum(preview.maxTransferable ?? 0)}
+                  {currency.format(preview.maxTransferable ?? 0)}
                 </button>
               </div>
             )

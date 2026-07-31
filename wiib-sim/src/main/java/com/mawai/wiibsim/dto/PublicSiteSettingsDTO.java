@@ -6,6 +6,9 @@ import java.time.LocalDateTime;
 public record PublicSiteSettingsDTO(
         String siteName,
         String faviconUrl,
+        String currencyName,
+        String currencyCode,
+        String currencySymbol,
         boolean dailyWelcomeEnabled,
         PageVisibilityDTO pageVisibility,
         LocalDateTime updatedAt

@@ -5,9 +5,10 @@ import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Skeleton } from '../components/ui/skeleton';
 import { EmptyState } from '../components/EmptyState';
-import { cn, fmtNum } from '../lib/utils';
+import { cn } from '../lib/utils';
 import { ChevronLeft, ChevronRight, Clock, Trophy } from 'lucide-react';
 import type { RankingItem, RankingSort } from '../types';
+import { useCurrency } from '../hooks/useCurrency';
 
 const PAGE_SIZE = 20;
 
@@ -20,18 +21,6 @@ const GRID = 'grid grid-cols-2 gap-x-3 gap-y-2 md:gap-y-0 md:items-center md:gri
 type Numeric = number | null | undefined;
 
 const num = (v: Numeric) => Number.isFinite(v) ? v as number : 0;
-const fmt = (v: Numeric) => fmtNum(num(v));  // 缺失值按 0.00 展示（榜单口径）
-
-/** 窄屏紧凑数字：1.23M / 12.3K，避免小屏格子里大数字换行 */
-const fmtCompact = (v: Numeric) => {
-  const n = num(v);
-  const abs = Math.abs(n);
-  const sign = n < 0 ? '-' : '';
-  if (abs >= 1e9) return sign + (abs / 1e9).toFixed(2) + 'B';
-  if (abs >= 1e6) return sign + (abs / 1e6).toFixed(2) + 'M';
-  if (abs >= 1e4) return sign + (abs / 1e3).toFixed(1) + 'K';
-  return fmt(n);
-};
 
 /** 名次序号：等宽补零，前三名用主色。数字本身就是层级，不再叠奖牌 emoji */
 function RankNum({ rank, className }: { rank: number; className?: string }) {
@@ -66,11 +55,12 @@ function Pct({ value, className }: { value: Numeric; className?: string }) {
 }
 
 function TradingProfit({ value, className }: { value: Numeric; className?: string }) {
+  const currency = useCurrency();
   const v = num(value);
   const up = v >= 0;
   return (
     <span className={cn('num', up ? 'text-gain' : 'text-loss', className)}>
-      {up ? '+' : ''}{fmt(v)}
+      {currency.formatSigned(v)}
     </span>
   );
 }
@@ -101,11 +91,12 @@ const ALL_METRICS: RankingSort[] = ['ASSETS', 'TRADING_PROFIT'];
 
 /** 按维度取值渲染。前三卡的主数字要跟着当前排序走，否则「按交易盈利排的榜、卡上最大的数是总资产」会看懵 */
 function MetricValue({ metric, item, className }: { metric: RankingSort; item: RankingItem; className?: string }) {
+  const currency = useCurrency();
   if (metric === 'TRADING_PROFIT') return <TradingProfit value={item.tradingProfit} className={className} />;
   return (
     <span className={cn('num', className)}>
-      <span className="sm:hidden">{fmtCompact(item.totalAssets)}</span>
-      <span className="hidden sm:inline">{fmt(item.totalAssets)}</span>
+      <span className="sm:hidden">{currency.formatCompact(num(item.totalAssets))}</span>
+      <span className="hidden sm:inline">{currency.format(num(item.totalAssets))}</span>
     </span>
   );
 }
@@ -117,6 +108,7 @@ function MetricValue({ metric, item, className }: { metric: RankingSort; item: R
 function TopCard({ item, place, sort, onOpen }: {
   item: RankingItem; place: 0 | 1 | 2; sort: RankingSort; onOpen: () => void;
 }) {
+  const currency = useCurrency();
   const champion = place === 0;
   return (
     <button
@@ -176,7 +168,7 @@ function TopCard({ item, place, sort, onOpen }: {
           <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/25">
             <span className="microlabel">余额 / 游戏</span>
             <span className="num text-[10px] text-muted-foreground truncate">
-              {fmtCompact(item.balanceWallet)} / {fmtCompact(item.gameWallet)}
+              {currency.formatCompact(num(item.balanceWallet))} / {currency.formatCompact(num(item.gameWallet))}
             </span>
           </div>
         </div>
@@ -186,6 +178,7 @@ function TopCard({ item, place, sort, onOpen }: {
 }
 
 function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort; onOpen: () => void }) {
+  const currency = useCurrency();
   return (
     <button
       type="button"
@@ -212,8 +205,8 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
 
       <Cell label="总资产" className={cn('md:text-right', sort === 'ASSETS' && 'text-primary')}>
         <span className="num text-[13px] font-bold">
-          <span className="md:hidden">{fmtCompact(item.totalAssets)}</span>
-          <span className="hidden md:inline">{fmt(item.totalAssets)}</span>
+          <span className="md:hidden">{currency.formatCompact(num(item.totalAssets))}</span>
+          <span className="hidden md:inline">{currency.format(num(item.totalAssets))}</span>
         </span>
       </Cell>
 
@@ -227,7 +220,7 @@ function RankRow({ item, sort, onOpen }: { item: RankingItem; sort: RankingSort;
 
       <Cell label="余额 / 游戏" className="md:text-right">
         <span className="num text-[11px] text-muted-foreground truncate">
-          {fmtCompact(item.balanceWallet)} / {fmtCompact(item.gameWallet)}
+          {currency.formatCompact(num(item.balanceWallet))} / {currency.formatCompact(num(item.gameWallet))}
         </span>
       </Cell>
 

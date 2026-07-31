@@ -21,6 +21,7 @@ import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogFooter, DialogHeader } from './ui/dialog';
 import { Input } from './ui/input';
 import { useToast } from './ui/use-toast';
+import { useCurrency } from '../hooks/useCurrency';
 
 type Mode = 'DEPOSIT' | 'WITHDRAWAL';
 
@@ -33,18 +34,19 @@ interface Props {
 const isPending = (transfer: ExternalQuotaTransfer) =>
   transfer.status === 'PENDING' || transfer.status === 'APPLYING';
 
-function taxBracketsLabel(brackets: WithdrawalTaxBracket[]): string {
+function taxBracketsLabel(brackets: WithdrawalTaxBracket[], format: (value: number, decimals?: number) => string): string {
   let lower = 0;
   return brackets.map((bracket) => {
     const range = bracket.upTo == null
-      ? `${fmtNum(lower, 0)} 以上`
-      : `${fmtNum(lower, 0)}–${fmtNum(bracket.upTo, 0)}`;
+      ? `${format(lower, 0)} 以上`
+      : `${format(lower, 0)}–${format(bracket.upTo, 0)}`;
     if (bracket.upTo != null) lower = bracket.upTo;
     return `${range}：${fmtNum(bracket.rate * 100, 0)}%`;
   }).join(' · ');
 }
 
 function TransferHistory({ transfers }: { transfers: ExternalQuotaTransfer[] }) {
+  const currency = useCurrency();
   if (transfers.length === 0) {
     return <div className="py-5 text-center text-xs text-muted-foreground">还没有主站额度转账记录</div>;
   }
@@ -74,9 +76,9 @@ function TransferHistory({ transfers }: { transfers: ExternalQuotaTransfer[] }) 
               </div>
               <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs">
                 <span className="font-mono tabular-nums">
-                  {deposit ? '+' : '-'}{fmtNum(transfer.amount)}
+                  {deposit ? currency.formatSigned(transfer.amount) : `-${currency.format(transfer.amount)}`}
                   {!deposit && transfer.netAmount != null && (
-                    <span className="ml-1 text-muted-foreground">（税后 {fmtNum(transfer.netAmount)}）</span>
+                    <span className="ml-1 text-muted-foreground">（税后 {currency.format(transfer.netAmount)}）</span>
                   )}
                 </span>
                 <span className="text-muted-foreground">{fmtDateTime(transfer.createdAt, true)}</span>
@@ -94,6 +96,7 @@ function TransferHistory({ transfers }: { transfers: ExternalQuotaTransfer[] }) 
 
 /** New API 主站额度 ↔ WTFiB 余额钱包。外部转账状态只在弹窗打开时轮询。 */
 export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
+  const currency = useCurrency();
   const fetchUser = useUserStore(s => s.fetchUser);
   const { toast } = useToast();
   const [mode, setMode] = useState<Mode>('DEPOSIT');
@@ -290,15 +293,15 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
             <div className="grid grid-cols-3 gap-2">
               <div className="rounded-md border border-border bg-card-2 p-3">
                 <p className="text-[10px] text-muted-foreground">余额钱包</p>
-                <p className="mt-1 font-mono text-sm font-bold tabular-nums">{fmtNum(info.balance)}</p>
+                <p className="mt-1 font-mono text-sm font-bold tabular-nums">{currency.format(info.balance)}</p>
               </div>
               <div className="rounded-md border border-border bg-card-2 p-3">
                 <p className="text-[10px] text-muted-foreground">主站转入本金</p>
-                <p className="mt-1 font-mono text-sm font-bold tabular-nums">{fmtNum(info.protectedPrincipal)}</p>
+                <p className="mt-1 font-mono text-sm font-bold tabular-nums">{currency.format(info.protectedPrincipal)}</p>
               </div>
               <div className="rounded-md border border-border bg-card-2 p-3">
                 <p className="text-[10px] text-muted-foreground">额度换算</p>
-                <p className="mt-1 font-mono text-sm font-bold tabular-nums">1 : {fmtNum(info.quotaPerUnit, 0)}</p>
+                <p className="mt-1 font-mono text-sm font-bold tabular-nums">1 {currency.code} : {fmtNum(info.quotaPerUnit, 0)}</p>
               </div>
             </div>
 
@@ -326,7 +329,7 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
                   <div>
                     <p className="text-sm font-semibold">从主站转入余额钱包</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      每 1.00 游戏金额消耗 {fmtNum(info.quotaPerUnit, 0)} 主站额度；到账额会计入受保护本金，不会被误算为盈利。
+                      每 {currency.format(1)} 消耗 {fmtNum(info.quotaPerUnit, 0)} 主站额度；到账额会计入受保护本金，不会被误算为盈利。
                     </p>
                   </div>
                 </div>
@@ -363,7 +366,7 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
                   <div className="grid grid-cols-3 gap-2 text-xs">
                     <div className="rounded bg-card-2 p-2.5">
                       <p className="text-muted-foreground">当前真实盈利</p>
-                      <p className="mt-1 font-mono font-semibold tabular-nums">{fmtNum(preview.currentProfit)}</p>
+                      <p className="mt-1 font-mono font-semibold tabular-nums">{currency.format(preview.currentProfit)}</p>
                     </div>
                     <div className="rounded bg-card-2 p-2.5">
                       <p className="text-muted-foreground">当前最多可提</p>
@@ -372,13 +375,13 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
                         className="mt-1 font-mono font-semibold text-primary tabular-nums hover:underline"
                         onClick={() => setAmount(preview.maximumGrossAmount.toFixed(2))}
                       >
-                        {fmtNum(preview.maximumGrossAmount)}
+                        {currency.format(preview.maximumGrossAmount)}
                       </button>
                     </div>
                     <div className="rounded bg-card-2 p-2.5">
                       <p className="text-muted-foreground">今日已提 / 上限</p>
                       <p className="mt-1 font-mono font-semibold tabular-nums">
-                        {fmtNum(preview.withdrawnToday)} / {fmtNum(preview.dailyLimit)}
+                        {currency.format(preview.withdrawnToday)} / {currency.format(preview.dailyLimit)}
                       </p>
                     </div>
                   </div>
@@ -413,9 +416,9 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
                 {preview && amountValid && !previewLoading && (
                   preview.requestAllowed ? (
                     <div className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs">
-                      <div className="flex justify-between"><span className="text-muted-foreground">提现毛额</span><span className="font-mono">{fmtNum(preview.requestedGrossAmount)}</span></div>
-                      <div className="mt-1 flex justify-between"><span className="text-muted-foreground">累进税</span><span className="font-mono text-yellow-500">-{fmtNum(preview.estimatedTax)}</span></div>
-                      <div className="mt-1 flex justify-between border-t border-border/50 pt-1.5 font-semibold"><span>税后到账</span><span className="font-mono text-gain">{fmtNum(preview.estimatedNetAmount)}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">提现毛额</span><span className="font-mono">{currency.format(preview.requestedGrossAmount)}</span></div>
+                      <div className="mt-1 flex justify-between"><span className="text-muted-foreground">累进税</span><span className="font-mono text-yellow-500">-{currency.format(preview.estimatedTax)}</span></div>
+                      <div className="mt-1 flex justify-between border-t border-border/50 pt-1.5 font-semibold"><span>税后到账</span><span className="font-mono text-gain">{currency.format(preview.estimatedNetAmount)}</span></div>
                       {estimatedQuota != null && <p className="mt-1 text-right text-[10px] text-muted-foreground">≈ {fmtNum(estimatedQuota, 0)} 主站额度</p>}
                     </div>
                   ) : (
@@ -426,7 +429,7 @@ export function ExternalWalletModal({ open, onClose, onSuccess }: Props) {
                   <p className="flex items-center gap-1.5 text-xs text-yellow-500"><Clock3 className="h-3.5 w-3.5" />上一笔提现仍在对账，完成或退回后可继续。</p>
                 )}
                 {preview?.taxBrackets?.length ? (
-                  <p className="text-[10px] leading-relaxed text-muted-foreground">边际税档：{taxBracketsLabel(preview.taxBrackets)}</p>
+                  <p className="text-[10px] leading-relaxed text-muted-foreground">边际税档：{taxBracketsLabel(preview.taxBrackets, currency.format)}</p>
                 ) : null}
               </div>
             )}

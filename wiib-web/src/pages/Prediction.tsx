@@ -15,6 +15,7 @@ import { WalletTransferModal } from '../components/WalletTransferModal';
 import { TrendingUp, TrendingDown, Loader2, Clock, Wallet, ArrowUpRight, ArrowDownRight, ArrowLeftRight } from 'lucide-react';
 import type { PredictionRound, PredictionBet, PageResult } from '../types';
 import { tradeSymbolName } from '../lib/orderSide';
+import { useCurrency } from '../hooks/useCurrency';
 
 const WINDOW_SECONDS = 300;
 const PREDICTION_ASSET = tradeSymbolName('BTCUSDT');
@@ -94,6 +95,7 @@ function fmtCountdown(sec: number): string {
 }
 
 export function Prediction() {
+  const currency = useCurrency();
   const user = useUserStore(s => s.user);
   const fetchUser = useUserStore(s => s.fetchUser);
   const isDark = useIsDark();
@@ -464,7 +466,7 @@ export function Prediction() {
                     {/* 预测下注走游戏钱包，不是交易余额 */}
                     <span className="text-xs text-muted-foreground flex items-center gap-1">
                       <Wallet className="w-3 h-3" />
-                      游戏钱包 {user ? `${fmtNum(user.gameBalance)} USDT` : '--'}
+                      游戏钱包 {user ? currency.withCode(user.gameBalance) : '--'}
                       <Button size="sm" variant="outline" onClick={() => setTransferOpen(true)} className="text-[10px] h-6 px-2 ml-1">
                         <ArrowLeftRight className="w-3 h-3" />划转
                       </Button>
@@ -481,7 +483,7 @@ export function Prediction() {
                       <Button key={v} variant="outline" size="sm"
                               className="flex-1 h-9 sm:h-7 text-xs font-semibold"
                               onClick={() => setAmount(prev => String((parseFloat(prev) || 0) + v))}>
-                        +${v}
+                        +{currency.format(v, 0)}
                       </Button>
                     ))}
                     <Button variant="outline" size="sm" className="flex-1 h-9 sm:h-7 text-xs font-semibold"
@@ -490,8 +492,8 @@ export function Prediction() {
                     </Button>
                   </div>
                   <div className="flex items-center justify-between py-2.5 px-3 mb-4 rounded-lg bg-muted/50">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">预计收益 <HelpTip side="top" iconClassName="w-3 h-3" text="若预测正确，每份合约按$1结算。收益 = 金额 ÷ 概率价格" /></span>
-                    <span className="text-sm font-bold font-mono tabular-nums">${toWin > 0 ? toWin.toFixed(2) : '--'}</span>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">预计收益 <HelpTip side="top" iconClassName="w-3 h-3" text={`若预测正确，每份合约按${currency.format(1, 0)}结算。收益 = 金额 ÷ 概率价格`} /></span>
+                    <span className="text-sm font-bold font-mono tabular-nums">{toWin > 0 ? currency.format(toWin) : '--'}</span>
                   </div>
                   <Button onClick={handleBuy} disabled={submitting || !user}
                           className={`w-full h-11 font-bold text-sm ${side === 'UP' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} text-white`}>
@@ -502,7 +504,7 @@ export function Prediction() {
               ) : (
                 <>
                   <div className="flex items-center justify-between mb-2.5">
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">持仓份数 <HelpTip side="top" iconClassName="w-3 h-3" text="持有的合约数量，预测正确时每份值$1" />: <span className="font-bold text-foreground">{totalShares.toFixed(2)}</span></span>
+                    <span className="text-xs text-muted-foreground flex items-center gap-1">持仓份数 <HelpTip side="top" iconClassName="w-3 h-3" text={`持有的合约数量，预测正确时每份值${currency.format(1, 0)}`} />: <span className="font-bold text-foreground">{totalShares.toFixed(2)}</span></span>
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs text-muted-foreground">份数</span>
                       <Input type="number" placeholder="0" value={shares}
@@ -525,7 +527,7 @@ export function Prediction() {
                   </div>
                   <div className="flex items-center justify-between py-2.5 px-3 mb-4 rounded-lg bg-muted/50">
                     <span className="text-xs text-muted-foreground flex items-center gap-1">预计到账 <HelpTip side="top" iconClassName="w-3 h-3" text="按当前卖出价计算的到手金额（已扣手续费）" /></span>
-                    <span className="text-sm font-bold font-mono tabular-nums">${youllReceive > 0 ? youllReceive.toFixed(2) : '--'}</span>
+                    <span className="text-sm font-bold font-mono tabular-nums">{youllReceive > 0 ? currency.format(youllReceive) : '--'}</span>
                   </div>
                   <Button onClick={handleSellSide} disabled={submitting || activeBetsForSide.length === 0}
                           className={`w-full h-11 font-bold text-sm ${side === 'UP' ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'} text-white`}>
@@ -612,8 +614,8 @@ export function Prediction() {
                     </span>
                     <span className="font-mono tabular-nums font-semibold">{b.contracts}</span>
                     <span className="text-muted-foreground">@ {b.avgPrice}</span>
-                    <span className="text-muted-foreground font-mono tabular-nums">${b.cost.toFixed(2)}</span>
-                    {b.currentValue != null && <span className="text-muted-foreground font-mono tabular-nums">~${b.currentValue.toFixed(2)}</span>}
+                    <span className="text-muted-foreground font-mono tabular-nums">{currency.format(b.cost)}</span>
+                    {b.currentValue != null && <span className="text-muted-foreground font-mono tabular-nums">~{currency.format(b.currentValue)}</span>}
                     <span className="ml-auto">
                       <Badge variant={b.status === 'LOST' ? 'destructive' : 'outline'}
                              className={`text-[10px] px-1.5 py-0 ${b.status === 'WON' ? 'bg-green-500/15 text-green-500 border-green-500/50' : ''}`}>
@@ -622,7 +624,7 @@ export function Prediction() {
                     </span>
                     {b.payout != null && b.status !== 'ACTIVE' && (
                       <span className={`font-mono tabular-nums font-semibold ${b.payout > b.cost ? 'text-green-500' : b.payout === 0 ? 'text-red-500' : 'text-muted-foreground'}`}>
-                        {b.payout > 0 ? `+$${b.payout.toFixed(2)}` : '$0'}
+                        {b.payout > 0 ? currency.formatSigned(b.payout) : currency.format(0)}
                       </span>
                     )}
                     {b.status === 'ACTIVE' && round?.status === 'OPEN' && (

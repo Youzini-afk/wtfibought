@@ -18,6 +18,7 @@ import type {
   PageResult, PositionHistoryItem, ProfilePosition, PublicTrade, UserProfile as UserProfileData,
 } from '../types';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
+import { useCurrency } from '../hooks/useCurrency';
 
 const TRADE_PAGE_SIZE = 20;
 
@@ -30,17 +31,19 @@ const EMPTY_POSITIONS: PageResult<PositionHistoryItem> = {
 };
 
 function ProfitText({ value, className }: { value: number | null; className?: string }) {
+  const currency = useCurrency();
   // 缺价时后端给 null，显示 "—"。填 0 会被读成"这仓一分不赚"，那是另一回事
   if (value == null) return <span className={cn('text-muted-foreground', className)}>—</span>;
   const up = value >= 0;
   return (
     <span className={cn('num', up ? 'text-gain' : 'text-loss', className)}>
-      {up ? '+' : ''}{fmtNum(value)}
+      {currency.formatSigned(value)}
     </span>
   );
 }
 
 function PositionRow({ p, onOpen }: { p: ProfilePosition; onOpen?: () => void }) {
+  const currency = useCurrency();
   const isFutures = p.side != null;
   return (
     <button
@@ -75,7 +78,7 @@ function PositionRow({ p, onOpen }: { p: ProfilePosition; onOpen?: () => void })
       </div>
       <div className="text-right shrink-0">
         <div className="num text-[13px] font-bold">
-          {p.value == null ? '—' : fmtNum(p.value)}
+          {p.value == null ? '—' : currency.format(p.value)}
         </div>
         <ProfitText value={p.profit} className="text-[11px] font-medium" />
       </div>
@@ -110,6 +113,7 @@ function PositionCard({ title, positions, onOpen }: {
 }
 
 export function UserProfile() {
+  const currency = useCurrency();
   useBStockAliasVersion();
   const navigate = useNavigate();
   const marketEnabled = useSiteSettingsStore(state => state.settings.pageVisibility.market);
@@ -237,7 +241,7 @@ export function UserProfile() {
               <div className="mt-2 grid grid-cols-3 gap-x-6 gap-y-2">
                 <div>
                   <div className="microlabel">总资产</div>
-                  <div className="num text-base font-bold">{fmtNum(s.totalAssets)}</div>
+                  <div className="num text-base font-bold">{currency.format(s.totalAssets)}</div>
                 </div>
                 <div>
                   <div className="microlabel">收益率</div>

@@ -5,6 +5,19 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** 转义要插入 ECharts HTML tooltip 的动态文本。 */
+const HTML_ESCAPES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+
+export function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, char => HTML_ESCAPES[char] ?? char);
+}
+
 // ---- 全站统一格式化口径：数字千分位；时间固定新加坡时区（UTC+8） ----
 
 /** 千分位 + 固定小数位；string 自动 parseFloat；null/NaN 返回 '-'。 */

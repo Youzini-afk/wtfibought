@@ -14,7 +14,6 @@ import { HelpTip } from '../HelpTip';
 import { LeverageSlider } from '../LeverageSlider';
 import { NeuToggle } from '../NeuToggle';
 import { PctSlider } from '../PctSlider';
-import { fmtNum } from '../../lib/utils';
 import { getCoin, getCoinPriceDecimals, getCoinPriceStep, formatCoinPrice } from '../../lib/coinConfig';
 import { useTradeFilter } from '../../lib/tradeFilters';
 import type { FuturesPosition, FuturesBracket } from '../../types';
@@ -23,6 +22,7 @@ import {
   FUTURES_LEVERAGE_OPTIONS, findFuturesBracket, formatRate, qtyByPct,
   type SLTPRow,
 } from './futuresMath';
+import { useCurrency } from '../../hooks/useCurrency';
 
 type PosActionType = 'close' | 'margin' | 'reduceMargin' | 'stoploss' | 'leverage';
 
@@ -175,6 +175,7 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
   wide?: boolean;
   onMutated: (ordersChanged: boolean) => void;
 }) {
+  const currency = useCurrency();
   const marketEnabled = useSiteSettingsStore(state => state.settings.pageVisibility.market);
   const cfg = getCoin(pos.symbol);
   // 平仓/SLTP 数量步长用合约过滤器（reduce-only 免最小名义额；全量平仓后端豁免步长，存量尘埃仓能平干净）
@@ -324,8 +325,8 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className={`text-xl font-black tabular-nums leading-none ${isPnlUp ? 'text-green-500' : 'text-red-500'}`}>
-          {isPnlUp ? '+' : ''}{fmtNum(unrealizedPnl)}
-          <span className="text-[11px] font-bold ml-1 opacity-60">USDT</span>
+          {currency.formatSigned(unrealizedPnl)}
+          <span className="text-[11px] font-bold ml-1 opacity-60">{currency.code}</span>
         </div>
         <span className={`inline-block text-[11px] font-bold tabular-nums px-1.5 py-0.5 rounded-md ${isPnlUp ? 'text-green-500 bg-green-500/10' : 'text-red-500 bg-red-500/10'}`}>
           {isPnlUp ? '+' : ''}{unrealizedPnlPct.toFixed(2)}%
@@ -338,12 +339,12 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
           { label: '开仓价', value: `$${fmtPrice(pos.entryPrice)}` },
           { label: '标记价', value: `$${fmtPrice(mp)}` },
           { label: '强平价', value: pos.liquidationPrice > 0 ? `$${fmtPrice(pos.liquidationPrice)}` : '—', cls: 'text-yellow-500' },
-          { label: isCrossPos ? '占用保证金' : '保证金', value: `$${fmtNum(pos.margin)}` },
-          { label: '资金费', value: `$${fmtNum(pos.fundingFeeTotal)}` },
+          { label: isCrossPos ? '占用保证金' : '保证金', value: currency.format(pos.margin) },
+          { label: '资金费', value: currency.format(pos.fundingFeeTotal) },
           { label: 'MMR', value: currentBracket ? `档${currentBracket.tier} · ${formatRate(currentBracket.mmr)}` : '—' },
           {
             label: '已实现盈亏',
-            value: `${(pos.realizedPnl ?? 0) >= 0 ? '+' : ''}${fmtNum(pos.realizedPnl ?? 0)}`,
+            value: currency.formatSigned(pos.realizedPnl ?? 0),
             cls: (pos.realizedPnl ?? 0) >= 0 ? 'text-green-500' : 'text-red-500',
           },
         ].map(it => (
@@ -422,8 +423,8 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
           {/* +保证金 */}
           {action === 'margin' && (
             <>
-              <Input type="number" placeholder="追加金额 (USDT)" value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" className="h-9 sm:h-8 text-xs" />
-              {user && <div className="text-[11px] text-muted-foreground">可用余额 {fmtNum(user.balance)} USDT</div>}
+              <Input type="number" placeholder={`追加金额 (${currency.code})`} value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" className="h-9 sm:h-8 text-xs" />
+              {user && <div className="text-[11px] text-muted-foreground">可用余额 {currency.format(user.balance)}</div>}
               <Button size="sm" className="w-full h-9 sm:h-8 text-xs" onClick={handleAddMargin} disabled={submitting}>
                 {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认追加'}
               </Button>
@@ -432,8 +433,8 @@ function PositionItem({ pos, brackets, wide, onMutated }: {
           {/* -保证金 */}
           {action === 'reduceMargin' && (
             <>
-              <Input type="number" placeholder="减少金额 (USDT)" value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" max={pos.margin} className="h-9 sm:h-8 text-xs" />
-              <div className="text-[11px] text-muted-foreground">当前保证金 {fmtNum(pos.margin)} USDT</div>
+              <Input type="number" placeholder={`减少金额 (${currency.code})`} value={marginAmt} onChange={e => setMarginAmt(e.target.value)} step="0.01" min="0" max={pos.margin} className="h-9 sm:h-8 text-xs" />
+              <div className="text-[11px] text-muted-foreground">当前保证金 {currency.format(pos.margin)}</div>
               <Button size="sm" className="w-full h-9 sm:h-8 text-xs" onClick={handleReduceMargin} disabled={submitting}>
                 {submitting ? <Loader2 className="w-3 h-3 animate-spin" /> : '确认减少'}
               </Button>

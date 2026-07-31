@@ -1,10 +1,11 @@
 import * as echarts from 'echarts';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { cn } from '../lib/utils';
+import { cn, escapeHtml } from '../lib/utils';
 import type { AssetSeriesInterval, AssetSeriesPoint, AssetSeriesRange } from '../types';
 import { useIsDark } from '../hooks/useIsDark';
 import { AssetSeriesControls } from './AssetSeriesControls';
 import { ASSET_SERIES_INTERVAL_MS } from '../lib/assetSeries';
+import { useCurrency } from '../hooks/useCurrency';
 
 type ProfitKey = 'profit' | 'cryptoProfit' | 'commodityProfit' | 'bstockProfit' | 'predictionProfit' | 'gameProfit';
 
@@ -47,6 +48,7 @@ export function ProfitChart({
   const chartRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<'cumulative' | 'interval'>('cumulative');
   const isDark = useIsDark();
+  const currency = useCurrency();
   const sortedData = useMemo(() => [...data].sort((a, b) => a.timestamp - b.timestamp), [data]);
 
   useEffect(() => {
@@ -103,7 +105,7 @@ export function ProfitChart({
             const value = Number(param.value ?? 0);
             html += `<div style="display:flex;align-items:center;gap:6px;margin:2px 0">
               ${param.marker}<span>${param.seriesName}</span>
-              <span style="margin-left:auto;font-weight:600;color:${value >= 0 ? gainColor : lossColor}">${value >= 0 ? '+' : ''}${value.toFixed(2)}</span>
+              <span style="margin-left:auto;font-weight:600;color:${value >= 0 ? gainColor : lossColor}">${escapeHtml(currency.formatSigned(value))}</span>
             </div>`;
           }
           return html;
@@ -131,7 +133,7 @@ export function ProfitChart({
         type: 'value',
         scale: true,
         splitLine: { lineStyle: { color: isDark ? '#181b21' : '#f1f1ee', type: 'dashed' } },
-        axisLabel: { color: textColor, fontSize: 9 },
+        axisLabel: { color: textColor, fontSize: 9, formatter: (value: number) => currency.formatCompact(value) },
       },
       series,
     });
@@ -142,7 +144,7 @@ export function ProfitChart({
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [sortedData, mode, range, interval, isDark]);
+  }, [sortedData, mode, range, interval, isDark, currency]);
 
   const intervalNeedsMoreData = mode === 'interval' && sortedData.length < 2;
 

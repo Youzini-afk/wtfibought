@@ -9,6 +9,7 @@ import {Skeleton} from '../components/ui/skeleton';
 import {CopyPlus, Hand, RotateCcw, Shield, Spade, Split, Square} from 'lucide-react';
 import {cn} from '../lib/utils';
 import type {BlackjackStatus, GameState, HandResult} from '../types';
+import {useCurrency} from '../hooks/useCurrency';
 
 const BET_PRESETS = [50, 100, 500, 1000];
 // 面额÷10对齐新经济，配色沿用原档位样式类
@@ -27,6 +28,7 @@ const RESULT_LABELS: Record<string, string> = {
 };
 
 export function Blackjack() {
+  const currency = useCurrency();
   const { toast } = useToast();
   const [status, setStatus] = useState<BlackjackStatus | null>(null);
   const [game, setGame] = useState<GameState | null>(null);
@@ -120,13 +122,13 @@ export function Blackjack() {
           </div>
           <div>
             <div className="text-xs text-muted-foreground">游戏余额</div>
-            <div className="text-xl font-bold tabular-nums">{chips.toLocaleString()}</div>
+            <div className="text-xl font-bold tabular-nums">{currency.format(chips, 0)}</div>
           </div>
           {status && (
             <div className="ml-2 pl-3 border-l border-white/10">
-              <div className="text-xs text-muted-foreground">今日积分池</div>
+              <div className="text-xs text-muted-foreground">今日{currency.name}池</div>
               <div className={cn('text-sm font-bold tabular-nums', (status.dailyPool ?? 0) <= 0 ? 'text-red-400' : 'text-emerald-400')}>
-                {(status.dailyPool ?? 0).toLocaleString()}
+                {currency.format(status.dailyPool ?? 0, 0)}
               </div>
             </div>
           )}
@@ -134,7 +136,7 @@ export function Blackjack() {
         <div className="flex items-center gap-2">
           {status && (
             <div className="text-xs text-muted-foreground text-right space-y-0.5 mr-2">
-              <div>{status.totalHands}局 | 赢{status.totalWon.toLocaleString()} | 输{status.totalLost.toLocaleString()}</div>
+              <div>{status.totalHands}局 | 赢{currency.formatCompact(status.totalWon)} | 输{currency.formatCompact(status.totalLost)}</div>
             </div>
           )}
         </div>
@@ -201,7 +203,7 @@ export function Blackjack() {
                     <span className="text-xs text-blue-300 bg-blue-500/20 px-1.5 py-0.5 rounded">x2</span>
                   )}
                   <span className="text-xs text-white/40 ml-auto tabular-nums">
-                    本轮积分 {hand.bet.toLocaleString()}
+                    本轮{currency.name} {currency.format(hand.bet, 0)}
                   </span>
                 </div>
                 <div className="flex gap-2 sm:gap-3 flex-wrap min-h-24 sm:min-h-28">
@@ -216,7 +218,7 @@ export function Blackjack() {
           {/* 保险 */}
           {game.insurance != null && (
             <div className="text-xs text-white/40 mt-2 flex items-center gap-1">
-              <Shield className="w-3 h-3" /> 保险: {game.insurance.toLocaleString()}
+              <Shield className="w-3 h-3" /> 保险: {currency.format(game.insurance, 0)}
             </div>
           )}
 
@@ -244,7 +246,7 @@ export function Blackjack() {
                         r.net < 0 && 'text-red-400',
                         r.net === 0 && 'text-white/50'
                       )}>
-                        {r.net > 0 ? '+' : ''}{r.net.toLocaleString()}
+                        {currency.formatSigned(r.net, 0)}
                       </span>
                     </div>
                   );
@@ -299,9 +301,9 @@ export function Blackjack() {
         <div className="bj-table casino-felt rounded-2xl p-6 sm:p-8">
           <div className="text-center space-y-4">
             <div>
-              <div className="text-xs text-white/40 uppercase tracking-widest mb-1">本轮积分</div>
+              <div className="text-xs text-white/40 uppercase tracking-widest mb-1">本轮{currency.name}</div>
               <div className="text-4xl sm:text-5xl font-bold text-white tabular-nums bj-count-up">
-                {betAmount.toLocaleString()}
+                {currency.format(betAmount, 0)}
               </div>
             </div>
 
@@ -318,7 +320,7 @@ export function Blackjack() {
                   style={{ animationDelay: `${i * 50}ms` }}
                   onClick={() => setBetAmount(v)}
                   disabled={v > chips}
-                  aria-label={`本轮积分 ${v.toLocaleString()}`}
+                  aria-label={`本轮${currency.name} ${currency.format(v, 0)}`}
                 >
                   {v >= 1000 ? `${v / 1000}K` : v}
                 </button>
@@ -327,7 +329,7 @@ export function Blackjack() {
 
             {/* 发牌 */}
             {poolExhausted ? (
-              <div className="text-sm text-red-400 text-center py-3">今日积分池已耗尽，明日重置</div>
+              <div className="text-sm text-red-400 text-center py-3">今日{currency.name}池已耗尽，明日重置</div>
             ) : (
               <Button
                 className={cn(
@@ -373,13 +375,13 @@ export function Blackjack() {
           </section>
 
           <section>
-            <h3 className="font-semibold mb-1">积分机制</h3>
+            <h3 className="font-semibold mb-1">{currency.name}机制</h3>
             <ul className="list-disc list-inside text-muted-foreground space-y-1">
-              <li>积分为站内虚拟数值，用于小游戏内结算与展示。</li>
-              <li>每日保底 200 积分，低于此值时次日自动补足。</li>
+              <li>{currency.name}为站内虚拟数值，用于小游戏内结算与展示。</li>
+              <li>每日保底 {currency.format(200, 0)}，低于此值时次日自动补足。</li>
               <li>单局可下注 50 / 100 / 500 / 1000 四档。</li>
               <li>超出 200 保底的部分可转出至游戏钱包，每日上限 500。</li>
-              <li>每日积分池全站共享，池子耗尽后当日不再开新局。</li>
+              <li>每日{currency.name}池全站共享，池子耗尽后当日不再开新局。</li>
             </ul>
           </section>
         </CardContent>
@@ -394,9 +396,9 @@ export function Blackjack() {
           <p className="text-sm text-muted-foreground">
             你有一局未完成的牌局
             {status?.activeGame?.playerHands?.[0]?.bet && (
-              <span>（本轮积分: {status.activeGame.playerHands[0].bet.toLocaleString()}）</span>
+              <span>（本轮{currency.name}: {currency.format(status.activeGame.playerHands[0].bet, 0)}）</span>
             )}
-            ，要继续还是放弃？放弃将损失本轮已投入积分。
+            ，要继续还是放弃？放弃将损失本轮已投入{currency.name}。
           </p>
         </DialogContent>
         <DialogFooter>

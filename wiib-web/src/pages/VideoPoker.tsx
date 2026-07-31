@@ -6,8 +6,9 @@ import { Skeleton } from '../components/ui/skeleton';
 import { WalletTransferModal } from '../components/WalletTransferModal';
 import { Wallet, ChevronDown, ArrowLeftRight } from 'lucide-react';
 import { CardContent } from '../components/ui/card';
-import { cn, fmtNum } from '../lib/utils';
+import { cn } from '../lib/utils';
 import type { VideoPokerGameState, VideoPokerStatus } from '../types';
+import { useCurrency } from '../hooks/useCurrency';
 
 const BET_PRESETS = [10, 50, 100, 500, 1000, 5000];
 // 面额÷10对齐新经济，配色沿用原档位样式类
@@ -108,6 +109,7 @@ function PokerCard({ card, isHeld, isOldHeld, isReplacing, onClick, disabled, de
 }
 
 export function VideoPoker() {
+  const currency = useCurrency();
   const { toast } = useToast();
   const [status, setStatus] = useState<VideoPokerStatus | null>(null);
   const [game, setGame] = useState<VideoPokerGameState | null>(null);
@@ -229,7 +231,7 @@ export function VideoPoker() {
             <div className="text-[10px] text-muted-foreground uppercase tracking-wider">游戏钱包</div>
             <div className="text-xl font-bold tabular-nums flex items-center gap-1.5">
               <Wallet className="w-4 h-4 text-muted-foreground" />
-              {fmtNum(balance)}
+              {currency.format(balance)}
             </div>
           </div>
         </div>
@@ -274,10 +276,10 @@ export function VideoPoker() {
               {winRank ? (
                 <div>
                   <div className="text-lg">{winRank}</div>
-                  <div className="text-sm font-normal text-emerald-800 dark:text-emerald-300/80">+{fmtNum(game.payout)} ({game.multiplier}x)</div>
+                  <div className="text-sm font-normal text-emerald-800 dark:text-emerald-300/80">{currency.formatSigned(game.payout)} ({game.multiplier}x)</div>
                 </div>
               ) : (
-                <span className="text-sm">未中奖 · -{fmtNum(game.betAmount)}</span>
+                <span className="text-sm">未中奖 · -{currency.format(game.betAmount)}</span>
               )}
             </div>
           )}
@@ -321,7 +323,7 @@ export function VideoPoker() {
               <div className="text-center">
                 <div className="text-xs text-muted-foreground uppercase tracking-widest mb-1">下注金额</div>
                 <div className="text-4xl sm:text-5xl font-bold text-foreground tabular-nums">
-                  {betAmount.toLocaleString()}
+                  {currency.format(betAmount, 0)}
                 </div>
               </div>
 

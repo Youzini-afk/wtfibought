@@ -6,10 +6,11 @@ import { Select } from '../components/ui/select';
 import { Skeleton } from '../components/ui/skeleton';
 import { useToast } from '../components/ui/use-toast';
 import { EmptyState } from '../components/EmptyState';
-import { cn, fmtNum, fmtTime } from '../lib/utils';
+import { cn, fmtTime } from '../lib/utils';
 import { Receipt, RefreshCw, Loader2, TriangleAlert } from 'lucide-react';
 import type { LedgerEntry, LedgerBizTypeOption, LedgerWallet } from '../types';
 import { tradeSymbolName } from '../lib/orderSide';
+import { useCurrency } from '../hooks/useCurrency';
 
 /** 后端默认 30、封顶 100。取默认值即可，一屏够看还省流量 */
 const PAGE_SIZE = 30;
@@ -67,7 +68,7 @@ function groupByDay(entries: LedgerEntry[]): { key: string; rows: LedgerEntry[] 
 }
 
 function EntryRow({ entry }: { entry: LedgerEntry }) {
-  const up = entry.delta > 0;
+  const currency = useCurrency();
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b border-border/25 last:border-b-0 hover:bg-accent/25 transition-colors">
       <span className="num text-[11px] text-muted-foreground w-11 shrink-0 tabular-nums">
@@ -89,17 +90,17 @@ function EntryRow({ entry }: { entry: LedgerEntry }) {
         {(entry.remark || entry.fee != null) && (
           <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[10px] text-muted-foreground">
             {entry.remark && <span className="truncate">{entry.remark}</span>}
-            {entry.fee != null && <span className="num shrink-0">含手续费 {fmtNum(entry.fee)}</span>}
+            {entry.fee != null && <span className="num shrink-0">含手续费 {currency.format(entry.fee)}</span>}
           </div>
         )}
       </div>
 
       <div className="text-right shrink-0">
         <div className={cn('num text-[13px] font-bold tabular-nums', deltaTone(entry))}>
-          {up ? '+' : ''}{fmtNum(entry.delta)}
+          {currency.formatSigned(entry.delta)}
         </div>
         <div className="num text-[10px] text-muted-foreground tabular-nums">
-          余 {fmtNum(entry.balanceAfter)}
+          余 {currency.format(entry.balanceAfter)}
         </div>
       </div>
     </div>

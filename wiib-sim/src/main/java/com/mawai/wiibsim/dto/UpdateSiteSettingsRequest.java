@@ -7,14 +7,23 @@ public record UpdateSiteSettingsRequest(
         String siteName,
         String faviconUrl,
         Map<String, Boolean> pageVisibility,
-        Boolean dailyWelcomeEnabled
+        Boolean dailyWelcomeEnabled,
+        String currencyName,
+        String currencyCode,
+        String currencySymbol
 ) {
     public UpdateSiteSettingsRequest(String siteName, String faviconUrl) {
-        this(siteName, faviconUrl, null, null);
+        this(siteName, faviconUrl, null, null, null, null, null);
     }
 
     public UpdateSiteSettingsRequest(String siteName, String faviconUrl,
                                      Map<String, Boolean> pageVisibility) {
-        this(siteName, faviconUrl, pageVisibility, null);
+        this(siteName, faviconUrl, pageVisibility, null, null, null, null);
+    }
+
+    public UpdateSiteSettingsRequest(String siteName, String faviconUrl,
+                                     Map<String, Boolean> pageVisibility,
+                                     Boolean dailyWelcomeEnabled) {
+        this(siteName, faviconUrl, pageVisibility, dailyWelcomeEnabled, null, null, null);
     }
 }

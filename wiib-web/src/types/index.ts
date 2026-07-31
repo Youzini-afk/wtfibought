@@ -501,6 +501,10 @@ export type PageVisibility = Record<PageVisibilityKey, boolean>;
 export interface SiteSettings {
   siteName: string;
   faviconUrl: string;
+  /** 站内记账货币的展示名称、代码与符号；不改变真实交易对或计算。 */
+  currencyName: string;
+  currencyCode: string;
+  currencySymbol: string;
   /** 每日首次进入首页时是否自动展示玩法说明；不影响手工入口。 */
   dailyWelcomeEnabled: boolean;
   pageVisibility: PageVisibility;
@@ -515,6 +519,9 @@ export interface SiteAdminSettings extends SiteSettings {
 export interface UpdateSiteSettings {
   siteName?: string;
   faviconUrl?: string;
+  currencyName?: string;
+  currencyCode?: string;
+  currencySymbol?: string;
   dailyWelcomeEnabled?: boolean;
   pageVisibility?: Partial<PageVisibility>;
 }

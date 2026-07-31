@@ -3,6 +3,8 @@ import { useEffect, useRef } from 'react';
 import { getCoin } from '../lib/coinConfig';
 import { useIsDark } from '../hooks/useIsDark';
 import type { PortfolioBStockRow, PortfolioCryptoRow, PortfolioFuturesRow } from '../lib/portfolioAllocation';
+import { useCurrency } from '../hooks/useCurrency';
+import { escapeHtml } from '../lib/utils';
 
 // bStock 无 coinConfig 配色，用独立蓝青系列循环取色，与币种暖色区分
 const BSTOCK_COLORS = ['#635bff', '#0ea5e9', '#14b8a6', '#6366f1', '#06b6d4', '#3b82f6'];
@@ -28,6 +30,7 @@ export function PortfolioChart({
 }: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
   const isDark = useIsDark();
+  const currency = useCurrency();
 
   useEffect(() => {
     if (!chartRef.current) return;
@@ -81,7 +84,7 @@ export function PortfolioChart({
            const note = params.name === '游戏钱包'
              ? '<br/><span style="font-size:0.8em;opacity:0.7">不可直接交易，需划转至余额钱包</span>' : '';
            return `${params.marker}${params.name}<br/>
-                   <span style="font-weight:bold; font-size:1.1em">${params.value.toFixed(2)}</span> (${params.percent}%)${note}`;
+                   <span style="font-weight:bold; font-size:1.1em">${escapeHtml(currency.format(params.value))}</span> (${params.percent}%)${note}`;
         }
       },
       legend: {
@@ -143,7 +146,7 @@ export function PortfolioChart({
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, pendingSettlement, compact, isDark]);
+  }, [cryptoPositions, bstockRows, futuresRows, balance, gameBalance, pendingSettlement, compact, isDark, currency]);
 
   return <div ref={chartRef} className={compact
     ? 'h-40 w-full transition-colors duration-300 sm:h-44'

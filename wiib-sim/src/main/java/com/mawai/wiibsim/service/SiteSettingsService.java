@@ -28,6 +28,9 @@ public class SiteSettingsService {
 
     public static final String DEFAULT_SITE_NAME = "WhatIfIBought";
     public static final String DEFAULT_FAVICON_URL = "/favicon.ico";
+    public static final String DEFAULT_CURRENCY_NAME = "USDT";
+    public static final String DEFAULT_CURRENCY_CODE = "USDT";
+    public static final String DEFAULT_CURRENCY_SYMBOL = "$";
     public static final boolean DEFAULT_DAILY_WELCOME_ENABLED = true;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> PAGE_VISIBILITY_KEYS = Set.of(
@@ -35,6 +38,9 @@ public class SiteSettingsService {
             "games", "testnet", "strategies", "comments");
     private static final int MAX_SITE_NAME_LENGTH = 80;
     private static final int MAX_FAVICON_URL_LENGTH = 512;
+    private static final int MAX_CURRENCY_NAME_LENGTH = 32;
+    private static final int MAX_CURRENCY_CODE_LENGTH = 16;
+    private static final int MAX_CURRENCY_SYMBOL_LENGTH = 16;
 
     private final SiteRuntimeConfigMapper mapper;
 
@@ -48,6 +54,7 @@ public class SiteSettingsService {
             SiteRuntimeConfig fallback = defaults();
             return new PublicSiteSettingsDTO(
                     fallback.getSiteName(), fallback.getFaviconUrl(),
+                    fallback.getCurrencyName(), fallback.getCurrencyCode(), fallback.getCurrencySymbol(),
                     fallback.getDailyWelcomeEnabled(), PageVisibilityDTO.allEnabled(), null);
         }
     }
@@ -62,14 +69,22 @@ public class SiteSettingsService {
     public synchronized SiteAdminSettingsDTO updateSettings(UpdateSiteSettingsRequest request) {
         if (request == null) throw parameterError("配置不能为空");
         if (request.siteName() == null && request.faviconUrl() == null
-                && request.pageVisibility() == null && request.dailyWelcomeEnabled() == null) {
+                && request.pageVisibility() == null && request.dailyWelcomeEnabled() == null
+                && request.currencyName() == null && request.currencyCode() == null
+                && request.currencySymbol() == null) {
             throw parameterError("至少需要提交一个配置字段");
         }
 
         String siteName = request.siteName() == null ? null : trim(request.siteName());
         String faviconUrl = request.faviconUrl() == null ? null : trim(request.faviconUrl());
+        String currencyName = request.currencyName() == null ? null : trim(request.currencyName());
+        String currencyCode = request.currencyCode() == null ? null : trim(request.currencyCode());
+        String currencySymbol = request.currencySymbol() == null ? null : trim(request.currencySymbol());
         if (siteName != null) validateSiteName(siteName);
         if (faviconUrl != null) validateFaviconUrl(faviconUrl);
+        if (currencyName != null) validateDisplayField("货币名称", currencyName, MAX_CURRENCY_NAME_LENGTH);
+        if (currencyCode != null) validateDisplayField("货币代码", currencyCode, MAX_CURRENCY_CODE_LENGTH);
+        if (currencySymbol != null) validateDisplayField("货币符号", currencySymbol, MAX_CURRENCY_SYMBOL_LENGTH);
 
         String pageVisibilityPatchJson = null;
         if (request.pageVisibility() != null) {
@@ -77,7 +92,7 @@ public class SiteSettingsService {
             pageVisibilityPatchJson = serializePageVisibilityPatch(request.pageVisibility());
         }
 
-        if (mapper.patch(siteName, faviconUrl, pageVisibilityPatchJson,
+        if (mapper.patch(siteName, faviconUrl, currencyName, currencyCode, currencySymbol, pageVisibilityPatchJson,
                 request.dailyWelcomeEnabled(), LocalDateTime.now()) < 1) {
             throw new IllegalStateException("站点设置保存失败");
         }
@@ -96,6 +111,9 @@ public class SiteSettingsService {
         defaults.setId(1);
         defaults.setSiteName(DEFAULT_SITE_NAME);
         defaults.setFaviconUrl(DEFAULT_FAVICON_URL);
+        defaults.setCurrencyName(DEFAULT_CURRENCY_NAME);
+        defaults.setCurrencyCode(DEFAULT_CURRENCY_CODE);
+        defaults.setCurrencySymbol(DEFAULT_CURRENCY_SYMBOL);
         defaults.setDailyWelcomeEnabled(DEFAULT_DAILY_WELCOME_ENABLED);
         defaults.setPageVisibilityJson(serializePageVisibility(PageVisibilityDTO.allEnabled()));
         return defaults;
@@ -104,10 +122,19 @@ public class SiteSettingsService {
     private SiteRuntimeConfig normalizeAndValidate(SiteRuntimeConfig config) {
         String siteName = trim(config.getSiteName());
         String faviconUrl = trim(config.getFaviconUrl());
+        String currencyName = normalizeOrDefault(config.getCurrencyName(), DEFAULT_CURRENCY_NAME);
+        String currencyCode = normalizeOrDefault(config.getCurrencyCode(), DEFAULT_CURRENCY_CODE);
+        String currencySymbol = normalizeOrDefault(config.getCurrencySymbol(), DEFAULT_CURRENCY_SYMBOL);
         validateSiteName(siteName);
         validateFaviconUrl(faviconUrl);
+        validateDisplayField("货币名称", currencyName, MAX_CURRENCY_NAME_LENGTH);
+        validateDisplayField("货币代码", currencyCode, MAX_CURRENCY_CODE_LENGTH);
+        validateDisplayField("货币符号", currencySymbol, MAX_CURRENCY_SYMBOL_LENGTH);
         config.setSiteName(siteName);
         config.setFaviconUrl(faviconUrl);
+        config.setCurrencyName(currencyName);
+        config.setCurrencyCode(currencyCode);
+        config.setCurrencySymbol(currencySymbol);
         if (config.getDailyWelcomeEnabled() == null) {
             config.setDailyWelcomeEnabled(DEFAULT_DAILY_WELCOME_ENABLED);
         }
@@ -149,19 +176,39 @@ public class SiteSettingsService {
         }
     }
 
+    private void validateDisplayField(String label, String value, int maxLength) {
+        if (value.isBlank()) throw parameterError(label + "不能为空");
+        if (value.codePointCount(0, value.length()) > maxLength) {
+            throw parameterError(label + "不能超过 " + maxLength + " 个字符");
+        }
+        if (value.codePoints().anyMatch(codePoint -> Character.isISOControl(codePoint) || isBidiControl(codePoint))) {
+            throw parameterError(label + "不能包含控制字符");
+        }
+    }
+
+    private boolean isBidiControl(int codePoint) {
+        return codePoint == 0x061C || codePoint == 0x200E || codePoint == 0x200F
+                || (codePoint >= 0x202A && codePoint <= 0x202E)
+                || (codePoint >= 0x2066 && codePoint <= 0x2069);
+    }
+
     private boolean isLocalHost(String host) {
         return "localhost".equalsIgnoreCase(host) || "127.0.0.1".equals(host) || "::1".equals(host);
     }
 
     private SiteAdminSettingsDTO toAdmin(SiteRuntimeConfig config, boolean databaseConfigured) {
         return new SiteAdminSettingsDTO(
-                config.getSiteName(), config.getFaviconUrl(), config.getDailyWelcomeEnabled(), pageVisibility(config),
+                config.getSiteName(), config.getFaviconUrl(),
+                config.getCurrencyName(), config.getCurrencyCode(), config.getCurrencySymbol(),
+                config.getDailyWelcomeEnabled(), pageVisibility(config),
                 config.getUpdatedAt(), databaseConfigured);
     }
 
     private PublicSiteSettingsDTO toPublic(SiteRuntimeConfig config) {
         return new PublicSiteSettingsDTO(
-                config.getSiteName(), config.getFaviconUrl(), config.getDailyWelcomeEnabled(),
+                config.getSiteName(), config.getFaviconUrl(),
+                config.getCurrencyName(), config.getCurrencyCode(), config.getCurrencySymbol(),
+                config.getDailyWelcomeEnabled(),
                 pageVisibility(config), config.getUpdatedAt());
     }
 
@@ -223,6 +270,11 @@ public class SiteSettingsService {
 
     private String trim(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String normalizeOrDefault(String value, String fallback) {
+        String normalized = trim(value);
+        return normalized.isBlank() ? fallback : normalized;
     }
 
     private BizException parameterError(String message) {

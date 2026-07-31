@@ -10,6 +10,7 @@ import { Skeleton } from '../ui/skeleton';
 import { fmtNum, fmtDateTime } from '../../lib/utils';
 import { formatCoinPrice } from '../../lib/coinConfig';
 import type { CryptoOrder, FuturesOrder, PageResult } from '../../types';
+import { useCurrency } from '../../hooks/useCurrency';
 
 const ORDER_STATUS_FILTERS = [
   { label: '全部', value: '' },
@@ -72,6 +73,7 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
   spotRefreshKey: number;
   futuresRefreshKey: number;
 }) {
+  const currency = useCurrency();
   const { toast } = useToast();
   const fmtPrice = (n?: number | null) => formatCoinPrice(symbol, n);
 
@@ -245,7 +247,7 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
                           <td className="px-2 py-2.5 text-right font-mono">{o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'}</td>
                           <td className="px-2 py-2.5 text-right font-mono">{o.filledPrice != null ? fmtPrice(o.filledPrice) : '-'}</td>
                           <td className={`px-2 py-2.5 text-right font-mono ${hasPnl ? (o.realizedPnl! > 0 ? 'text-gain' : 'text-loss') : ''}`}>
-                            {hasPnl ? `${o.realizedPnl! > 0 ? '+' : ''}${fmtNum(o.realizedPnl!)}` : '-'}
+                            {hasPnl ? currency.formatSigned(o.realizedPnl!) : '-'}
                           </td>
                           <td className="px-2 py-2.5 text-center"><Badge variant={st.variant}>{st.label}</Badge></td>
                           <td className="px-4 py-2.5 text-center">
@@ -390,7 +392,7 @@ export function CoinOrdersCard({ symbol, mode, spotRefreshKey, futuresRefreshKey
                 <DRow k="限价" v={o.limitPrice != null ? fmtPrice(o.limitPrice) : '-'} />
                 <DRow k="成交价" v={o.filledPrice != null ? fmtPrice(o.filledPrice) : '-'} />
                 <DRow k="盈亏" v={hasPnl
-                  ? <span className={o.realizedPnl! > 0 ? 'text-gain' : 'text-loss'}>{o.realizedPnl! > 0 ? '+' : ''}{fmtNum(o.realizedPnl!)}</span>
+                  ? <span className={o.realizedPnl! > 0 ? 'text-gain' : 'text-loss'}>{currency.formatSigned(o.realizedPnl!)}</span>
                   : '-'} />
                 <DRow k="状态" v={<Badge variant={st.variant}>{st.label}</Badge>} />
                 {o.status === 'PENDING' && (
