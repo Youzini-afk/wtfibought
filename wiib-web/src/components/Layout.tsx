@@ -15,12 +15,12 @@ import { bstockApi } from '../api';
 import {
   Home, Briefcase, LogOut, LogIn, TrendingUp, Sun, Moon,
   BarChart3, User, ChevronDown, List, DollarSign,
-  Brain, Gem, Globe, ShieldCheck,
+  Brain, Gem, Globe, ShieldCheck, Target,
 } from 'lucide-react';
 
 interface Props { children: React.ReactNode }
 
-const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi'];
+const MARKET_PATHS = ['/bstock', '/coin', '/commodity', '/tradfi', '/prediction'];
 
 const LED_LABEL: Record<HealthLevel, string> = {
   ok: '正常', warn: '降级', down: '断连', unknown: '未知',
@@ -84,7 +84,9 @@ export function Layout({ children }: Props) {
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-4 h-full whitespace-nowrap">
             <HeaderNavItem to="/" label="首页" />
-            {visiblePages?.market && <MarketDropdown isActive={isMarketActive} />}
+            {visiblePages?.market && (
+              <MarketDropdown isActive={isMarketActive} showPrediction={Boolean(visiblePages.games)} />
+            )}
             {visiblePages?.portfolio && <HeaderNavItem to="/portfolio" label="持仓" />}
             {/* 账单：桌面端唯一入口（手机端在「我的」页里）。原先挂在持仓页当按钮，
                 资金流水跟持仓是两件事，藏在别的页面里找不着 */}
@@ -197,7 +199,7 @@ function HeaderNavItem({ to, label }: { to: string; label: string }) {
   );
 }
 
-function MarketDropdown({ isActive }: { isActive: boolean }) {
+function MarketDropdown({ isActive, showPrediction }: { isActive: boolean; showPrediction: boolean }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -226,6 +228,9 @@ function MarketDropdown({ isActive }: { isActive: boolean }) {
             { to: '/coin', icon: <DollarSign className="w-4 h-4" />, label: '币种' },
             { to: '/commodity', icon: <Gem className="w-4 h-4" />, label: '大宗商品' },
             { to: '/tradfi', icon: <Globe className="w-4 h-4" />, label: 'TradFi 合约' },
+            ...(showPrediction
+              ? [{ to: '/prediction', icon: <Target className="w-4 h-4" />, label: '涨跌预测' }]
+              : []),
           ].map(({ to, icon, label }) => (
             <NavLink
               key={to}
