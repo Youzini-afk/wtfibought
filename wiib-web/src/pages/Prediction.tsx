@@ -357,11 +357,6 @@ export function Prediction() {
   return (
     <div className="page-shell p-4 md:p-6 space-y-4">
 
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs font-bold">
-        <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-        新玩法测试中 — 预测{PREDICTION_ASSET} 5分钟涨跌，参考外部概率市场，手续费等相关费用可能会不同
-      </div>
-
       {/* ── Hero: 标题 + 倒计时 + 价格 + 图表 ── */}
       <Card className="overflow-hidden">
         <CardContent className="p-0">
