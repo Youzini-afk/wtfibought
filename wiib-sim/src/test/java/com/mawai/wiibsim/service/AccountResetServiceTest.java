@@ -38,6 +38,7 @@ class AccountResetServiceTest {
     private ExternalQuotaTransferMapper externalQuotaTransferMapper;
     private FuturesPositionIndexService indexService;
     private AccountPurgeTx purgeTx;
+    private AssetSnapshotService assetSnapshotService;
     private StringRedisTemplate redis;
     private ZSetOperations<String, String> zSetOps;
     private AccountResetService service;
@@ -50,6 +51,7 @@ class AccountResetServiceTest {
         externalQuotaTransferMapper = mock(ExternalQuotaTransferMapper.class);
         indexService = mock(FuturesPositionIndexService.class);
         purgeTx = mock(AccountPurgeTx.class);
+        assetSnapshotService = mock(AssetSnapshotService.class);
 
         redis = mock(StringRedisTemplate.class);
         zSetOps = mock(ZSetOperations.class);
@@ -60,7 +62,8 @@ class AccountResetServiceTest {
         when(zSetOps.range(anyString(), anyLong(), anyLong())).thenReturn(Set.of());
 
         service = new AccountResetService(
-                positionMapper, cryptoOrderMapper, externalQuotaTransferMapper, indexService, purgeTx, redis);
+                positionMapper, cryptoOrderMapper, externalQuotaTransferMapper, indexService, purgeTx,
+                assetSnapshotService, redis);
     }
 
     private static FuturesPosition openPosition() {
@@ -82,6 +85,7 @@ class AccountResetServiceTest {
         InOrder order = inOrder(indexService, purgeTx);
         order.verify(indexService).unregisterAll(p);
         order.verify(purgeTx).purge(7L);
+        verify(assetSnapshotService).invalidateUser(7L);
     }
 
     @Test
@@ -94,6 +98,7 @@ class AccountResetServiceTest {
 
         // 补偿：删表失败必须把触发保护装回去，否则仓位裸奔
         verify(indexService).registerPositionIndex(p);
+        verify(assetSnapshotService, never()).invalidateUser(7L);
     }
 
     @Test

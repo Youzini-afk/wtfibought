@@ -15,16 +15,18 @@ import { useToast } from '../components/ui/use-toast';
 import { SpotlightCard } from '../components/fx/SpotlightCard';
 import { DecryptedText } from '../components/fx/DecryptedText';
 import { ArcGauge } from '../components/fx/ArcGauge';
-import { Sparkline } from '../components/fx/Sparkline';
+import { AssetEquityChart } from '../components/AssetEquityChart';
+import { AssetSeriesControls } from '../components/AssetSeriesControls';
 import {
   RefreshCcw, Bell, Gamepad2, List, DollarSign, ArrowRight, Target, Brain, Gift,
 } from 'lucide-react';
-import type { BuffStatus, AssetSnapshot, QuantSnapshotView } from '../types';
+import type { BuffStatus, AssetSeriesPoint, AssetSnapshot, QuantSnapshotView } from '../types';
 import { useUserStore } from '../stores/userStore';
 import { useSiteSettingsStore } from '../stores/siteSettingsStore';
 import { cn, fmtMoney } from '../lib/utils';
 import { orderSideView, tradeSymbolName } from '../lib/orderSide';
 import type { PageVisibilityKey } from '../types';
+import { useAssetSeriesPreferences } from '../hooks/useAssetSeriesPreferences';
 
 const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
 function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
@@ -62,10 +64,14 @@ export function Home() {
   const [tradesLoadedNonce, setTradesLoadedNonce] = useState(-1);
   const tradesLoading = tradesLoadedNonce !== refreshNonce;
 
-  // 驾驶舱数据：资产曲线(30d) + 实时快照(今日盈亏) + BTC 量化快照(AI 波动画像)
-  const [history, setHistory] = useState<AssetSnapshot[]>([]);
+  // 驾驶舱数据：可选范围资产曲线 + 实时快照(今日盈亏) + BTC 量化快照(AI 波动画像)
+  const [assetSeries, setAssetSeries] = useState<AssetSeriesPoint[]>([]);
+  const [assetSeriesKey, setAssetSeriesKey] = useState('');
+  const [assetSeriesLoading, setAssetSeriesLoading] = useState(false);
   const [realtime, setRealtime] = useState<AssetSnapshot | null>(null);
   const [quantSnap, setQuantSnap] = useState<QuantSnapshotView | null>(null);
+  const { range, interval, setRange, setInterval } = useAssetSeriesPreferences();
+  const assetSeriesQueryKey = `${range}:${interval}`;
 
   useEffect(() => { if (shouldShowNotice()) navigate('/intro', { replace: true }); }, [navigate]);
 
@@ -75,9 +81,34 @@ export function Home() {
 
   useEffect(() => {
     if (!ready) return;
-    userApi.assetHistory(30).then(setHistory).catch(() => {});
-    userApi.assetRealtime().then(setRealtime).catch(() => {});
-  }, [ready, refreshNonce]);
+    let cancelled = false;
+    let inFlight = false;
+    setAssetSeriesLoading(true);
+    const load = async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const series = await userApi.assetSeries(range, interval);
+        if (cancelled) return;
+        setAssetSeries(series);
+        setAssetSeriesKey(assetSeriesQueryKey);
+        const snapshot = await userApi.assetRealtime();
+        if (!cancelled) setRealtime(snapshot);
+      } catch { /* 保留其它范围的缓存，但不按当前范围展示 */ }
+      finally {
+        inFlight = false;
+        if (!cancelled) setAssetSeriesLoading(false);
+      }
+    };
+    void load();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load();
+    }, 5 * 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [ready, refreshNonce, range, interval, assetSeriesQueryKey]);
 
   useEffect(() => {
     if (!pageVisibility.ai) return;
@@ -94,10 +125,6 @@ export function Home() {
   }, [refreshNonce]);
 
   const isProfit = (user?.profit ?? 0) >= 0;
-  // 曲线尾端接上实时值，让"最新一格"跟着盘面动
-  const equityCurve = history.length
-    ? [...history.map(h => h.totalAssets), ...(realtime ? [realtime.totalAssets] : [])]
-    : [];
   const todayProfit = realtime?.dailyProfit ?? null;
   const todayUp = (todayProfit ?? 0) >= 0;
   const volLegs: Record<string, VolLeg> | null = (() => {
@@ -150,16 +177,19 @@ export function Home() {
                 </span>
                 <span className="ml-1">总盈亏</span>
               </div>
-              <div className="mt-3 h-20 flex-1 min-h-16">
-                {equityCurve.length > 1 && (
-                  <Sparkline
-                    data={equityCurve}
-                    stroke={isProfit ? 'var(--color-gain)' : 'var(--color-loss)'}
-                    dot={false}
-                    className="w-full h-full"
-                  />
-                )}
-              </div>
+              <AssetSeriesControls
+                range={range}
+                interval={interval}
+                onRangeChange={setRange}
+                onIntervalChange={setInterval}
+                className="mt-3"
+              />
+              <AssetEquityChart
+                data={assetSeriesKey === assetSeriesQueryKey ? assetSeries : []}
+                range={range}
+                loading={assetSeriesLoading}
+                className="mt-2 h-20 flex-1 min-h-16"
+              />
             </SpotlightCard>
 
             <div className="flex flex-col gap-4">
@@ -244,7 +274,7 @@ export function Home() {
               <div className="flex gap-6 md:gap-8 shrink-0">
                 {[
                   { num: '50+', label: '影子股票' },
-                  { num: '6', label: '币种' },
+                  { num: '9', label: '币种' },
                   { num: '24/7', label: '影子币行情' },
                 ].map(s => (
                   <div key={s.label} className="text-center">

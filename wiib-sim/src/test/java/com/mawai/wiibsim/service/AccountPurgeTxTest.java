@@ -12,6 +12,7 @@ import com.mawai.wiibsim.mapper.FuturesPositionMapper;
 import com.mawai.wiibsim.mapper.MinesGameMapper;
 import com.mawai.wiibsim.mapper.PredictionBetMapper;
 import com.mawai.wiibsim.mapper.UserAssetSnapshotMapper;
+import com.mawai.wiibsim.mapper.UserAssetPointMapper;
 import com.mawai.wiibsim.mapper.UserBuffMapper;
 import com.mawai.wiibsim.mapper.UserLedgerMapper;
 import com.mawai.wiibsim.mapper.UserMapper;
@@ -44,6 +45,7 @@ class AccountPurgeTxTest {
     @Mock MinesGameMapper minesGameMapper;
     @Mock VideoPokerGameMapper videoPokerGameMapper;
     @Mock UserAssetSnapshotMapper userAssetSnapshotMapper;
+    @Mock UserAssetPointMapper userAssetPointMapper;
     @Mock UserBuffMapper userBuffMapper;
     @Mock UserLedgerMapper userLedgerMapper;
     @Mock UserService userService;
@@ -74,6 +76,7 @@ class AccountPurgeTxTest {
                 minesGameMapper,
                 videoPokerGameMapper,
                 userAssetSnapshotMapper,
+                userAssetPointMapper,
                 userBuffMapper,
                 userLedgerMapper,
                 userService);

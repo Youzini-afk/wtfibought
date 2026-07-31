@@ -45,6 +45,7 @@ public class AccountResetService {
     private final ExternalQuotaTransferMapper externalQuotaTransferMapper;
     private final FuturesPositionIndexService indexService;
     private final AccountPurgeTx purgeTx;
+    private final AssetSnapshotService assetSnapshotService;
     private final StringRedisTemplate redis;
 
     /** 策略账户（quant-FIBO 这类）是 user 表里的真实行，永不可重置；用户名须逐字匹配，防误点 */
@@ -98,6 +99,7 @@ public class AccountResetService {
             }
             throw e;
         }
+        assetSnapshotService.invalidateUser(userId);
         redis.delete(RANKING_KEY);   // 榜单缓存 15min，不清的话重置结果要等下一轮才可见
         log.info("[AccountReset] 账户已重置 userId={} 清理仓位数={}", userId, openPositions.size());
     }

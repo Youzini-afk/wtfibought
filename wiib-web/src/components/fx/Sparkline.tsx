@@ -43,6 +43,7 @@ export function Sparkline({ data, stroke, area = true, dot = true, className }: 
       <path
         d={line} fill="none" stroke={c} strokeWidth="1.5"
         strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke"
+        pathLength={1}
         className="spark-draw"
       />
       {dot && <circle cx={lx} cy={ly} r="2" fill={c} className="spark-dot" style={{ filter: `drop-shadow(0 0 2px ${c})` }} />}

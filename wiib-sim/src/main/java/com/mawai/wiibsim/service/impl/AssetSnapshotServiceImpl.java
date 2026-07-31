@@ -5,6 +5,7 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.mawai.wiibcommon.config.BinanceProperties;
+import com.mawai.wiibcommon.dto.AssetSeriesPointDTO;
 import com.mawai.wiibcommon.dto.AssetSnapshotDTO;
 import com.mawai.wiibcommon.dto.CategoryAveragesDTO;
 import com.mawai.wiibcommon.entity.*;
@@ -18,11 +19,13 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -35,8 +38,15 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class AssetSnapshotServiceImpl implements AssetSnapshotService {
 
+    private static final long BASE_SAMPLE_MILLIS = TimeUnit.MINUTES.toMillis(5);
+    private static final long INTRADAY_RETENTION_MILLIS = TimeUnit.DAYS.toMillis(31);
+    private static final Object[] SAMPLE_LOCKS = java.util.stream.IntStream.range(0, 1024)
+            .mapToObj(ignored -> new Object())
+            .toArray(Object[]::new);
+
     private final UserMapper userMapper;
     private final UserAssetSnapshotMapper snapshotMapper;
+    private final UserAssetPointMapper assetPointMapper;
     private final CryptoPositionService cryptoPositionService;
     private final FuturesPositionMapper futuresPositionMapper;
     private final FuturesOrderMapper futuresOrderMapper;
@@ -78,6 +88,16 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     private final Cache<Long, AssetSnapshotDTO> realtimeCache = Caffeine.newBuilder()
             .maximumSize(2000)
             .expireAfterWrite(5, TimeUnit.MINUTES)
+            .build();
+    /** 同一用户同一五分钟桶只实际写一次，重复读接口不会持续 UPDATE 同一行。 */
+    private final Cache<Long, Long> recordedBucketCache = Caffeine.newBuilder()
+            .maximumSize(50_000)
+            .expireAfterAccess(10, TimeUnit.MINUTES)
+            .build();
+    /** 账户重置时递增；重置前已经在途的旧快照因此不能在提交后重新落点。 */
+    private final Cache<Long, Long> samplingGenerationCache = Caffeine.newBuilder()
+            .maximumSize(50_000)
+            .expireAfterAccess(1, TimeUnit.DAYS)
             .build();
     private final LoadingCache<Integer, Map<Long, CategoryAveragesDTO>> categoryRankCache = Caffeine.newBuilder()
             .maximumSize(16)
@@ -124,21 +144,46 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
 
     @Override
     public AssetSnapshotDTO getRealtimeSnapshot(Long userId) {
-        AssetSnapshotDTO cached = realtimeCache.getIfPresent(userId);
-        if (cached != null) return cached;
+        long generation = currentSamplingGeneration(userId);
+        AssetSnapshotDTO dto = realtimeCache.get(userId, this::computeRealtimeSnapshot);
+        if (dto != null) recordPointSafely(userId, dto, System.currentTimeMillis(), generation);
+        return dto;
+    }
 
+    private AssetSnapshotDTO computeRealtimeSnapshot(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) return null;
 
         LocalDate today = LocalDate.now();
         Map<String, BigDecimal> cryptoPriceMap = cryptoPositionService.fetchCryptoPriceMap();
         UserAssetSnapshot snapshot = computeSnapshot(user, today, cryptoPriceMap, loadCategorySets());
-
         UserAssetSnapshot yesterday = snapshotMapper.selectByUserAndDate(userId, today.minusDays(1));
-        AssetSnapshotDTO dto = toDTO(snapshot, yesterday);
+        return toDTO(snapshot, yesterday);
+    }
 
-        realtimeCache.put(userId, dto);
-        return dto;
+    @Override
+    public List<AssetSeriesPointDTO> getSeries(Long userId, String range, String interval) {
+        AssetSeriesSpec spec = AssetSeriesSpec.resolve(range, interval);
+        long now = System.currentTimeMillis();
+        long startMs = now - spec.rangeMillis();
+        AssetSnapshotDTO live = getRealtimeSnapshot(userId);
+        if (live == null) return List.of();
+
+        TreeMap<Long, AssetSeriesPointDTO> buckets = new TreeMap<>();
+        ZoneId zone = ZoneId.systemDefault();
+        LocalDate startDate = java.time.Instant.ofEpochMilli(startMs).atZone(zone).toLocalDate();
+
+        // 新表刚上线时用原有每日快照补足 7D/30D 的早期区间；同桶内的五分钟点会覆盖每日点。
+        for (UserAssetSnapshot daily : snapshotMapper.listByUserAndDateRange(userId, startDate)) {
+            long timestamp = daily.getSnapshotDate().atStartOfDay(zone).toInstant().toEpochMilli();
+            mergeSeriesPoint(buckets, toSeriesDTO(daily, timestamp), startMs, spec.bucketMillis());
+        }
+        for (UserAssetPoint point : assetPointMapper.listBucketed(userId, startMs, spec.bucketMillis())) {
+            mergeSeriesPoint(buckets, toSeriesDTO(point), startMs, spec.bucketMillis());
+        }
+        // 使用请求完成时的真实时间作为末点，避免当前五分钟桶在图上看起来落后。
+        mergeSeriesPoint(buckets, toSeriesDTO(live, now), startMs, spec.bucketMillis());
+        return new ArrayList<>(buckets.values());
     }
 
     @Override
@@ -161,6 +206,30 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
     public CategoryAveragesDTO getCategoryAverages(Long userId, int days) {
         Map<Long, CategoryAveragesDTO> rankMap = categoryRankCache.get(days);
         return rankMap.getOrDefault(userId, new CategoryAveragesDTO());
+    }
+
+    @Override
+    public void purgeIntradayHistory() {
+        int deleted = assetPointMapper.deleteBefore(System.currentTimeMillis() - INTRADAY_RETENTION_MILLIS);
+        if (deleted > 0) {
+            log.info("清理过期资产采样点 {} 条", deleted);
+        }
+    }
+
+    @Override
+    public void invalidateUser(Long userId) {
+        synchronized (sampleLock(userId)) {
+            samplingGenerationCache.put(userId, currentSamplingGeneration(userId) + 1);
+            realtimeCache.invalidate(userId);
+            recordedBucketCache.invalidate(userId);
+            try {
+                // AccountPurgeTx 已在事务内删过一次；这里再次删除用于封住在途旧采样的提交竞态。
+                assetPointMapper.deleteByUserId(userId);
+            } catch (Exception e) {
+                log.warn("账户重置后的资产采样二次清理失败 userId={}: {}", userId, e.getMessage());
+            }
+        }
+        categoryRankCache.invalidateAll();
     }
 
     private Map<Long, CategoryAveragesDTO> buildCategoryRankMap(int days) {
@@ -394,6 +463,101 @@ public class AssetSnapshotServiceImpl implements AssetSnapshotService {
             dto.setDailyPredictionProfit(cur.getPredictionProfit());
             dto.setDailyGameProfit(cur.getGameProfit());
         }
+        return dto;
+    }
+
+    private void recordPointSafely(Long userId, AssetSnapshotDTO dto, long nowMs, long generation) {
+        long bucketStart = Math.floorDiv(nowMs, BASE_SAMPLE_MILLIS) * BASE_SAMPLE_MILLIS;
+        synchronized (sampleLock(userId)) {
+            if (currentSamplingGeneration(userId) != generation) return;
+            Long recordedBucket = recordedBucketCache.getIfPresent(userId);
+            if (recordedBucket != null && recordedBucket == bucketStart) return;
+
+            try {
+                UserAssetPoint point = new UserAssetPoint();
+                point.setUserId(userId);
+                point.setBucketStartMs(bucketStart);
+                point.setTotalAssets(dto.getTotalAssets());
+                point.setCapitalBase(dto.getCapitalBase());
+                point.setProfit(dto.getProfit());
+                point.setProfitPct(dto.getProfitPct());
+                point.setBstockProfit(dto.getBstockProfit());
+                point.setCryptoProfit(dto.getCryptoProfit());
+                point.setCommodityProfit(dto.getCommodityProfit());
+                point.setPredictionProfit(dto.getPredictionProfit());
+                point.setGameProfit(dto.getGameProfit());
+                point.setCreatedAt(LocalDateTime.now());
+                assetPointMapper.upsert(point);
+                recordedBucketCache.put(userId, bucketStart);
+            } catch (Exception e) {
+                // 采样是旁路记录，写入失败不能影响资产查询和交易页面。
+                log.debug("资产采样写入失败 userId={}: {}", userId, e.getMessage());
+            }
+        }
+    }
+
+    private long currentSamplingGeneration(Long userId) {
+        return samplingGenerationCache.get(userId, ignored -> 0L);
+    }
+
+    private static Object sampleLock(Long userId) {
+        return SAMPLE_LOCKS[Math.floorMod(Long.hashCode(userId), SAMPLE_LOCKS.length)];
+    }
+
+    private static void mergeSeriesPoint(TreeMap<Long, AssetSeriesPointDTO> buckets,
+                                         AssetSeriesPointDTO point,
+                                         long startMs,
+                                         long bucketMillis) {
+        if (point.getTimestamp() == null || point.getTimestamp() < startMs) return;
+        long key = Math.floorDiv(point.getTimestamp(), bucketMillis);
+        AssetSeriesPointDTO existing = buckets.get(key);
+        if (existing == null || existing.getTimestamp() <= point.getTimestamp()) {
+            buckets.put(key, point);
+        }
+    }
+
+    private static AssetSeriesPointDTO toSeriesDTO(UserAssetPoint point) {
+        AssetSeriesPointDTO dto = new AssetSeriesPointDTO();
+        dto.setTimestamp(point.getBucketStartMs());
+        dto.setTotalAssets(point.getTotalAssets());
+        dto.setCapitalBase(point.getCapitalBase());
+        dto.setProfit(point.getProfit());
+        dto.setProfitPct(point.getProfitPct());
+        dto.setBstockProfit(point.getBstockProfit());
+        dto.setCryptoProfit(point.getCryptoProfit());
+        dto.setCommodityProfit(point.getCommodityProfit());
+        dto.setPredictionProfit(point.getPredictionProfit());
+        dto.setGameProfit(point.getGameProfit());
+        return dto;
+    }
+
+    private static AssetSeriesPointDTO toSeriesDTO(UserAssetSnapshot snapshot, long timestamp) {
+        AssetSeriesPointDTO dto = new AssetSeriesPointDTO();
+        dto.setTimestamp(timestamp);
+        dto.setTotalAssets(snapshot.getTotalAssets());
+        dto.setCapitalBase(snapshot.getCapitalBase());
+        dto.setProfit(snapshot.getProfit());
+        dto.setProfitPct(snapshot.getProfitPct());
+        dto.setBstockProfit(snapshot.getBstockProfit());
+        dto.setCryptoProfit(snapshot.getCryptoProfit());
+        dto.setCommodityProfit(snapshot.getCommodityProfit());
+        dto.setPredictionProfit(snapshot.getPredictionProfit());
+        dto.setGameProfit(snapshot.getGameProfit());
+        return dto;
+    }
+
+    private static AssetSeriesPointDTO toSeriesDTO(AssetSnapshotDTO snapshot, long timestamp) {
+        AssetSeriesPointDTO dto = new AssetSeriesPointDTO();
+        dto.setTimestamp(timestamp);
+        dto.setTotalAssets(snapshot.getTotalAssets());
+        dto.setCapitalBase(snapshot.getCapitalBase());
+        dto.setProfit(snapshot.getProfit());
+        dto.setProfitPct(snapshot.getProfitPct());
+        dto.setBstockProfit(snapshot.getBstockProfit());
+        dto.setCryptoProfit(snapshot.getCryptoProfit());
+        dto.setCommodityProfit(snapshot.getCommodityProfit());
+        dto.setPredictionProfit(snapshot.getPredictionProfit());
+        dto.setGameProfit(snapshot.getGameProfit());
         return dto;
     }
 

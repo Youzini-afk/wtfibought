@@ -1,62 +1,79 @@
 import * as echarts from 'echarts';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../lib/utils';
-import type { AssetSnapshot } from '../types';
+import type { AssetSeriesInterval, AssetSeriesPoint, AssetSeriesRange } from '../types';
 import { useIsDark } from '../hooks/useIsDark';
+import { AssetSeriesControls } from './AssetSeriesControls';
+import { ASSET_SERIES_INTERVAL_MS } from '../lib/assetSeries';
+
+type ProfitKey = 'profit' | 'cryptoProfit' | 'commodityProfit' | 'bstockProfit' | 'predictionProfit' | 'gameProfit';
 
 interface Props {
-  data: AssetSnapshot[];
+  data: AssetSeriesPoint[];
+  range: AssetSeriesRange;
+  interval: AssetSeriesInterval;
+  onRangeChange: (range: AssetSeriesRange) => void;
+  onIntervalChange: (interval: AssetSeriesInterval) => void;
+  loading?: boolean;
 }
 
-// 五分类收益曲线：crypto 含币合约，大宗商品含金/油合约
-const CUMULATIVE_CONFIG = [
+const PROFIT_CONFIG: ReadonlyArray<{ key: ProfitKey; name: string; color: string }> = [
   { key: 'profit', name: '总收益', color: '#635bff' },
   { key: 'cryptoProfit', name: '加密货币', color: '#f97316' },
   { key: 'commodityProfit', name: '大宗商品', color: '#eab308' },
   { key: 'bstockProfit', name: '影子股票', color: '#0ea5e9' },
   { key: 'predictionProfit', name: '预测', color: '#a855f7' },
   { key: 'gameProfit', name: '游戏', color: '#ef4444' },
-] as const;
+];
 
-const DAILY_CONFIG = [
-  { key: 'dailyProfit', name: '日收益', color: '#635bff' },
-  { key: 'dailyCryptoProfit', name: '加密货币', color: '#f97316' },
-  { key: 'dailyCommodityProfit', name: '大宗商品', color: '#eab308' },
-  { key: 'dailyBstockProfit', name: '影子股票', color: '#0ea5e9' },
-  { key: 'dailyPredictionProfit', name: '预测', color: '#a855f7' },
-  { key: 'dailyGameProfit', name: '游戏', color: '#ef4444' },
-] as const;
+function axisLabel(timestamp: number, range: AssetSeriesRange, interval: AssetSeriesInterval): string {
+  const date = new Date(timestamp);
+  if (range === '1h' || range === '24h') {
+    return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+  }
+  const day = date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
+  if (interval === '1d') return day;
+  return `${day} ${date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
+}
 
-export function ProfitChart({ data }: Props) {
+export function ProfitChart({
+  data,
+  range,
+  interval,
+  onRangeChange,
+  onIntervalChange,
+  loading = false,
+}: Props) {
   const chartRef = useRef<HTMLDivElement>(null);
-  const [mode, setMode] = useState<'cumulative' | 'daily'>('cumulative');
-  const [dailyRange, setDailyRange] = useState<7 | 14 | 30>(7);
+  const [mode, setMode] = useState<'cumulative' | 'interval'>('cumulative');
   const isDark = useIsDark();
-
-  const filteredData = mode === 'daily' ? data.slice(-dailyRange) : data;
+  const sortedData = useMemo(() => [...data].sort((a, b) => a.timestamp - b.timestamp), [data]);
 
   useEffect(() => {
-    if (!chartRef.current || filteredData.length === 0) return;
+    if (!chartRef.current || sortedData.length === 0) return;
     const chart = echarts.init(chartRef.current, isDark ? 'dark' : 'light');
-
-    const config = mode === 'daily' ? DAILY_CONFIG : CUMULATIVE_CONFIG;
-    const dates = filteredData.map(d => d.date);
+    const labels = sortedData.map(point => axisLabel(point.timestamp, range, interval));
     const textColor = isDark ? '#878b96' : '#71737b';
     const gainColor = isDark ? '#0abf95' : '#089981';
     const lossColor = isDark ? '#ff5a68' : '#f23645';
 
-    const series: echarts.SeriesOption[] = config.map(cfg => ({
-      name: cfg.name,
+    const series: echarts.SeriesOption[] = PROFIT_CONFIG.map(config => ({
+      name: config.name,
       type: 'line',
-      data: filteredData.map(d => d[cfg.key as keyof AssetSnapshot] as number ?? 0),
-      smooth: true,
+      data: sortedData.map((point, index) => {
+        const current = point[config.key] ?? 0;
+        if (mode === 'cumulative') return current;
+        if (index === 0) return null;
+        const previous = sortedData[index - 1];
+        if (point.timestamp - previous.timestamp > ASSET_SERIES_INTERVAL_MS[interval] * 1.75) return null;
+        return current - (previous[config.key] ?? 0);
+      }),
+      smooth: 0.22,
       symbol: 'circle',
-      symbolSize: filteredData.length <= 7 ? 6 : 0,
-      lineStyle: {
-        width: cfg.key === 'profit' || cfg.key === 'dailyProfit' ? 2.5 : 1.5,
-      },
-      itemStyle: { color: cfg.color },
-      ...(cfg.key === 'profit' || cfg.key === 'dailyProfit' ? {
+      symbolSize: sortedData.length <= 12 ? 5 : 0,
+      lineStyle: { width: config.key === 'profit' ? 2.5 : 1.5 },
+      itemStyle: { color: config.color },
+      ...(config.key === 'profit' ? {
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: isDark ? 'rgba(99,91,255,0.25)' : 'rgba(99,91,255,0.15)' },
@@ -74,15 +91,19 @@ export function ProfitChart({ data }: Props) {
         backgroundColor: isDark ? '#13151a' : '#FFFFFF',
         borderColor: isDark ? '#23262e' : '#e4e4df',
         textStyle: { color: isDark ? '#eceef0' : '#17181a', fontSize: 12 },
-        formatter: (params: { axisValue: string; value: number; marker: string; seriesName: string }[]) => {
-          const date = params[0]?.axisValue ?? '';
-          let html = `<div style="font-weight:600;margin-bottom:4px">${date}</div>`;
-          for (const p of params) {
-            const v = (p.value as number).toFixed(2);
-            const sign = p.value >= 0 ? '+' : '';
+        formatter: (params: { dataIndex: number; value: number | null; marker: string; seriesName: string }[]) => {
+          const index = params[0]?.dataIndex ?? 0;
+          const timestamp = sortedData[index]?.timestamp;
+          const heading = timestamp == null ? '' : new Date(timestamp).toLocaleString('zh-CN', {
+            month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
+          });
+          let html = `<div style="font-weight:600;margin-bottom:4px">${heading}</div>`;
+          for (const param of params) {
+            if (param.value == null) continue;
+            const value = Number(param.value ?? 0);
             html += `<div style="display:flex;align-items:center;gap:6px;margin:2px 0">
-              ${p.marker}<span>${p.seriesName}</span>
-              <span style="margin-left:auto;font-weight:600;color:${p.value >= 0 ? gainColor : lossColor}">${sign}${v}</span>
+              ${param.marker}<span>${param.seriesName}</span>
+              <span style="margin-left:auto;font-weight:600;color:${value >= 0 ? gainColor : lossColor}">${value >= 0 ? '+' : ''}${value.toFixed(2)}</span>
             </div>`;
           }
           return html;
@@ -100,17 +121,15 @@ export function ProfitChart({ data }: Props) {
       grid: { left: 8, right: 8, top: 16, bottom: 40, containLabel: true },
       xAxis: {
         type: 'category',
-        data: dates,
-        axisLabel: {
-          color: textColor,
-          fontSize: 9,
-          formatter: (v: string) => v.substring(5),
-        },
+        data: labels,
+        boundaryGap: false,
+        axisLabel: { color: textColor, fontSize: 9, hideOverlap: true },
         axisLine: { lineStyle: { color: isDark ? '#23262e' : '#e4e4df' } },
         axisTick: { show: false },
       },
       yAxis: {
         type: 'value',
+        scale: true,
         splitLine: { lineStyle: { color: isDark ? '#181b21' : '#f1f1ee', type: 'dashed' } },
         axisLabel: { color: textColor, fontSize: 9 },
       },
@@ -123,55 +142,59 @@ export function ProfitChart({ data }: Props) {
       window.removeEventListener('resize', onResize);
       chart.dispose();
     };
-  }, [filteredData, mode, isDark]);
+  }, [sortedData, mode, range, interval, isDark]);
 
-  if (data.length === 0) {
-    return (
-      <div className="w-full h-48 sm:h-56 flex items-center justify-center text-sm text-muted-foreground">
-        暂无历史数据，每日零点自动快照
-      </div>
-    );
-  }
+  const intervalNeedsMoreData = mode === 'interval' && sortedData.length < 2;
 
   return (
     <div className="w-full">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-2">
-        <div className="flex gap-1">
-          {mode === 'daily' && ([7, 14, 30] as const).map(d => (
-            <button
-              key={d}
-              onClick={() => setDailyRange(d)}
-              className={cn(
-                "px-3 py-1.5 rounded-lg text-xs sm:text-[10px] font-medium transition-colors min-w-[44px]",
-                dailyRange === d ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground bg-muted/50"
-              )}
-            >
-              {d}天
-            </button>
-          ))}
-        </div>
-        <div className="flex gap-1">
+      <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <AssetSeriesControls
+          range={range}
+          interval={interval}
+          onRangeChange={onRangeChange}
+          onIntervalChange={onIntervalChange}
+          className="min-w-0 flex-1"
+        />
+        <div className="flex gap-1 self-end sm:self-auto">
           <button
+            type="button"
             onClick={() => setMode('cumulative')}
             className={cn(
-              "px-3 py-1.5 rounded-lg text-xs sm:text-[10px] font-medium transition-colors min-w-[44px]",
-              mode === 'cumulative' ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground bg-muted/50"
+              'min-w-14 rounded-lg px-3 py-1.5 text-[10px] font-medium transition-colors',
+              mode === 'cumulative' ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground hover:text-foreground',
             )}
           >
             累计
           </button>
           <button
-            onClick={() => setMode('daily')}
+            type="button"
+            onClick={() => setMode('interval')}
             className={cn(
-              "px-3 py-1.5 rounded-lg text-xs sm:text-[10px] font-medium transition-colors min-w-[44px]",
-              mode === 'daily' ? "bg-primary/15 text-primary" : "text-muted-foreground hover:text-foreground bg-muted/50"
+              'min-w-14 rounded-lg px-3 py-1.5 text-[10px] font-medium transition-colors',
+              mode === 'interval' ? 'bg-primary/15 text-primary' : 'bg-muted/50 text-muted-foreground hover:text-foreground',
             )}
           >
-            日收益
+            区间变化
           </button>
         </div>
       </div>
-      <div ref={chartRef} className="w-full h-56 sm:h-72" />
+
+      {loading ? (
+        <div className="flex h-48 w-full items-center justify-center text-sm text-muted-foreground sm:h-56">
+          正在加载资产曲线…
+        </div>
+      ) : sortedData.length === 0 ? (
+        <div className="flex h-48 w-full items-center justify-center text-sm text-muted-foreground sm:h-56">
+          暂无该范围的资产采样，保持在线后会自动积累
+        </div>
+      ) : intervalNeedsMoreData ? (
+        <div className="flex h-48 w-full items-center justify-center text-sm text-muted-foreground sm:h-56">
+          至少需要两个连续采样点才能计算区间变化
+        </div>
+      ) : (
+        <div ref={chartRef} className="h-56 w-full sm:h-72" />
+      )}
     </div>
   );
 }

@@ -6,7 +6,7 @@ import type { NewApiAdminSettings, UpdateNewApiAdminSettings } from '../types';
 import type { SiteAdminSettings, SiteSettings, UpdateSiteSettings } from '../types';
 import type { BStockAdminItem, BStockCatalogStatus, BStockCatalogSyncResult, UpdateBStockAdminRequest } from '../types';
 import { registerBStockAliases } from '../lib/orderSide';
-import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, BStockAlias, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
+import type { User, PageResult, RankingItem, CommentItem, NotificationItem, BuffStatus, UserBuff, BlackjackStatus, GameState, MinesStatus, MinesGameState, VideoPokerStatus, VideoPokerGameState, CryptoPrice, CryptoOrderRequest, CryptoOrder, CryptoPosition, BStock, BStockAlias, FuturesOpenRequest, FuturesCloseRequest, FuturesAddMarginRequest, FuturesReduceMarginRequest, FuturesStopLossRequest, FuturesTakeProfitRequest, FuturesAdjustLeverageRequest, FuturesCrossAccount, WalletTransferPreview, ExternalWalletInfo, ExternalQuotaTransfer, ExternalWithdrawalPreview, FuturesPosition, FuturesOrder, FuturesBracket, TradeFilterMap, PredictionRound, PredictionBet, PredictionBuyRequest, PredictionBetLive, PredictionPnl, AssetSnapshot, AssetSeriesPoint, AssetSeriesRange, AssetSeriesInterval, CategoryAverages, BehaviorAnalysisReport, ForceOrder, AiKeyConfig, AiModelAssignment, InviteCode, WorkbenchEvent, QuantSnapshotView, QuantSnapshotSeriesPoint, QuantDeepAnalysisView, Scorecard, StrategyAccountView, StrategySignalState, FeedStreamHealth, WorkbenchSessionSummary, WorkbenchChatMessage, NewsFlashItem } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -80,6 +80,8 @@ export const userApi = {
   portfolio: () => api.get<unknown, User>('/user/portfolio'),
   assetHistory: (days = 30) => api.get<unknown, AssetSnapshot[]>('/user/asset-history', { params: { days } }),
   assetRealtime: () => api.get<unknown, AssetSnapshot>('/user/asset-realtime'),
+  assetSeries: (range: AssetSeriesRange, interval: AssetSeriesInterval) =>
+    api.get<unknown, AssetSeriesPoint[]>('/user/asset-series', { params: { range, interval } }),
   categoryAverages: (days = 30) => api.get<unknown, CategoryAverages>('/user/category-averages', { params: { days } }),
   // 重置账户：清空交易与游戏数据回到初始资金，每周一次，需逐字输入用户名确认
   resetAccount: (confirmUsername: string) =>

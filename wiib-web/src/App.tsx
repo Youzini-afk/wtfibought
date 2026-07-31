@@ -33,6 +33,7 @@ import { ForceOrders } from './pages/ForceOrders';
 import { useUserStore } from './stores/userStore';
 import { useSiteSettingsStore } from './stores/siteSettingsStore';
 import type { PageVisibilityKey } from './types';
+import { userApi } from './api';
 
 declare global {
   interface Window {
@@ -76,6 +77,24 @@ function App() {
       if (fetchKey == null) { window.__wiibSplashDone?.(); return; }
       void fetchUser().finally(() => window.__wiibSplashDone?.());
     }, [fetchKey, fetchUser]);
+
+  // 只为当前有登录会话且页面可见的活跃用户记录五分钟资产点；不会扫描全部注册用户。
+  useEffect(() => {
+    if (!token) return;
+    let lastSampleAt = 0;
+    const sample = () => {
+      const now = Date.now();
+      if (document.hidden || now - lastSampleAt < 4 * 60_000) return;
+      lastSampleAt = now;
+      void userApi.assetRealtime().catch(() => {});
+    };
+    const timer = window.setInterval(sample, 5 * 60_000);
+    document.addEventListener('visibilitychange', sample);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', sample);
+    };
+  }, [token]);
 
   return (
     <BrowserRouter>

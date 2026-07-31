@@ -20,4 +20,10 @@ public class AssetSnapshotTask {
             assetSnapshotService.snapshotAll();
         });
     }
+
+    /** 五分钟点只保留 31 天；清理与每日全量快照错峰执行。 */
+    @Scheduled(cron = "0 30 3 * * *")
+    public void purgeIntradayHistory() {
+        Thread.startVirtualThread(assetSnapshotService::purgeIntradayHistory);
+    }
 }

@@ -2,6 +2,7 @@ package com.mawai.wiibsim.controller;
 
 import com.mawai.wiibcommon.annotation.CurrentUserId;
 import com.mawai.wiibcommon.dto.AssetSnapshotDTO;
+import com.mawai.wiibcommon.dto.AssetSeriesPointDTO;
 import com.mawai.wiibcommon.dto.CategoryAveragesDTO;
 import com.mawai.wiibcommon.dto.UserDTO;
 import com.mawai.wiibcommon.entity.User;
@@ -59,6 +60,15 @@ public class UserController {
     @Operation(summary = "获取用户实时资产快照(含日收益)")
     public Result<AssetSnapshotDTO> getRealtimeSnapshot(@CurrentUserId Long userId) {
         return Result.ok(assetSnapshotService.getRealtimeSnapshot(userId));
+    }
+
+    @GetMapping("/asset-series")
+    @Operation(summary = "获取用户资产时间序列")
+    public Result<List<AssetSeriesPointDTO>> getAssetSeries(
+            @CurrentUserId Long userId,
+            @RequestParam(defaultValue = "24h") String range,
+            @RequestParam(required = false) String interval) {
+        return Result.ok(assetSnapshotService.getSeries(userId, range, interval));
     }
 
     @GetMapping("/asset-history")

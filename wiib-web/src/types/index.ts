@@ -700,6 +700,23 @@ export interface AssetSnapshot {
   dailyGameProfit: number;
 }
 
+export type AssetSeriesRange = '1h' | '24h' | '7d' | '30d';
+export type AssetSeriesInterval = '5m' | '15m' | '1h' | '6h' | '1d';
+
+/** 首页总资产与持仓收益图共用的时间序列点。 */
+export interface AssetSeriesPoint {
+  timestamp: number;
+  totalAssets: number;
+  capitalBase: number;
+  profit: number;
+  profitPct: number;
+  bstockProfit: number;
+  cryptoProfit: number;
+  commodityProfit: number;
+  predictionProfit: number;
+  gameProfit: number;
+}
+
 export interface CategoryAverages {
   bstockProfit: number;
   cryptoProfit: number;

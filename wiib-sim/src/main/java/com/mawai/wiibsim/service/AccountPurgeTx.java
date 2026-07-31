@@ -14,7 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 
 /**
- * 重置账户的事务段：12 张用户表清空 + user 复位，全成功或全回滚。
+ * 重置账户的事务段：13 张用户表清空 + user 复位，全成功或全回滚。
  * <p>
  * 单独成 bean 而不是放 {@link AccountResetService} 里，是因为 @Transactional 走 Spring 代理，
  * 同类内部自调用会绕过代理导致事务根本不生效——这种 bug 平时看不出来，只在出错回滚时才暴露。
@@ -35,6 +35,7 @@ public class AccountPurgeTx {
     private final MinesGameMapper minesGameMapper;
     private final VideoPokerGameMapper videoPokerGameMapper;
     private final UserAssetSnapshotMapper userAssetSnapshotMapper;
+    private final UserAssetPointMapper userAssetPointMapper;
     private final UserBuffMapper userBuffMapper;
     private final UserLedgerMapper userLedgerMapper;
     private final UserService userService;
@@ -69,6 +70,7 @@ public class AccountPurgeTx {
         videoPokerGameMapper.delete(eq(VideoPokerGame.class, VideoPokerGame::getUserId, userId));
         // 流水与快照
         userAssetSnapshotMapper.delete(eq(UserAssetSnapshot.class, UserAssetSnapshot::getUserId, userId));
+        userAssetPointMapper.deleteByUserId(userId);
         userBuffMapper.delete(eq(UserBuff.class, UserBuff::getUserId, userId));
         userLedgerMapper.deleteByUserId(userId);   // 账本随账户一起重来
 
@@ -78,7 +80,7 @@ public class AccountPurgeTx {
         userService.recordInitialGrant(userId, initialBalance);
     }
 
-    /** 这 11 张表都是同一个 user_id 条件，抽掉重复的 wrapper 构造（账本第 12 张走自己的 deleteByUserId） */
+    /** 这 11 张表都是同一个 user_id 条件；账本和资产点各走自己的 deleteByUserId。 */
     private static <T> LambdaQueryWrapper<T> eq(Class<T> type, SFunction<T, ?> column, long userId) {
         return new LambdaQueryWrapper<>(type).eq(column, userId);
     }

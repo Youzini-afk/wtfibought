@@ -36,9 +36,10 @@ import {
   RotateCcw,
   History,
 } from 'lucide-react';
-import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSnapshot, CategoryAverages, BStock } from '../types';
+import type { CryptoPosition, FuturesPosition, PredictionPnl, AssetSeriesPoint, AssetSnapshot, CategoryAverages, BStock } from '../types';
 import { formatCoinPrice, getCoin } from '../lib/coinConfig';
 import { tradeSymbolName } from '../lib/orderSide';
+import { useAssetSeriesPreferences } from '../hooks/useAssetSeriesPreferences';
 
 interface CryptoRow extends CryptoPosition {
   currentPrice: number;
@@ -98,9 +99,10 @@ export function Portfolio() {
   const [panel, setPanel] = useState<'chart' | 'wallet' | 'profit' | 'radar' | null>('wallet');
   const [chartReady, setChartReady] = useState(false);
   const [walletReady, setWalletReady] = useState(false);
-  const [profitData, setProfitData] = useState<AssetSnapshot[]>([]);
-  const [profitLoaded, setProfitLoaded] = useState(false);
+  const [profitData, setProfitData] = useState<AssetSeriesPoint[]>([]);
+  const [profitLoading, setProfitLoading] = useState(false);
   const [realtimeSnapshot, setRealtimeSnapshot] = useState<AssetSnapshot | null>(null);
+  const { range: profitRange, interval: profitInterval, setRange: setProfitRange, setInterval: setProfitInterval } = useAssetSeriesPreferences();
   const [categoryAverages, setCategoryAverages] = useState<CategoryAverages | null>(null);
   const [transferOpen, setTransferOpen] = useState(false);
   const [externalWalletOpen, setExternalWalletOpen] = useState(false);
@@ -114,19 +116,24 @@ export function Portfolio() {
   }, [user?.avatar]);
 
   useEffect(() => {
-    if (panel === 'profit' && !profitLoaded) {
-      Promise.all([
-        userApi.assetHistory(30),
-        userApi.assetRealtime(),
-      ]).then(([history, realtime]) => {
-        setProfitData(history);
+    if (panel !== 'profit') return;
+    let cancelled = false;
+    setProfitLoading(true);
+    userApi.assetSeries(profitRange, profitInterval)
+      .then(async series => [series, await userApi.assetRealtime()] as const)
+      .then(([series, realtime]) => {
+        if (cancelled) return;
+        setProfitData(series);
         setRealtimeSnapshot(realtime);
       }).catch(() => {
+        if (cancelled) return;
         setProfitData([]);
         setRealtimeSnapshot(null);
-      }).finally(() => setProfitLoaded(true));
-    }
-  }, [panel, profitLoaded]);
+      }).finally(() => {
+        if (!cancelled) setProfitLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [panel, profitRange, profitInterval, refreshNonce]);
 
   useEffect(() => {
     if (panel === 'radar') {
@@ -240,7 +247,7 @@ export function Portfolio() {
       await userApi.resetAccount(confirmName);
       closeReset();
       setRefreshNonce(n => n + 1);
-      setProfitLoaded(false);
+      setProfitData([]);
       setRealtimeSnapshot(null);
       toast('账户已重置为初始状态', 'success');
     } catch (e) {
@@ -438,7 +445,14 @@ export function Portfolio() {
                         </div>
                       </div>
                     )}
-                    <ProfitChart data={profitData} />
+                    <ProfitChart
+                      data={profitData}
+                      range={profitRange}
+                      interval={profitInterval}
+                      onRangeChange={setProfitRange}
+                      onIntervalChange={setProfitInterval}
+                      loading={profitLoading}
+                    />
                   </div>
                 ) : panel === 'radar' ? (
                   <div className="w-full animate-in fade-in duration-300 px-1 sm:px-0 py-3">
@@ -574,7 +588,7 @@ export function Portfolio() {
           size="sm"
           onClick={() => {
             setRefreshNonce((n) => n + 1);
-            setProfitLoaded(false);
+            setProfitData([]);
             setRealtimeSnapshot(null);
             toast('已刷新', 'info');
           }}
