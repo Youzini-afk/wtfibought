@@ -501,6 +501,8 @@ export type PageVisibility = Record<PageVisibilityKey, boolean>;
 export interface SiteSettings {
   siteName: string;
   faviconUrl: string;
+  /** 每日首次进入首页时是否自动展示玩法说明；不影响手工入口。 */
+  dailyWelcomeEnabled: boolean;
   pageVisibility: PageVisibility;
   updatedAt: string | null;
 }
@@ -513,6 +515,7 @@ export interface SiteAdminSettings extends SiteSettings {
 export interface UpdateSiteSettings {
   siteName?: string;
   faviconUrl?: string;
+  dailyWelcomeEnabled?: boolean;
   pageVisibility?: Partial<PageVisibility>;
 }
 

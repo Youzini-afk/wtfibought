@@ -6,9 +6,15 @@ import java.util.Map;
 public record UpdateSiteSettingsRequest(
         String siteName,
         String faviconUrl,
-        Map<String, Boolean> pageVisibility
+        Map<String, Boolean> pageVisibility,
+        Boolean dailyWelcomeEnabled
 ) {
     public UpdateSiteSettingsRequest(String siteName, String faviconUrl) {
-        this(siteName, faviconUrl, null);
+        this(siteName, faviconUrl, null, null);
+    }
+
+    public UpdateSiteSettingsRequest(String siteName, String faviconUrl,
+                                     Map<String, Boolean> pageVisibility) {
+        this(siteName, faviconUrl, pageVisibility, null);
     }
 }

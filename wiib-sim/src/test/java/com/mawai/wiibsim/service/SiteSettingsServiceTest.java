@@ -40,19 +40,21 @@ class SiteSettingsServiceTest {
         assertThat(publicSettings.faviconUrl()).isEqualTo("/favicon.ico");
         assertThat(publicSettings.pageVisibility().ai()).isTrue();
         assertThat(publicSettings.pageVisibility().market()).isTrue();
+        assertThat(publicSettings.dailyWelcomeEnabled()).isTrue();
+        assertThat(adminSettings.dailyWelcomeEnabled()).isTrue();
         assertThat(adminSettings.databaseConfigured()).isFalse();
     }
 
     @Test
     void partialUpdateKeepsUnspecifiedFieldAndTrimsInput() {
         SiteRuntimeConfig saved = entity("新站名", "/old.ico");
-        when(mapper.patch(eq("新站名"), isNull(), isNull(), any())).thenReturn(1);
+        when(mapper.patch(eq("新站名"), isNull(), isNull(), isNull(), any())).thenReturn(1);
         when(mapper.selectCurrent()).thenReturn(saved);
         SiteSettingsService service = new SiteSettingsService(mapper);
 
         SiteAdminSettingsDTO result = service.updateSettings(new UpdateSiteSettingsRequest("  新站名  ", null));
 
-        verify(mapper).patch(eq("新站名"), isNull(), isNull(), any());
+        verify(mapper).patch(eq("新站名"), isNull(), isNull(), isNull(), any());
         assertThat(result.siteName()).isEqualTo("新站名");
         assertThat(result.faviconUrl()).isEqualTo("/old.ico");
         assertThat(result.databaseConfigured()).isTrue();
@@ -60,7 +62,7 @@ class SiteSettingsServiceTest {
 
     @Test
     void allowsRootRelativeAndHttpsIconResources() {
-        when(mapper.patch(isNull(), any(), isNull(), any())).thenReturn(1);
+        when(mapper.patch(isNull(), any(), isNull(), isNull(), any())).thenReturn(1);
         when(mapper.selectCurrent()).thenReturn(
                 entity("Site", "/brand/icon.svg?v=2"),
                 entity("Site", "https://cdn.example.com/icon.png?v=3"));
@@ -84,7 +86,7 @@ class SiteSettingsServiceTest {
                 .hasMessageContaining("HTTPS");
         assertThatThrownBy(() -> service.updateSettings(new UpdateSiteSettingsRequest(null, "//tracker.example/icon.png")))
                 .isInstanceOf(BizException.class);
-        verify(mapper, never()).patch(any(), any(), any(), any());
+        verify(mapper, never()).patch(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -92,7 +94,7 @@ class SiteSettingsServiceTest {
         SiteRuntimeConfig saved = entity("Site", "/favicon.ico");
         saved.setPageVisibilityJson("{\"ai\":false,\"games\":false}");
         when(mapper.selectCurrent()).thenReturn(saved);
-        when(mapper.patch(isNull(), isNull(), any(), any())).thenReturn(1);
+        when(mapper.patch(isNull(), isNull(), any(), isNull(), any())).thenReturn(1);
         SiteSettingsService service = new SiteSettingsService(mapper);
 
         SiteAdminSettingsDTO result = service.updateSettings(
@@ -101,6 +103,7 @@ class SiteSettingsServiceTest {
         verify(mapper).patch(
                 isNull(), isNull(),
                 argThat(json -> json.contains("\"ai\":false") && !json.contains("games")),
+                isNull(),
                 any());
         assertThat(result.pageVisibility().ai()).isFalse();
         assertThat(result.pageVisibility().games()).isFalse();
@@ -136,7 +139,7 @@ class SiteSettingsServiceTest {
                 new UpdateSiteSettingsRequest(null, null, nullValue)))
                 .isInstanceOf(BizException.class)
                 .hasMessageContaining("不能为 null");
-        verify(mapper, never()).patch(any(), any(), any(), any());
+        verify(mapper, never()).patch(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -148,8 +151,25 @@ class SiteSettingsServiceTest {
 
         assertThat(result.siteName()).isEqualTo("WhatIfIBought");
         assertThat(result.faviconUrl()).isEqualTo("/favicon.ico");
+        assertThat(result.dailyWelcomeEnabled()).isTrue();
         assertThat(result.pageVisibility().comments()).isTrue();
         assertThat(result.updatedAt()).isNull();
+    }
+
+    @Test
+    void dailyWelcomeCanBeDisabledIndependently() {
+        SiteRuntimeConfig saved = entity("Site", "/favicon.ico");
+        saved.setDailyWelcomeEnabled(false);
+        when(mapper.patch(isNull(), isNull(), isNull(), eq(false), any())).thenReturn(1);
+        when(mapper.selectCurrent()).thenReturn(saved);
+        SiteSettingsService service = new SiteSettingsService(mapper);
+
+        SiteAdminSettingsDTO result = service.updateSettings(
+                new UpdateSiteSettingsRequest(null, null, null, false));
+
+        verify(mapper).patch(isNull(), isNull(), isNull(), eq(false), any());
+        assertThat(result.dailyWelcomeEnabled()).isFalse();
+        assertThat(result.pageVisibility().market()).isTrue();
     }
 
     private SiteRuntimeConfig entity(String siteName, String faviconUrl) {

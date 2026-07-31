@@ -27,6 +27,7 @@ export const DEFAULT_PAGE_VISIBILITY: PageVisibility = {
 export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   siteName: 'WhatIfIBought',
   faviconUrl: '/favicon.ico',
+  dailyWelcomeEnabled: true,
   pageVisibility: { ...DEFAULT_PAGE_VISIBILITY },
   updatedAt: null,
 };
@@ -56,6 +57,9 @@ export function normalizeSiteSettings(value: unknown): SiteSettings | null {
   return {
     siteName: settings.siteName.trim(),
     faviconUrl: settings.faviconUrl.trim(),
+    dailyWelcomeEnabled: typeof settings.dailyWelcomeEnabled === 'boolean'
+      ? settings.dailyWelcomeEnabled
+      : true,
     pageVisibility: normalizePageVisibility(settings.pageVisibility),
     updatedAt: settings.updatedAt || null,
   };

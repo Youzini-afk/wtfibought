@@ -2,9 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Bell } from 'lucide-react';
-
-const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
-function hideNoticeToday() { localStorage.setItem(HIDE_NOTICE_KEY, new Date().toDateString()); }
+import { acknowledgeDailyNotice, hideDailyNoticeToday } from '../lib/dailyNotice';
 
 export function Intro() {
   const navigate = useNavigate();
@@ -101,8 +99,8 @@ export function Intro() {
       {/* sticky 底部按钮 */}
       <div className="fixed left-0 right-0 bottom-20 md:bottom-6 px-4 md:px-6 z-50">
         <div className="max-w-2xl mx-auto flex gap-3">
-          <Button variant="outline" className="flex-1" onClick={() => { hideNoticeToday(); goHome(); }}>今日不展示</Button>
-          <Button className="flex-1" onClick={goHome}>我知道了</Button>
+          <Button variant="outline" className="flex-1" onClick={() => { hideDailyNoticeToday(); goHome(); }}>今日不展示</Button>
+          <Button className="flex-1" onClick={() => { acknowledgeDailyNotice(); goHome(); }}>我知道了</Button>
         </div>
       </div>
     </div>

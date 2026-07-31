@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelsTopLeft, RefreshCw, RotateCcw, Save } from 'lucide-react';
+import { BellRing, PanelsTopLeft, RefreshCw, RotateCcw, Save } from 'lucide-react';
 import { adminApi } from '../api';
 import type { PageVisibility, PageVisibilityKey, SiteAdminSettings } from '../types';
 import { applySiteSettings } from '../lib/siteAppearance';
@@ -65,6 +65,7 @@ export function PageVisibilitySettingsCard() {
   const { toast } = useToast();
   const [settings, setSettings] = useState<SiteAdminSettings | null>(null);
   const [form, setForm] = useState<PageVisibility>({ ...DEFAULT_PAGE_VISIBILITY });
+  const [dailyWelcomeEnabled, setDailyWelcomeEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const loadSeq = useRef(0);
@@ -77,6 +78,7 @@ export function PageVisibilitySettingsCard() {
       if (seq !== loadSeq.current) return;
       setSettings(loaded);
       setForm(toForm(loaded));
+      setDailyWelcomeEnabled(loaded.dailyWelcomeEnabled ?? true);
     } catch (error) {
       if (seq !== loadSeq.current) return;
       toast((error as Error).message || '页面设置加载失败', 'error');
@@ -99,11 +101,15 @@ export function PageVisibilitySettingsCard() {
   const save = async () => {
     setSaving(true);
     try {
-      const saved = await adminApi.updateSiteSettings({ pageVisibility: form });
+      const saved = await adminApi.updateSiteSettings({
+        pageVisibility: form,
+        dailyWelcomeEnabled,
+      });
       setSettings(saved);
       setForm(toForm(saved));
+      setDailyWelcomeEnabled(saved.dailyWelcomeEnabled ?? true);
       applySiteSettings(saved);
-      toast('前台页面设置已保存并立即生效', 'success');
+      toast('前台设置已保存并立即生效', 'success');
     } catch (error) {
       toast((error as Error).message || '页面设置保存失败', 'error');
     } finally {
@@ -120,7 +126,7 @@ export function PageVisibilitySettingsCard() {
               <PanelsTopLeft className="h-5 w-5 text-primary" />前台页面
             </CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
-              控制功能页是否向用户开放；关闭后会隐藏全部导航入口，并拦截对应页面的直接访问。
+              控制每日提示与功能页开放范围；页面关闭后会隐藏导航入口，并拦截直接访问。
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -135,6 +141,24 @@ export function PageVisibilitySettingsCard() {
       </CardHeader>
 
       <CardContent className="space-y-5">
+        <div className="flex items-center justify-between gap-4 rounded-lg border border-primary/25 bg-primary/5 p-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <BellRing className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+            <div>
+              <p className="text-sm font-semibold">每日玩法说明</p>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                开启后，用户每天首次进入首页时自动展示玩法说明；关闭不影响铃铛手工入口。
+              </p>
+            </div>
+          </div>
+          <VisibilitySwitch
+            checked={dailyWelcomeEnabled}
+            disabled={disabled}
+            label="每日自动展示玩法说明"
+            onChange={setDailyWelcomeEnabled}
+          />
+        </div>
+
         <div className="grid gap-3 md:grid-cols-2">
           {PAGE_OPTIONS.map(option => (
             <div key={option.key} className="flex items-center justify-between gap-4 rounded-lg border bg-muted/20 p-3">
@@ -163,7 +187,10 @@ export function PageVisibilitySettingsCard() {
           <div className="flex gap-2">
             <Button
               variant="outline"
-              onClick={() => setForm({ ...DEFAULT_PAGE_VISIBILITY })}
+              onClick={() => {
+                setForm({ ...DEFAULT_PAGE_VISIBILITY });
+                setDailyWelcomeEnabled(true);
+              }}
               disabled={disabled}
             >
               <RotateCcw className="h-4 w-4" />全部开启

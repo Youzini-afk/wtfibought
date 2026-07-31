@@ -20,7 +20,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Set;
 
-/** 持久化站点外观与页面可见性；读取直接以数据库为真源，天然支持多实例。 */
+/** 持久化站点外观、每日欢迎提示与页面可见性；读取直接以数据库为真源，天然支持多实例。 */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -28,6 +28,7 @@ public class SiteSettingsService {
 
     public static final String DEFAULT_SITE_NAME = "WhatIfIBought";
     public static final String DEFAULT_FAVICON_URL = "/favicon.ico";
+    public static final boolean DEFAULT_DAILY_WELCOME_ENABLED = true;
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Set<String> PAGE_VISIBILITY_KEYS = Set.of(
             "market", "portfolio", "ledger", "ai", "ranking",
@@ -46,7 +47,8 @@ public class SiteSettingsService {
             log.warn("读取公开站点设置失败，已降级默认值: {}", e.getMessage());
             SiteRuntimeConfig fallback = defaults();
             return new PublicSiteSettingsDTO(
-                    fallback.getSiteName(), fallback.getFaviconUrl(), PageVisibilityDTO.allEnabled(), null);
+                    fallback.getSiteName(), fallback.getFaviconUrl(),
+                    fallback.getDailyWelcomeEnabled(), PageVisibilityDTO.allEnabled(), null);
         }
     }
 
@@ -59,7 +61,8 @@ public class SiteSettingsService {
     /** 管理设置频率极低；串行化同实例请求，数据库 UPSERT 负责跨实例原子性。 */
     public synchronized SiteAdminSettingsDTO updateSettings(UpdateSiteSettingsRequest request) {
         if (request == null) throw parameterError("配置不能为空");
-        if (request.siteName() == null && request.faviconUrl() == null && request.pageVisibility() == null) {
+        if (request.siteName() == null && request.faviconUrl() == null
+                && request.pageVisibility() == null && request.dailyWelcomeEnabled() == null) {
             throw parameterError("至少需要提交一个配置字段");
         }
 
@@ -74,7 +77,8 @@ public class SiteSettingsService {
             pageVisibilityPatchJson = serializePageVisibilityPatch(request.pageVisibility());
         }
 
-        if (mapper.patch(siteName, faviconUrl, pageVisibilityPatchJson, LocalDateTime.now()) < 1) {
+        if (mapper.patch(siteName, faviconUrl, pageVisibilityPatchJson,
+                request.dailyWelcomeEnabled(), LocalDateTime.now()) < 1) {
             throw new IllegalStateException("站点设置保存失败");
         }
         SiteRuntimeConfig saved = mapper.selectCurrent();
@@ -92,6 +96,7 @@ public class SiteSettingsService {
         defaults.setId(1);
         defaults.setSiteName(DEFAULT_SITE_NAME);
         defaults.setFaviconUrl(DEFAULT_FAVICON_URL);
+        defaults.setDailyWelcomeEnabled(DEFAULT_DAILY_WELCOME_ENABLED);
         defaults.setPageVisibilityJson(serializePageVisibility(PageVisibilityDTO.allEnabled()));
         return defaults;
     }
@@ -103,6 +108,9 @@ public class SiteSettingsService {
         validateFaviconUrl(faviconUrl);
         config.setSiteName(siteName);
         config.setFaviconUrl(faviconUrl);
+        if (config.getDailyWelcomeEnabled() == null) {
+            config.setDailyWelcomeEnabled(DEFAULT_DAILY_WELCOME_ENABLED);
+        }
         config.setPageVisibilityJson(serializePageVisibility(pageVisibility(config)));
         return config;
     }
@@ -147,13 +155,14 @@ public class SiteSettingsService {
 
     private SiteAdminSettingsDTO toAdmin(SiteRuntimeConfig config, boolean databaseConfigured) {
         return new SiteAdminSettingsDTO(
-                config.getSiteName(), config.getFaviconUrl(), pageVisibility(config),
+                config.getSiteName(), config.getFaviconUrl(), config.getDailyWelcomeEnabled(), pageVisibility(config),
                 config.getUpdatedAt(), databaseConfigured);
     }
 
     private PublicSiteSettingsDTO toPublic(SiteRuntimeConfig config) {
         return new PublicSiteSettingsDTO(
-                config.getSiteName(), config.getFaviconUrl(), pageVisibility(config), config.getUpdatedAt());
+                config.getSiteName(), config.getFaviconUrl(), config.getDailyWelcomeEnabled(),
+                pageVisibility(config), config.getUpdatedAt());
     }
 
     private void validatePageVisibilityPatch(Map<String, Boolean> patch) {

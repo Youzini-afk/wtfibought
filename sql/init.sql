@@ -924,13 +924,17 @@ CREATE TABLE IF NOT EXISTS site_runtime_config (
     id              SMALLINT PRIMARY KEY CHECK (id = 1),
     site_name       VARCHAR(80) NOT NULL DEFAULT 'WhatIfIBought',
     favicon_url     VARCHAR(512) NOT NULL DEFAULT '/favicon.ico',
+    daily_welcome_enabled BOOLEAN NOT NULL DEFAULT TRUE,
     page_visibility JSONB NOT NULL DEFAULT '{"market":true,"portfolio":true,"ledger":true,"ai":true,"ranking":true,"games":true,"testnet":true,"strategies":true,"comments":true}'::JSONB,
     updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE site_runtime_config
+    ADD COLUMN IF NOT EXISTS daily_welcome_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 INSERT INTO site_runtime_config (id, site_name, favicon_url)
 VALUES (1, 'WhatIfIBought', '/favicon.ico')
 ON CONFLICT (id) DO NOTHING;
 COMMENT ON TABLE site_runtime_config IS '站点外观与前台页面可见性运行时配置（固定 id=1）';
+COMMENT ON COLUMN site_runtime_config.daily_welcome_enabled IS '是否在用户每日首次进入首页时自动展示玩法说明';
 COMMENT ON COLUMN site_runtime_config.page_visibility IS '普通用户前台功能页可见性；缺失键按开启处理';
 
 --新版本删掉这两列(待执行不进入commit)

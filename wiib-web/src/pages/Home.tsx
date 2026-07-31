@@ -28,9 +28,7 @@ import { cn, fmtMoney } from '../lib/utils';
 import { orderSideView, tradeSymbolName } from '../lib/orderSide';
 import type { PageVisibilityKey } from '../types';
 import { useAssetSeriesPreferences } from '../hooks/useAssetSeriesPreferences';
-
-const HIDE_NOTICE_KEY = 'wiib-notice-hide-date';
-function shouldShowNotice() { const d = localStorage.getItem(HIDE_NOTICE_KEY); return !d || d !== new Date().toDateString(); }
+import { shouldShowDailyNotice } from '../lib/dailyNotice';
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -53,6 +51,7 @@ export function Home() {
   const { toast } = useToast();
   const { user } = useUserStore();
   const pageVisibility = useSiteSettingsStore(state => state.settings.pageVisibility);
+  const dailyWelcomeEnabled = useSiteSettingsStore(state => state.settings.dailyWelcomeEnabled);
   // 路由已挡住未登录，user 为 null 只可能是 fetchUser 还没回来。
   // 行情/成交那几块不依赖 user，先渲染出来，本人相关的卡等 user 到了再补
   const ready = !!user;
@@ -74,7 +73,11 @@ export function Home() {
   const { range, interval, setRange, setInterval } = useAssetSeriesPreferences();
   const assetSeriesQueryKey = `${range}:${interval}`;
 
-  useEffect(() => { if (shouldShowNotice()) navigate('/intro', { replace: true }); }, [navigate]);
+  useEffect(() => {
+    if (dailyWelcomeEnabled && shouldShowDailyNotice()) {
+      navigate('/intro', { replace: true });
+    }
+  }, [dailyWelcomeEnabled, navigate]);
 
   useEffect(() => {
     if (ready) buffApi.status().then(setBuffStatus).catch(() => {});
