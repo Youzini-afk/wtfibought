@@ -9,11 +9,16 @@ export interface PredictionStream {
   upAsk: number | null;
   downBid: number | null;
   downAsk: number | null;
-  activities: PredictionBetLive[];
+  activities: PredictionActivity[];
+}
+
+export interface PredictionActivity extends PredictionBetLive {
+  activityId: string;
 }
 
 const MAX_ACTIVITIES = 30;
-const DRIP_INTERVAL = 180;
+const MAX_QUEUED_ACTIVITIES = 120;
+const DRIP_INTERVAL = 240;
 
 export function usePredictionStream(): PredictionStream {
   const [btcPrice, setBtcPrice] = useState<number | null>(null);
@@ -22,11 +27,19 @@ export function usePredictionStream(): PredictionStream {
   const [upAsk, setUpAsk] = useState<number | null>(null);
   const [downBid, setDownBid] = useState<number | null>(null);
   const [downAsk, setDownAsk] = useState<number | null>(null);
-  const [activities, setActivities] = useState<PredictionBetLive[]>([]);
-  const queueRef = useRef<PredictionBetLive[]>([]);
+  const [activities, setActivities] = useState<PredictionActivity[]>([]);
+  const queueRef = useRef<PredictionActivity[]>([]);
+  const activitySequenceRef = useRef(0);
 
   const enqueue = useCallback((a: PredictionBetLive) => {
-    queueRef.current.push(a);
+    activitySequenceRef.current += 1;
+    queueRef.current.push({
+      ...a,
+      activityId: `${a.source || 'unknown'}-${a.ts}-${activitySequenceRef.current}`,
+    });
+    if (queueRef.current.length > MAX_QUEUED_ACTIVITIES) {
+      queueRef.current.splice(0, queueRef.current.length - MAX_QUEUED_ACTIVITIES);
+    }
   }, []);
 
   // 定时从队列取一条，逐条滴入

@@ -551,28 +551,31 @@ export function Prediction() {
           <CardContent className="flex-1 overflow-hidden px-1.5 pb-1.5 relative">
             {activities.length === 0 && <p className="text-xs text-muted-foreground text-center py-8">等待交易...</p>}
             <div className="absolute bottom-0 left-0 right-0 px-1.5 flex flex-col-reverse gap-px overflow-hidden" style={{ maxHeight: '100%' }}>
-              {activities.map((a, i) => {
+              {activities.map(a => {
                 const up = a.outcome === 'Up' || a.side === 'UP';
                 const amt = a.amount != null ? Math.round(a.amount) : 0;
                 const isLocal = a.source === 'local';
                 return (
-                  <div key={`${a.ts}-${i}`}
-                       className="flex items-center justify-between py-1.5 px-2 rounded pred-feed-in">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${up ? 'bg-green-500/15 text-green-500' : 'bg-red-500/15 text-red-500'}`}>
-                        {up ? '↑' : '↓'}
-                      </span>
-                      <span className="text-[11px] text-muted-foreground truncate">
-                        {isLocal ? (a.username || 'User') : '外部市场'}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <span className={`text-xs font-mono font-bold tabular-nums ${up ? 'text-green-500' : 'text-red-500'}`}>
-                        ${amt}
-                      </span>
-                      <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${up ? 'bg-green-500/12 text-green-500' : 'bg-red-500/12 text-red-500'}`}>
-                        {up ? 'UP' : 'DN'}
-                      </span>
+                  <div key={a.activityId} className="pred-feed-cascade">
+                    <div className="min-h-0 overflow-hidden">
+                      <div className="flex items-center justify-between py-1.5 px-2 rounded">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${up ? 'bg-green-500/15 text-green-500' : 'bg-red-500/15 text-red-500'}`}>
+                            {up ? '↑' : '↓'}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground truncate">
+                            {isLocal ? (a.username || 'User') : '外部市场'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className={`text-xs font-mono font-bold tabular-nums ${up ? 'text-green-500' : 'text-red-500'}`}>
+                            ${amt}
+                          </span>
+                          <span className={`text-[9px] font-bold px-1 py-0.5 rounded ${up ? 'bg-green-500/12 text-green-500' : 'bg-red-500/12 text-red-500'}`}>
+                            {up ? 'UP' : 'DN'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 );

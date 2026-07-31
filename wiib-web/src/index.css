@@ -591,10 +591,26 @@ html.dark .vp-machine { box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07); }
   animation: roll-down-out 0.3s ease-in-out forwards;
 }
 
-@keyframes pred-feed-slide {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
+@keyframes pred-feed-cascade {
+  from {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
-.pred-feed-in {
-  animation: pred-feed-slide 0.35s ease-out both;
+.pred-feed-cascade {
+  display: grid;
+  animation: pred-feed-cascade 0.48s cubic-bezier(0.22, 1, 0.36, 1) both;
+  will-change: grid-template-rows, opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pred-feed-cascade {
+    animation: none;
+  }
 }
